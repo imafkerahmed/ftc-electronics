@@ -1,82 +1,130 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { ShoppingBag, Search, Menu, User } from 'lucide-react';
-import { useCart } from '@/hooks/use-cart';
-import { useUiStore } from '@/store/use-ui-store';
-import { Button } from '@/components/ui/button';
+import { useState } from "react";
+import Link from "next/link";
+import { ShoppingBag, Search, User } from "lucide-react";
+import { useCart } from "@/hooks/use-cart";
+import { useUiStore } from "@/store/use-ui-store";
+import { Button } from "@/components/ui/button";
+import StaggeredMenuComponent from "@/components/StaggeredMenu/StaggeredMenu";
+import SearchOverlay from "@/components/layout/search-overlay";
+
+interface StaggeredMenuProps {
+  position?: "left" | "right";
+  colors?: string[];
+  items?: { 
+    label: string; 
+    link: string; 
+    ariaLabel?: string; 
+    subItems?: { label: string; link: string; ariaLabel?: string }[];
+  }[];
+  socialItems?: { label: string; link: string }[];
+  displaySocials?: boolean;
+  displayItemNumbering?: boolean;
+  className?: string;
+  menuButtonColor?: string;
+  openMenuButtonColor?: string;
+  accentColor?: string;
+  changeMenuColorOnOpen?: boolean;
+  isFixed?: boolean;
+  closeOnClickAway?: boolean;
+  onMenuOpen?: () => void;
+  onMenuClose?: () => void;
+}
+
+const StaggeredMenu = StaggeredMenuComponent as React.FC<StaggeredMenuProps>;
 
 export default function Navbar() {
-  const pathname = usePathname();
   const { cartCount } = useCart();
   const toggleCartDrawer = useUiStore((state) => state.toggleCartDrawer);
-  const toggleMobileNav = useUiStore((state) => state.toggleMobileNav);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchTriggerRect, setSearchTriggerRect] = useState<DOMRect | null>(null);
 
-  const isActive = (path: string) => pathname === path;
+  const handleSearchClick = (e: React.MouseEvent<HTMLElement>) => {
+    setSearchTriggerRect(e.currentTarget.getBoundingClientRect());
+    setIsSearchOpen(true);
+  };
 
-  const navLinks = [
-    { name: 'Home', href: '/' },
-    { name: 'Shop All', href: '/products' },
-    { name: 'Laptops', href: '/products?category=laptops' },
-    { name: 'Phones', href: '/products?category=phones' },
-    { name: 'Audio', href: '/products?category=audio' },
+  const menuItems = [
+    { label: "Home", link: "/" },
+    { 
+      label: "Shop All", 
+      link: "/products",
+      subItems: [
+        { label: "Laptops", link: "/products?category=laptops" },
+        { label: "Phones", link: "/products?category=phones" },
+        { label: "Audio", link: "/products?category=audio" },
+        { label: "Accessories", link: "/coming-soon" }
+      ]
+    },
+    { 
+      label: "Brands", 
+      link: "/products?filter=brands",
+      subItems: [
+        { label: "Apple", link: "/products?brand=apple" },
+        { label: "Samsung", link: "/products?brand=samsung" },
+        { label: "Sony", link: "/products?brand=sony" },
+        { label: "Bose", link: "/products?brand=bose" },
+        { label: "Asus", link: "/products?brand=asus" }
+      ]
+    },
+    { label: "On Sale", link: "/products?filter=on-sale" },
+    { label: "About", link: "/coming-soon" },
+    { label: "Contact", link: "/coming-soon" },
   ];
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background/80 backdrop-blur-md">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-        
-        {/* Mobile Hamburger menu */}
-        <div className="flex items-center md:hidden">
+      <div className="relative flex h-16 w-full items-center justify-between px-4 sm:px-6 lg:px-8">
+        {/* Left Side: Staggered Menu Component */}
+        {/* Left Side: Staggered Menu Component & Search Icon Button */}
+        <div className="flex items-center pl-10 sm:pl-12 lg:pl-16">
+          <StaggeredMenu
+            position="left"
+            isFixed={true}
+            className="z-[60]"
+            menuButtonColor="#000"
+            openMenuButtonColor="#000"
+            accentColor="#3b82f6"
+            colors={["#f3f4f6", "#3b82f6"]}
+            items={menuItems}
+            displayItemNumbering={false}
+          />
           <Button
             variant="ghost"
             size="icon"
-            onClick={toggleMobileNav}
-            aria-label="Toggle Mobile Menu"
-            className="text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            onClick={handleSearchClick}
+            className="text-muted-foreground hover:text-foreground hover:bg-muted/50 h-9 w-9 rounded-lg"
+            aria-label="Open Search Overlay"
           >
-            <Menu className="h-6 w-6" />
+            <Search className="h-5 w-5" />
           </Button>
         </div>
 
-        {/* Brand Logo */}
-        <div className="flex items-center gap-2">
-          <Link href="/" className="flex items-center gap-2 text-xl font-bold tracking-wider text-foreground">
-            <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">FTC</span>
+        {/* Brand Logo - Centered absolutely */}
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
+          <Link
+            href="/"
+            className="flex items-center gap-2 text-xl font-bold tracking-wider text-foreground"
+          >
+            <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+              FTC
+            </span>
             <span className="text-muted-foreground font-light">|</span>
-            <span className="text-xs uppercase tracking-widest text-foreground/80">Electronics</span>
+            <span className="text-xs uppercase tracking-widest text-foreground/80">
+              Electronics
+            </span>
           </Link>
         </div>
 
-        {/* Desktop Navigation */}
-        <nav className="hidden md:flex items-center space-x-8">
-          {navLinks.map((link) => {
-            const active = isActive(link.href);
-            return (
-              <Link
-                key={link.name}
-                href={link.href}
-                className={`text-sm font-medium transition-colors hover:text-foreground ${
-                  active ? 'text-blue-600' : 'text-muted-foreground'
-                }`}
-              >
-                {link.name}
-              </Link>
-            );
-          })}
-        </nav>
-
         {/* Right side utility icons */}
-        <div className="flex items-center space-x-4">
-          
-          {/* Quick search input trigger */}
-          <Link href="/products" className="text-muted-foreground hover:text-foreground transition-colors" aria-label="Search Catalog">
-            <Search className="h-5 w-5" />
-          </Link>
-
+        <div className="flex items-center space-x-2 sm:space-x-3">
           {/* Account portal Link */}
-          <Link href="/account/profile" className="text-muted-foreground hover:text-foreground transition-colors" aria-label="User Account">
+          <Link
+            href="/account/profile"
+            className="text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors p-2 rounded-lg"
+            aria-label="User Account"
+          >
             <User className="h-5 w-5" />
           </Link>
 
@@ -85,7 +133,7 @@ export default function Navbar() {
             variant="ghost"
             size="icon"
             onClick={toggleCartDrawer}
-            className="relative text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            className="relative text-muted-foreground hover:text-foreground hover:bg-muted/50 h-9 w-9 rounded-lg"
             aria-label="Open Shopping Cart"
           >
             <ShoppingBag className="h-5 w-5" />
@@ -95,9 +143,15 @@ export default function Navbar() {
               </span>
             )}
           </Button>
-
         </div>
       </div>
+
+      {/* Concept 1 Circular Zoom Search Overlay */}
+      <SearchOverlay
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        triggerRect={searchTriggerRect}
+      />
     </header>
   );
 }

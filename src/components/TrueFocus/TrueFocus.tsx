@@ -86,11 +86,10 @@ const TrueFocus: React.FC<TrueFocusProps> = ({
             className={`focus-word ${manualMode ? 'manual' : ''} ${isActive && !manualMode ? 'active' : ''}`}
             style={{
               filter: isActive ? 'blur(0px)' : `blur(${blurAmount}px)`,
-              // Cast custom properties to standard CSS properties using inline objects
-              ['--border-color' as any]: borderColor,
-              ['--glow-color' as any]: glowColor,
+              '--border-color': borderColor,
+              '--glow-color': glowColor,
               transition: `filter ${animationDuration}s ease`
-            }}
+            } as React.CSSProperties}
             onMouseEnter={() => handleMouseEnter(index)}
             onMouseLeave={handleMouseLeave}
           >
@@ -112,9 +111,9 @@ const TrueFocus: React.FC<TrueFocusProps> = ({
           duration: animationDuration
         }}
         style={{
-          ['--border-color' as any]: borderColor,
-          ['--glow-color' as any]: glowColor
-        }}
+          '--border-color': borderColor,
+          '--glow-color': glowColor
+        } as React.CSSProperties}
       >
         <span className="corner top-left"></span>
         <span className="corner top-right"></span>
