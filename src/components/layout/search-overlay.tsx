@@ -4,6 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, X } from "lucide-react";
 import { gsap } from "gsap";
+import { useLenis } from "lenis/react";
+import { MOCK_PRODUCTS } from "@/lib/db";
+import { Product } from "@/types/product";
 
 interface SearchOverlayProps {
   isOpen: boolean;
@@ -13,7 +16,9 @@ interface SearchOverlayProps {
 
 export default function SearchOverlay({ isOpen, onClose, triggerRect }: SearchOverlayProps) {
   const router = useRouter();
+  const lenis = useLenis();
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Product[]>([]);
   const overlayRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -33,6 +38,40 @@ export default function SearchOverlay({ isOpen, onClose, triggerRect }: SearchOv
     { label: "Bose", link: "/products?brand=bose" },
     { label: "Asus", link: "/products?brand=asus" },
   ];
+
+  // Live filter products as user types
+  useEffect(() => {
+    if (searchQuery.trim() === "") {
+      setSearchResults([]);
+      return;
+    }
+    const queryLower = searchQuery.toLowerCase();
+    const filtered = MOCK_PRODUCTS.filter(
+      (p) =>
+        p.name.toLowerCase().includes(queryLower) ||
+        p.category.toLowerCase().includes(queryLower) ||
+        p.brand.toLowerCase().includes(queryLower)
+    );
+    setSearchResults(filtered);
+  }, [searchQuery]);
+
+  // Remove background scroll when search overlay is open
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = "hidden";
+      document.documentElement.style.overflow = "hidden";
+      lenis?.stop();
+    } else {
+      document.body.style.overflow = "";
+      document.documentElement.style.overflow = "";
+      lenis?.start();
+    }
+    return () => {
+      document.body.style.overflow = "";
+      document.documentElement.style.overflow = "";
+      lenis?.start();
+    };
+  }, [isOpen, lenis]);
 
   // Animate Open/Close
   useEffect(() => {
@@ -129,6 +168,13 @@ export default function SearchOverlay({ isOpen, onClose, triggerRect }: SearchOv
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
+  // Click outside (on backdrop overlay) to close
+  const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === overlayRef.current) {
+      onClose();
+    }
+  };
+
   // Submit Search
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -146,13 +192,15 @@ export default function SearchOverlay({ isOpen, onClose, triggerRect }: SearchOv
   return (
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-[100] w-screen h-screen bg-background/80 backdrop-blur-2xl flex items-center justify-center pointer-events-auto"
+      onClick={handleOverlayClick}
+      className="fixed inset-0 z-[100] w-screen h-screen bg-background/95 backdrop-blur-[40px] flex items-center justify-center pointer-events-auto"
       style={{ visibility: "hidden" }}
+      data-lenis-prevent
     >
       {/* Close button */}
       <button
         onClick={onClose}
-        className="absolute top-6 right-6 p-3 rounded-full bg-muted/30 border border-border/40 hover:bg-muted/70 transition-all text-foreground hover:scale-105"
+        className="absolute top-6 right-6 p-3 rounded-full bg-muted/30 border border-border/40 hover:bg-muted/70 transition-all text-foreground hover:scale-105 cursor-pointer"
         aria-label="Close search overlay"
       >
         <X className="h-5 w-5" />
@@ -166,7 +214,7 @@ export default function SearchOverlay({ isOpen, onClose, triggerRect }: SearchOv
         <div ref={elementsRef} className="flex flex-col space-y-12">
           {/* Large Title Question */}
           <div className="space-y-3">
-            <h2 className="text-3xl md:text-5xl lg:text-6xl font-extrabold tracking-tight text-foreground bg-gradient-to-r from-foreground via-foreground/90 to-muted-foreground bg-clip-text text-transparent">
+            <h2 className="text-3xl md:text-5xl lg:text-6xl font-extrabold tracking-tight text-foreground bg-gradient-to-r from-foreground via-foreground/90 to-muted-foreground bg-clip-text text-transparent uppercase">
               What are you looking for?
             </h2>
             <p className="text-muted-foreground/80 text-sm md:text-base font-medium">
@@ -186,50 +234,101 @@ export default function SearchOverlay({ isOpen, onClose, triggerRect }: SearchOv
             />
             <button
               type="submit"
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-muted-foreground/60 hover:text-blue-600 transition-colors"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-muted-foreground/60 hover:text-blue-600 transition-colors cursor-pointer"
               aria-label="Search"
             >
               <Search className="h-7 w-7 md:h-9 md:w-9" />
             </button>
           </form>
 
-          {/* Quick suggestions layout */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4">
-            {/* Categories */}
-            <div className="space-y-4">
-              <h3 className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">
-                Trending Categories
-              </h3>
-              <div className="flex flex-wrap gap-2.5">
-                {categories.map((c) => (
-                  <button
-                    key={c.label}
-                    onClick={() => handleSuggestionClick(c.link)}
-                    className="px-4 py-2 text-xs md:text-sm font-semibold bg-muted/30 border border-border/40 hover:border-blue-500/30 hover:bg-blue-50/50 hover:text-blue-600 rounded-full transition-all"
-                  >
-                    {c.label}
-                  </button>
-                ))}
+          {/* Live Search Results OR Quick suggestions */}
+          <div className="pt-4">
+            {searchQuery.trim() !== "" ? (
+              <div className="space-y-4">
+                <h3 className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold border-b border-border/50 pb-2">
+                  Matching Products ({searchResults.length})
+                </h3>
+                {searchResults.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[300px] overflow-y-auto pr-2">
+                    {searchResults.map((product) => (
+                      <button
+                        key={product.id}
+                        onClick={() => handleSuggestionClick(`/products/${product.slug}`)}
+                        className="flex items-center gap-4 p-3 rounded-xl border border-border/40 hover:border-blue-500/30 bg-muted/20 hover:bg-muted/40 transition-all text-left group cursor-pointer"
+                      >
+                        <div className="relative w-12 h-12 bg-white rounded-lg flex items-center justify-center p-1 overflow-hidden shrink-0 border border-border/20">
+                          <img
+                            src={product.images[0]}
+                            alt={product.name}
+                            className="object-contain w-full h-full group-hover:scale-105 transition-transform duration-300"
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-sm font-bold text-foreground truncate group-hover:text-blue-600 transition-colors">
+                            {product.name}
+                          </h4>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-mono">
+                            {product.brand} // {product.category}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="text-xs font-mono font-bold text-foreground block">
+                            ${product.discountPrice || product.price}
+                          </span>
+                          {product.discountPrice && (
+                            <span className="text-[10px] font-mono text-muted-foreground line-through block">
+                              ${product.price}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-8 text-center text-muted-foreground">
+                    No hardware products found matching &ldquo;<span className="text-foreground font-semibold">{searchQuery}</span>&rdquo;.
+                  </div>
+                )}
               </div>
-            </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Categories */}
+                <div className="space-y-4">
+                  <h3 className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">
+                    Trending Categories
+                  </h3>
+                  <div className="flex flex-wrap gap-2.5">
+                    {categories.map((c) => (
+                      <button
+                        key={c.label}
+                        onClick={() => handleSuggestionClick(c.link)}
+                        className="px-4 py-2 text-xs md:text-sm font-semibold bg-muted/30 border border-border/40 hover:border-blue-500/30 hover:bg-blue-50/50 hover:text-blue-600 rounded-full transition-all cursor-pointer"
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-            {/* Brands */}
-            <div className="space-y-4">
-              <h3 className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">
-                Popular Brands
-              </h3>
-              <div className="flex flex-wrap gap-2.5">
-                {brands.map((b) => (
-                  <button
-                    key={b.label}
-                    onClick={() => handleSuggestionClick(b.link)}
-                    className="px-4 py-2 text-xs md:text-sm font-semibold bg-muted/30 border border-border/40 hover:border-blue-500/30 hover:bg-blue-50/50 hover:text-blue-600 rounded-full transition-all"
-                  >
-                    {b.label}
-                  </button>
-                ))}
+                {/* Brands */}
+                <div className="space-y-4">
+                  <h3 className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">
+                    Popular Brands
+                  </h3>
+                  <div className="flex flex-wrap gap-2.5">
+                    {brands.map((b) => (
+                      <button
+                        key={b.label}
+                        onClick={() => handleSuggestionClick(b.link)}
+                        className="px-4 py-2 text-xs md:text-sm font-semibold bg-muted/30 border border-border/40 hover:border-blue-500/30 hover:bg-blue-50/50 hover:text-blue-600 rounded-full transition-all cursor-pointer"
+                      >
+                        {b.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
