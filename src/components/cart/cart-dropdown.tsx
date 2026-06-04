@@ -44,7 +44,7 @@ export default function CartDropdown() {
         </div>
 
         {/* Scrollable list items */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div className="flex-1 overflow-y-auto p-6 space-y-4" data-lenis-prevent>
           {items.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-center">
               <ShoppingCart className="h-12 w-12 text-muted-foreground/30 mb-4" />
