@@ -3,9 +3,8 @@
 import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, MousePointerClick } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { motion, useScroll, useTransform, useMotionValueEvent } from "motion/react";
-import { Button } from "@/components/ui/button";
 
 interface Slide {
   id: number;

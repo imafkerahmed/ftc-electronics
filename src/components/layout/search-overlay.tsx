@@ -2,11 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { Search, X } from "lucide-react";
 import { gsap } from "gsap";
 import { useLenis } from "lenis/react";
 import { MOCK_PRODUCTS } from "@/lib/db";
-import { Product } from "@/types/product";
 
 interface SearchOverlayProps {
   isOpen: boolean;
@@ -18,7 +18,6 @@ export default function SearchOverlay({ isOpen, onClose, triggerRect }: SearchOv
   const router = useRouter();
   const lenis = useLenis();
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<Product[]>([]);
   const overlayRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -39,21 +38,15 @@ export default function SearchOverlay({ isOpen, onClose, triggerRect }: SearchOv
     { label: "Asus", link: "/products?brand=asus" },
   ];
 
-  // Live filter products as user types
-  useEffect(() => {
-    if (searchQuery.trim() === "") {
-      setSearchResults([]);
-      return;
-    }
-    const queryLower = searchQuery.toLowerCase();
-    const filtered = MOCK_PRODUCTS.filter(
-      (p) =>
-        p.name.toLowerCase().includes(queryLower) ||
-        p.category.toLowerCase().includes(queryLower) ||
-        p.brand.toLowerCase().includes(queryLower)
-    );
-    setSearchResults(filtered);
-  }, [searchQuery]);
+  // Live filter products as user types (computed during render to avoid useEffect setState warning)
+  const searchResults = searchQuery.trim() === ""
+    ? []
+    : MOCK_PRODUCTS.filter(
+        (p) =>
+          p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          p.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          p.brand.toLowerCase().includes(searchQuery.toLowerCase())
+      );
 
   // Remove background scroll when search overlay is open
   useEffect(() => {
@@ -257,10 +250,12 @@ export default function SearchOverlay({ isOpen, onClose, triggerRect }: SearchOv
                         className="flex items-center gap-4 p-3 rounded-xl border border-border/40 hover:border-blue-500/30 bg-muted/20 hover:bg-muted/40 transition-all text-left group cursor-pointer"
                       >
                         <div className="relative w-12 h-12 bg-white rounded-lg flex items-center justify-center p-1 overflow-hidden shrink-0 border border-border/20">
-                          <img
+                          <Image
                             src={product.images[0]}
                             alt={product.name}
-                            className="object-contain w-full h-full group-hover:scale-105 transition-transform duration-300"
+                            fill
+                            sizes="48px"
+                            className="object-contain group-hover:scale-105 transition-transform duration-300"
                           />
                         </div>
                         <div className="flex-1 min-w-0">
@@ -268,7 +263,7 @@ export default function SearchOverlay({ isOpen, onClose, triggerRect }: SearchOv
                             {product.name}
                           </h4>
                           <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-mono">
-                            {product.brand} // {product.category}
+                            {product.brand} {"//"} {product.category}
                           </p>
                         </div>
                         <div className="text-right shrink-0">

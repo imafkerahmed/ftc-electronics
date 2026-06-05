@@ -98,7 +98,7 @@ export default function SplitFeatureGrid() {
               
               {/* Top Left: Code / Index */}
               <div className="absolute top-6 left-6 font-mono text-[10px] tracking-widest text-muted-foreground uppercase select-none">
-                {item.id} // {item.code}
+                {item.id} {"//"} {item.code}
               </div>
 
               {/* Top Right: Technical Spec Highlight */}

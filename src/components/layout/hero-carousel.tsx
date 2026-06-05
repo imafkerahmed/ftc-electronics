@@ -98,7 +98,7 @@ export default function HeroCarousel() {
 
   // Handle Drag/Swipe Navigation
   const dragThreshold = 50;
-  const handleDragEnd = (event: any, info: any) => {
+  const handleDragEnd = (_event: unknown, info: { offset: { x: number } }) => {
     const swipe = info.offset.x;
     if (swipe < -dragThreshold) {
       handleNext();

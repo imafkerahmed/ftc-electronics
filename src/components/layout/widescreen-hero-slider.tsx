@@ -71,10 +71,7 @@ export default function WidescreenHeroSlider() {
     setCurrentIndex((prev) => (prev + 1) % slides.length);
   }, []);
 
-  const handlePrev = useCallback(() => {
-    setDirection(-1);
-    setCurrentIndex((prev) => (prev - 1 + slides.length) % slides.length);
-  }, []);
+
 
   const handleDotClick = (index: number) => {
     setDirection(index > currentIndex ? 1 : -1);

@@ -26,6 +26,8 @@ export interface Product {
   numReviews: number;
   countInStock: number;
   isFeatured?: boolean;
+  isPreOrder?: boolean;
+  currency?: 'USD' | 'LKR';
   reviews?: Review[];
   createdAt: string;
 }
