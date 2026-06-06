@@ -6,18 +6,18 @@ import { getCollectionProducts } from "@/lib/db";
 
 export default async function StoreHomePage() {
   // Fetch products and categories for layout rendering
-  const onSaleProducts = await getCollectionProducts('on-sale');
-  const newArrivalProducts = await getCollectionProducts('new-arrivals');
-  const airPurifierProducts = await getCollectionProducts('air-purifiers');
+  const onSaleProducts = await getCollectionProducts("on-sale");
+  const newArrivalProducts = await getCollectionProducts("new-arrivals");
+  const airPurifierProducts = await getCollectionProducts("air-purifiers");
 
   return (
     <div className="w-full">
       <CampaignHeroBanner />
-      
+
       <BrandLogoTicker />
-      
+
       {/* On Sale Section - Carousel layout with red subtitle badge */}
-      <CollectionSection 
+      <CollectionSection
         title="On-Sale"
         subtitle="Limited Stocks"
         badgeBgColor="bg-[#ff0000]"
@@ -27,7 +27,7 @@ export default async function StoreHomePage() {
       />
 
       {/* New Arrivals Section - Responsive Grid layout */}
-      <CollectionSection 
+      <CollectionSection
         title="New Arrivals"
         layout="grid"
         products={newArrivalProducts.slice(0, 4)}
@@ -35,7 +35,7 @@ export default async function StoreHomePage() {
       />
 
       {/* Air Purifiers Section - Carousel layout */}
-      <CollectionSection 
+      <CollectionSection
         title="Air Purifiers"
         layout="carousel"
         products={airPurifierProducts}

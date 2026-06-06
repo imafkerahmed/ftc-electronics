@@ -6,7 +6,7 @@ import { ShoppingBag, Search, User } from "lucide-react";
 import { useCart } from "@/hooks/use-cart";
 import { useUiStore } from "@/store/use-ui-store";
 import { Button } from "@/components/ui/button";
-import StaggeredMenuComponent from "@/components/StaggeredMenu/StaggeredMenu";
+import StaggeredMenuComponent from "@/components/ui/StaggeredMenu/StaggeredMenu";
 import SearchOverlay from "@/components/layout/search-overlay";
 
 interface StaggeredMenuProps {

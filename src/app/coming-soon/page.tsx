@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import TrueFocus from "@/components/TrueFocus/TrueFocus";
+import TrueFocus from "@/components/ui/TrueFocus/TrueFocus";
 
 export default function ComingSoon() {
   return (
