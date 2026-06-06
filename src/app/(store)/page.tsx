@@ -2,6 +2,7 @@ import CampaignHeroBanner from "@/components/layout/campaign-hero-banner";
 import BrandLogoTicker from "@/components/layout/brand-logo-ticker";
 import CollectionSection from "@/components/product/collection-section";
 import ReviewCarousel from "@/components/product/review-carousel";
+import ValuePropositions from "@/components/layout/value-propositions";
 import { getCollectionProducts } from "@/lib/db";
 
 export default async function StoreHomePage() {
@@ -44,6 +45,9 @@ export default async function StoreHomePage() {
 
       {/* Client Reviews Social Proof Carousel */}
       <ReviewCarousel />
+
+      {/* Why Choose Us - Bento Grid Section */}
+      <ValuePropositions />
     </div>
   );
 }
