@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -24,13 +25,20 @@ const slides: CampaignSlide[] = [
     ctaText: "Learn more about Koko split payments",
     link: "/coming-soon",
     renderVisual: () => (
-      <div className="flex items-center gap-4 text-4xl sm:text-5xl font-mono font-black select-none opacity-20 tracking-tighter">
-        <span className="text-blue-600">01</span>
-        <span>/</span>
-        <span>02</span>
-        <span>/</span>
-        <span>03</span>
-      </div>
+      <motion.div 
+        className="relative w-[220px] h-[160px] sm:w-[300px] sm:h-[220px] md:w-[360px] md:h-[240px] flex items-center justify-end z-10"
+        animate={{ y: [0, -8, 0] }}
+        transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+      >
+        <Image
+          src="/assets/hero/Slider-Banner-Koko.png"
+          alt="Koko Pay Split Payments"
+          fill
+          priority
+          sizes="(max-width: 768px) 300px, 400px"
+          className="object-contain filter drop-shadow-[0_10px_25px_rgba(0,0,0,0.15)] pointer-events-none"
+        />
+      </motion.div>
     ),
   },
   {

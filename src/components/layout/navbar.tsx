@@ -107,7 +107,7 @@ export default function Navbar() {
             href="/"
             className="flex items-center gap-2 text-xl font-bold tracking-wider text-foreground"
           >
-            <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-green-500 to-emerald-600 bg-clip-text text-transparent">
               FTC
             </span>
             <span className="text-muted-foreground font-light">|</span>
