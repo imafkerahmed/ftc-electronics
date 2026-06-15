@@ -30,7 +30,8 @@ export const StaggeredMenu = ({
   const closeTweenRef = useRef(null);
   const colorTweenRef = useRef(null);
   const toggleBtnRef = useRef(null);
-  const busyRef = useRef(false);
+  const menuBusyRef = useRef(false);
+  const transitionBusyRef = useRef(false);
   const itemEntranceTweenRef = useRef(null);
 
   useLayoutEffect(() => {
@@ -168,16 +169,16 @@ export const StaggeredMenu = ({
   }, [position]);
 
   const playOpen = useCallback(() => {
-    if (busyRef.current) return;
-    busyRef.current = true;
+    if (menuBusyRef.current) return;
+    menuBusyRef.current = true;
     const tl = buildOpenTimeline();
     if (tl) {
       tl.eventCallback('onComplete', () => {
-        busyRef.current = false;
+        menuBusyRef.current = false;
       });
       tl.play(0);
     } else {
-      busyRef.current = false;
+      menuBusyRef.current = false;
     }
   }, [buildOpenTimeline]);
 
@@ -211,7 +212,8 @@ export const StaggeredMenu = ({
         const socialLinks = Array.from(panel.querySelectorAll('.sm-socials-link'));
         if (socialTitle) gsap.set(socialTitle, { opacity: 0 });
         if (socialLinks.length) gsap.set(socialLinks, { y: 25, opacity: 0 });
-        busyRef.current = false;
+        menuBusyRef.current = false;
+        transitionBusyRef.current = false;
       }
     });
   }, [position]);
@@ -248,12 +250,12 @@ export const StaggeredMenu = ({
   }, [changeMenuColorOnOpen, menuButtonColor, openMenuButtonColor]);
 
   const transitionToView = useCallback((targetView) => {
-    if (busyRef.current) return;
-    busyRef.current = true;
+    if (transitionBusyRef.current) return;
+    transitionBusyRef.current = true;
 
     const panel = panelRef.current;
     if (!panel) {
-      busyRef.current = false;
+      transitionBusyRef.current = false;
       return;
     }
 
@@ -282,7 +284,7 @@ export const StaggeredMenu = ({
             ease: 'power4.out',
             stagger: { each: 0.04, from: 'start' },
             onComplete: () => {
-              busyRef.current = false;
+              transitionBusyRef.current = false;
             }
           });
         }, 30);

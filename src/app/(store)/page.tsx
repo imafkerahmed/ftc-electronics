@@ -3,6 +3,8 @@ import BrandLogoTicker from "@/components/layout/brand-logo-ticker";
 import CollectionSection from "@/components/product/collection-section";
 import ReviewCarousel from "@/components/product/review-carousel";
 import ValuePropositions from "@/components/layout/value-propositions";
+import LocationMap from "@/components/layout/location-map";
+import CategoryBentoGrid from "@/components/layout/category-bento-grid";
 import { getCollectionProducts } from "@/lib/db";
 
 export default async function StoreHomePage() {
@@ -43,11 +45,17 @@ export default async function StoreHomePage() {
         seeAllLink="/products?category=air-purifiers"
       />
 
+      {/* Category Bento Grid Section */}
+      <CategoryBentoGrid />
+
       {/* Client Reviews Social Proof Carousel */}
       <ReviewCarousel />
 
       {/* Why Choose Us - Bento Grid Section */}
       <ValuePropositions />
+
+      {/* Flagship Store Location Map */}
+      <LocationMap />
     </div>
   );
 }
