@@ -1,23 +1,28 @@
 "use client";
 
 import { useRef } from "react";
-import { useInView } from "motion/react";
 import RotatingTextComponent from "@/components/ui/RotatingText/RotatingText";
 
-const RotatingText = RotatingTextComponent as any;
+const RotatingText = RotatingTextComponent as React.ComponentType<{
+  texts: string[];
+  mainClassName?: string;
+  staggerDuration?: number;
+  splitBy?: string;
+  transition?: { type: string; damping: number; stiffness: number };
+  rotationInterval?: number;
+}>;
 
 export default function ValuePropositions() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const isInView = useInView(containerRef, { once: true, amount: 0.1 });
 
   return (
     <section
       ref={containerRef}
-      className="w-full bg-white dark:bg-background border-b border-border py-20 sm:py-28 relative z-10 overflow-hidden"
+      className="w-full bg-white dark:bg-background border-b border-border py-8 sm:py-20 lg:py-28 relative z-10 overflow-hidden"
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-8 lg:px-16 flex flex-col items-center justify-center text-center">
         {/* Large Rotating Text Title */}
-        <div className="w-full max-w-5xl mb-6 flex flex-col items-center justify-center min-h-[120px] sm:min-h-[160px] lg:min-h-[200px]">
+        <div className="w-full max-w-5xl mb-2 sm:mb-6 flex flex-col items-center justify-center min-h-[70px] sm:min-h-[160px] lg:min-h-[200px]">
           <h2 className="text-3xl sm:text-5xl lg:text-7xl font-extrabold tracking-tight uppercase leading-none text-center">
             <RotatingText
               texts={[
@@ -37,7 +42,7 @@ export default function ValuePropositions() {
         </div>
 
         {/* Detailed philosophy paragraph */}
-        <div className="max-w-2xl mx-auto mt-6">
+        <div className="max-w-2xl mx-auto mt-2 sm:mt-6">
           <p className="text-neutral-500 dark:text-neutral-400 text-sm sm:text-base leading-relaxed">
             As an authorized premium electronics distributor, we offer
             meticulously vetted hardware with direct manufacturer guarantees. We

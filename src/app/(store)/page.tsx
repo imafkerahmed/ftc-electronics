@@ -6,6 +6,7 @@ import ValuePropositions from "@/components/layout/value-propositions";
 import LocationMap from "@/components/layout/location-map";
 import CategoryBentoGrid from "@/components/layout/category-bento-grid";
 import { getCollectionProducts } from "@/lib/db";
+import HomePageLoaderWrapper from "@/components/layout/home-page-loader-wrapper";
 
 export default async function StoreHomePage() {
   // Fetch products and categories for layout rendering
@@ -14,48 +15,50 @@ export default async function StoreHomePage() {
   const airPurifierProducts = await getCollectionProducts("air-purifiers");
 
   return (
-    <div className="w-full">
-      <CampaignHeroBanner />
+    <HomePageLoaderWrapper>
+      <div className="w-full">
+        <CampaignHeroBanner />
 
-      <BrandLogoTicker />
+        <BrandLogoTicker />
 
-      {/* On Sale Section - Carousel layout with red subtitle badge */}
-      <CollectionSection
-        title="On-Sale"
-        subtitle="Limited Stocks"
-        badgeBgColor="bg-[#ff0000]"
-        layout="carousel"
-        products={onSaleProducts}
-        seeAllLink="/products?filter=on-sale"
-      />
+        {/* On Sale Section - Carousel layout with red subtitle badge */}
+        <CollectionSection
+          title="On-Sale"
+          subtitle="Limited Stocks"
+          badgeBgColor="bg-[#ff0000]"
+          layout="carousel"
+          products={onSaleProducts}
+          seeAllLink="/products?filter=on-sale"
+        />
 
-      {/* New Arrivals Section - Responsive Grid layout */}
-      <CollectionSection
-        title="New Arrivals"
-        layout="grid"
-        products={newArrivalProducts.slice(0, 4)}
-        seeAllLink="/products?sortBy=newest"
-      />
+        {/* New Arrivals Section - Responsive Grid layout */}
+        <CollectionSection
+          title="New Arrivals"
+          layout="grid"
+          products={newArrivalProducts.slice(0, 4)}
+          seeAllLink="/products?sortBy=newest"
+        />
 
-      {/* Air Purifiers Section - Carousel layout */}
-      <CollectionSection
-        title="Air Purifiers"
-        layout="carousel"
-        products={airPurifierProducts}
-        seeAllLink="/products?category=air-purifiers"
-      />
+        {/* Air Purifiers Section - Carousel layout */}
+        <CollectionSection
+          title="Air Purifiers"
+          layout="carousel"
+          products={airPurifierProducts}
+          seeAllLink="/products?category=air-purifiers"
+        />
 
-      {/* Category Bento Grid Section */}
-      <CategoryBentoGrid />
+        {/* Category Bento Grid Section */}
+        <CategoryBentoGrid />
 
-      {/* Client Reviews Social Proof Carousel */}
-      <ReviewCarousel />
+        {/* Client Reviews Social Proof Carousel */}
+        <ReviewCarousel />
 
-      {/* Why Choose Us - Bento Grid Section */}
-      <ValuePropositions />
+        {/* Why Choose Us - Bento Grid Section */}
+        <ValuePropositions />
 
-      {/* Flagship Store Location Map */}
-      <LocationMap />
-    </div>
+        {/* Flagship Store Location Map */}
+        <LocationMap />
+      </div>
+    </HomePageLoaderWrapper>
   );
 }

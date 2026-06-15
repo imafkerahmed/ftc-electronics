@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck
 import * as React from "react";
 const MOBILE_BREAKPOINT = 1024;

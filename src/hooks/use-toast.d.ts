@@ -20,27 +20,27 @@ declare function toast(props: ToastOptions): {
     update: (props: ToastOptions) => string;
 };
 declare namespace toast {
-    var _a: (props: Omit<ToastOptions, "type">) => {
+    const _a: (props: Omit<ToastOptions, "type">) => {
         id: string;
         dismiss: () => void;
         update: (props: ToastOptions) => string;
     };
-    export var destructive: (props: Omit<ToastOptions, "type">) => {
+    export const destructive: (props: Omit<ToastOptions, "type">) => {
         id: string;
         dismiss: () => void;
         update: (props: ToastOptions) => string;
     };
-    export var success: (props: Omit<ToastOptions, "type">) => {
+    export const success: (props: Omit<ToastOptions, "type">) => {
         id: string;
         dismiss: () => void;
         update: (props: ToastOptions) => string;
     };
-    export var warning: (props: Omit<ToastOptions, "type">) => {
+    export const warning: (props: Omit<ToastOptions, "type">) => {
         id: string;
         dismiss: () => void;
         update: (props: ToastOptions) => string;
     };
-    export var info: (props: Omit<ToastOptions, "type">) => {
+    export const info: (props: Omit<ToastOptions, "type">) => {
         id: string;
         dismiss: () => void;
         update: (props: ToastOptions) => string;

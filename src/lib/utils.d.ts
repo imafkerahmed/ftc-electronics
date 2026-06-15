@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export function cn(...inputs: any[]): string;
 export function formatCurrency(amount: any, currency: string, options: any): string;
 export function generateUniqueId(prefix?: string): string;

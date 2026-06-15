@@ -142,7 +142,7 @@ export default function ReviewCarousel() {
       <div
         ref={sectionRef}
         style={{ backgroundColor: "#f4f4f5" }}
-        className="w-full py-16 border-b border-neutral-200 relative overflow-hidden text-neutral-900 select-none"
+        className="w-full py-8 sm:py-12 lg:py-16 border-b border-neutral-200 relative overflow-hidden text-neutral-900 select-none"
       >
         <style
           dangerouslySetInnerHTML={{
@@ -158,7 +158,7 @@ export default function ReviewCarousel() {
           }}
         />
 
-        <div className="max-w-7xl mx-auto px-6 sm:px-12 lg:px-16 flex flex-col gap-10 sm:gap-12 relative z-10">
+        <div className="max-w-7xl mx-auto px-6 sm:px-12 lg:px-16 flex flex-col gap-5 sm:gap-8 lg:gap-12 relative z-10">
           {/* Top Section: Testimonials Description */}
           <motion.div
             className="w-full flex flex-col items-center justify-center text-center relative z-20"
@@ -170,7 +170,7 @@ export default function ReviewCarousel() {
               Customer <span className="text-blue-600">Reviews</span>
             </h2>
 
-            <p className="mt-5 text-sm sm:text-base text-neutral-500 leading-relaxed max-w-xl mx-auto">
+            <p className="mt-2.5 sm:mt-4 lg:mt-5 text-sm sm:text-base text-neutral-500 leading-relaxed max-w-xl mx-auto">
               Real reviews and specs verified by verified purchasers. Sourced
               directly from our official channels.
             </p>
@@ -193,7 +193,7 @@ export default function ReviewCarousel() {
                   <div
                     key={`${review.id}-${index}`}
                     onClick={() => setSelectedReview(review)}
-                    className="cursor-pointer group w-[280px] sm:w-[340px] lg:w-[380px] shrink-0 border border-neutral-200/60 bg-white shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_25px_-5px_rgba(0,0,0,0.1)] hover:-translate-y-1 transition-all duration-300 p-6 sm:p-7 rounded-2xl flex flex-col justify-between min-h-[310px]"
+                    className="cursor-pointer group w-[280px] sm:w-[340px] lg:w-[380px] shrink-0 border border-neutral-200/60 bg-white shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_25px_-5px_rgba(0,0,0,0.1)] hover:-translate-y-1 transition-all duration-300 p-3 sm:p-6 lg:p-7 rounded-2xl flex flex-col justify-between min-h-[175px] sm:min-h-[210px] lg:min-h-[310px]"
                   >
                     {/* Top content */}
                     <div>
@@ -221,13 +221,13 @@ export default function ReviewCarousel() {
                       </div>
 
                       {/* Testimonial Quote */}
-                      <p className="mt-5 text-sm sm:text-[15px] text-neutral-600 italic leading-relaxed line-clamp-4 relative z-10">
+                      <p className="mt-2 sm:mt-3 lg:mt-5 text-sm sm:text-[15px] text-neutral-600 italic leading-relaxed line-clamp-2 lg:line-clamp-4 relative z-10">
                         &ldquo;{review.comment}&rdquo;
                       </p>
                     </div>
 
                     {/* Bottom details */}
-                    <div className="mt-6">
+                    <div className="mt-3 sm:mt-4 lg:mt-6">
                       {/* User name & Date */}
                       <div className="flex items-center justify-between text-[10px] uppercase tracking-wider border-b border-neutral-100 pb-3">
                         <span className="font-bold text-neutral-900">
@@ -242,7 +242,7 @@ export default function ReviewCarousel() {
                       <Link
                         href={`/products/${review.product.slug}`}
                         onClick={(e) => e.stopPropagation()}
-                        className="group/prod flex items-center gap-3.5 bg-neutral-50/50 border border-neutral-200/50 hover:border-blue-300 hover:bg-blue-50/30 hover:shadow-sm p-2.5 rounded-xl mt-3 transition-all duration-300"
+                        className="group/prod flex items-center gap-3.5 bg-neutral-50/50 border border-neutral-200/50 hover:border-blue-300 hover:bg-blue-50/30 hover:shadow-sm p-1.5 lg:p-2.5 rounded-xl mt-2 sm:mt-3 transition-all duration-300"
                       >
                         {/* Product Thumbnail */}
                         <div className="relative h-10 w-10 shrink-0 bg-white rounded-lg overflow-hidden border border-neutral-100 shadow-sm">

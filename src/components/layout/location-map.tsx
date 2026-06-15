@@ -19,12 +19,12 @@ export default function LocationMap() {
   return (
     <section
       style={{ backgroundColor: "#f4f4f5" }}
-      className="w-full border-b border-neutral-200 py-16 sm:py-24 relative z-10 overflow-hidden text-neutral-900"
+      className="w-full border-b border-neutral-200 py-8 sm:py-16 lg:py-24 relative z-10 overflow-hidden text-neutral-900"
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-8 lg:px-16">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 lg:gap-12 items-center">
           {/* Left Column: Interactive Map */}
-          <div className="lg:col-span-7 relative h-[350px] sm:h-[400px]">
+          <div className="lg:col-span-7 relative h-[220px] sm:h-[350px] lg:h-[400px]">
             <div className="w-full h-full rounded-2xl overflow-hidden border border-neutral-200 bg-white shadow-xs relative">
               {/* Map iframe */}
               <iframe
@@ -41,7 +41,7 @@ export default function LocationMap() {
           </div>
 
           {/* Right Column: Address and Opening Hours */}
-          <div className="lg:col-span-5 flex flex-col justify-center space-y-6">
+          <div className="lg:col-span-5 flex flex-col justify-center space-y-4 sm:space-y-6">
             <div>
               <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-neutral-900 uppercase leading-snug">
                 FTC{" "}
@@ -52,7 +52,7 @@ export default function LocationMap() {
             </div>
 
             {/* Details List */}
-            <div className="space-y-4 pt-2">
+            <div className="space-y-3 sm:space-y-4 pt-0.5 sm:pt-2">
               {/* Address */}
               <div className="flex items-start gap-3.5 group">
                 <div className="p-2 rounded-lg bg-blue-50 text-blue-600 mt-0.5">
@@ -133,7 +133,7 @@ export default function LocationMap() {
             </div>
 
             {/* Action CTA Button */}
-            <div className="pt-4">
+            <div className="pt-2 sm:pt-4">
               <a
                 href={storeInfo.googleMapsLink}
                 target="_blank"

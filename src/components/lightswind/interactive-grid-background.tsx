@@ -81,7 +81,7 @@ const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
   const idleTargetsRef = useRef<{ x: number; y: number }[]>([]);
   const idlePositionsRef = useRef<{ x: number; y: number }[]>([]);
   const mouseActiveRef = useRef(false);
-  const lastMouseTimeRef = useRef(Date.now());
+  const lastMouseTimeRef = useRef(0);
 
   // Detect dark mode and custom theme colors
   useEffect(() => {
