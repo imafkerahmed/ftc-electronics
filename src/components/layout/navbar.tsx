@@ -15,10 +15,10 @@ import { cn } from "@/lib/utils";
 interface StaggeredMenuProps {
   position?: "left" | "right";
   colors?: string[];
-  items?: { 
-    label: string; 
-    link: string; 
-    ariaLabel?: string; 
+  items?: {
+    label: string;
+    link: string;
+    ariaLabel?: string;
     subItems?: { label: string; link: string; ariaLabel?: string }[];
   }[];
   socialItems?: { label: string; link: string }[];
@@ -49,7 +49,9 @@ export default function Navbar() {
   const [isIntroActive, setIsIntroActive] = useState(shouldPlayIntro);
   const [showOverlay, setShowOverlay] = useState(shouldPlayIntro);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [searchTriggerRect, setSearchTriggerRect] = useState<DOMRect | null>(null);
+  const [searchTriggerRect, setSearchTriggerRect] = useState<DOMRect | null>(
+    null,
+  );
 
   useEffect(() => {
     if (shouldPlayIntro) {
@@ -83,26 +85,26 @@ export default function Navbar() {
 
   const menuItems = [
     { label: "Home", link: "/" },
-    { 
-      label: "Shop All", 
+    {
+      label: "Shop All",
       link: "/products",
       subItems: [
         { label: "Laptops", link: "/products?category=laptops" },
         { label: "Phones", link: "/products?category=phones" },
         { label: "Audio", link: "/products?category=audio" },
-        { label: "Accessories", link: "/coming-soon" }
-      ]
+        { label: "Accessories", link: "/coming-soon" },
+      ],
     },
-    { 
-      label: "Brands", 
+    {
+      label: "Brands",
       link: "/products?filter=brands",
       subItems: [
         { label: "Apple", link: "/products?brand=apple" },
         { label: "Samsung", link: "/products?brand=samsung" },
         { label: "Sony", link: "/products?brand=sony" },
         { label: "Bose", link: "/products?brand=bose" },
-        { label: "Asus", link: "/products?brand=asus" }
-      ]
+        { label: "Asus", link: "/products?brand=asus" },
+      ],
     },
     { label: "On Sale", link: "/products?filter=on-sale" },
     { label: "About", link: "/coming-soon" },
@@ -110,18 +112,24 @@ export default function Navbar() {
   ];
 
   return (
-    <header className={cn(
-      "sticky top-0 z-50 w-full border-b backdrop-blur-md transition-colors duration-1000",
-      isIntroActive 
-        ? "border-transparent bg-transparent backdrop-blur-none" 
-        : "border-border bg-background/80 backdrop-blur-md"
-    )}>
+    <header
+      className={cn(
+        "sticky top-0 z-50 w-full border-b backdrop-blur-md transition-colors duration-1000",
+        isIntroActive
+          ? "border-transparent bg-transparent backdrop-blur-none"
+          : "border-border bg-background/80 backdrop-blur-md",
+      )}
+    >
       <div className="relative flex h-16 w-full items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Left Side: Staggered Menu Component & Search Icon Button */}
         <motion.div
           initial={hasIntroPlayed ? { opacity: 1 } : { opacity: 0 }}
           animate={{ opacity: isIntroActive ? 0 : 1 }}
-          transition={{ duration: 0.8, ease: "easeOut", delay: isIntroActive ? 0 : 1.5 }}
+          transition={{
+            duration: 0.8,
+            ease: "easeOut",
+            delay: isIntroActive ? 0 : 1.5,
+          }}
           className="flex items-center pl-10 sm:pl-12 lg:pl-16"
         >
           <StaggeredMenu
@@ -184,7 +192,11 @@ export default function Navbar() {
         <motion.div
           initial={hasIntroPlayed ? { opacity: 1 } : { opacity: 0 }}
           animate={{ opacity: isIntroActive ? 0 : 1 }}
-          transition={{ duration: 0.8, ease: "easeOut", delay: isIntroActive ? 0 : 1.5 }}
+          transition={{
+            duration: 0.8,
+            ease: "easeOut",
+            delay: isIntroActive ? 0 : 1.5,
+          }}
           className="flex items-center space-x-2 sm:space-x-3"
         >
           {/* Account portal Link */}
@@ -253,7 +265,12 @@ export default function Navbar() {
                 layoutId="brand-logo-electronics"
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ opacity: 1, scale: 1 }}
-                transition={{ type: "spring", stiffness: 80, damping: 20, delay: 0.2 }}
+                transition={{
+                  type: "spring",
+                  stiffness: 80,
+                  damping: 20,
+                  delay: 0.2,
+                }}
                 className="text-2xl uppercase tracking-widest text-foreground/80 font-bold"
               >
                 Electronics

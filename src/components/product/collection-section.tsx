@@ -76,7 +76,7 @@ export default function CollectionSection({
   return (
     <div 
       ref={containerRef}
-      className="w-full py-10 sm:py-14 border-b border-border bg-background relative z-10"
+      className="w-full py-16 sm:py-24 border-t border-neutral-200/80 dark:border-neutral-800/80 border-b border-border bg-background relative z-10"
     >
       <div className="max-w-7xl mx-auto px-6 sm:px-12 lg:px-16 flex flex-col md:flex-row gap-8 md:gap-6 lg:gap-10">
         
@@ -93,6 +93,11 @@ export default function CollectionSection({
               {subtitle}
             </span>
           )}
+
+          {/* Minimal Semantic Tracking Label */}
+          <span className="text-neutral-400 dark:text-neutral-500 font-mono text-[10px] tracking-widest uppercase mb-1.5 block">
+            FTC // CURATED ECOSYSTEM
+          </span>
 
           {/* Section Main Title */}
           <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50 uppercase leading-snug">

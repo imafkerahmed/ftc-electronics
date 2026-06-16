@@ -11,21 +11,52 @@ interface BrandLogo {
 }
 
 const brandLogos: BrandLogo[] = [
-  { name: "Apple", src: "/assets/brand-logos/apple.png", width: 32, height: 32 },
-  { name: "Samsung", src: "/assets/brand-logos/samsung.png", width: 105, height: 28 },
-  { name: "Anker", src: "/assets/brand-logos/anker.png", width: 95, height: 28 },
-  { name: "Ugreen", src: "/assets/brand-logos/ugreen.png", width: 95, height: 28 },
+  {
+    name: "Apple",
+    src: "/assets/brand-logos/apple.png",
+    width: 32,
+    height: 32,
+  },
+  {
+    name: "Samsung",
+    src: "/assets/brand-logos/samsung.png",
+    width: 105,
+    height: 28,
+  },
+  {
+    name: "Anker",
+    src: "/assets/brand-logos/anker.png",
+    width: 95,
+    height: 28,
+  },
+  {
+    name: "Ugreen",
+    src: "/assets/brand-logos/ugreen.png",
+    width: 95,
+    height: 28,
+  },
   { name: "Wiwu", src: "/assets/brand-logos/wiwu.png", width: 85, height: 28 },
-  { name: "Xiaomi", src: "/assets/brand-logos/xiaomi.png", width: 32, height: 32 },
+  {
+    name: "Xiaomi",
+    src: "/assets/brand-logos/xiaomi.png",
+    width: 32,
+    height: 32,
+  },
 ];
 
 export default function BrandLogoTicker({ className }: { className?: string }) {
   // Duplicate the brand logos list to create a seamless infinite marquee effect
-  const duplicatedLogos = [...brandLogos, ...brandLogos, ...brandLogos, ...brandLogos];
+  const duplicatedLogos = [
+    ...brandLogos,
+    ...brandLogos,
+    ...brandLogos,
+    ...brandLogos,
+  ];
 
   return (
-    <div className={`w-full border-b border-border bg-muted/5 h-[130px] overflow-hidden relative select-none z-10 flex items-center justify-center ${className}`}>
-      
+    <div
+      className={`w-full border-b border-border bg-muted/5 h-[130px] overflow-hidden relative select-none z-10 flex items-center justify-center ${className}`}
+    >
       {/* Soft overlay gradients on edges for premium visual fade */}
       <div className="absolute left-0 top-0 bottom-0 w-16 sm:w-28 bg-gradient-to-r from-background to-transparent z-20 pointer-events-none" />
       <div className="absolute right-0 top-0 bottom-0 w-16 sm:w-28 bg-gradient-to-l from-background to-transparent z-20 pointer-events-none" />
@@ -62,7 +93,6 @@ export default function BrandLogoTicker({ className }: { className?: string }) {
           ))}
         </motion.div>
       </div>
-
     </div>
   );
 }

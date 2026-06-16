@@ -25,7 +25,8 @@ const slides: Slide[] = [
     id: 1,
     badge: "CREATOR STATION",
     title: "Zenith Pro 16 Laptops",
-    description: "M3 Max Pro speed meets a breathtaking 240Hz OLED color-accurate display.",
+    description:
+      "M3 Max Pro speed meets a breathtaking 240Hz OLED color-accurate display.",
     price: "$1,899",
     image: "/assets/hero-laptop.png",
     link: "/products?category=laptops",
@@ -37,7 +38,8 @@ const slides: Slide[] = [
     id: 2,
     badge: "STUDIO FIDELITY",
     title: "Auralux ANC Headphones",
-    description: "Experience pure hybrid noise-cancelling acoustics designed for ultimate focus.",
+    description:
+      "Experience pure hybrid noise-cancelling acoustics designed for ultimate focus.",
     price: "$349",
     image: "/assets/hero-headphones.png",
     link: "/products?category=audio",
@@ -49,7 +51,8 @@ const slides: Slide[] = [
     id: 3,
     badge: "MECHANICAL BEAST",
     title: "Matrix-87 Keyboards",
-    description: "Custom gasket mounted chassis combined with ultra-responsive transparent switches.",
+    description:
+      "Custom gasket mounted chassis combined with ultra-responsive transparent switches.",
     price: "$189",
     image: "/assets/hero-keyboard.png",
     link: "/products?category=accessories",
@@ -70,8 +73,6 @@ export default function WidescreenHeroSlider() {
     setDirection(1);
     setCurrentIndex((prev) => (prev + 1) % slides.length);
   }, []);
-
-
 
   const handleDotClick = (index: number) => {
     setDirection(index > currentIndex ? 1 : -1);
@@ -133,10 +134,8 @@ export default function WidescreenHeroSlider() {
             className={`absolute inset-0 w-full h-full bg-gradient-to-br ${activeSlide.gradient} flex items-center`}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 w-full h-full items-center p-6 sm:p-12 lg:p-16 gap-6 md:gap-8">
-              
               {/* Left Column: Text Content */}
               <div className="w-full flex flex-col justify-center items-center md:items-start text-center md:text-left order-2 md:order-1 max-w-lg mx-auto md:mx-0 z-10">
-                
                 {/* Monospace Badge tag */}
                 <div className="mb-3">
                   <span className="font-mono text-[10px] font-bold tracking-widest text-white/50 border border-white/10 px-2 py-0.5 rounded uppercase">
@@ -157,8 +156,12 @@ export default function WidescreenHeroSlider() {
                 {/* Pricing & CTA */}
                 <div className="flex items-center gap-5 sm:gap-6">
                   <div className="text-left">
-                    <span className="text-[9px] text-white/40 block uppercase tracking-widest leading-none">Starting at</span>
-                    <span className="text-xl sm:text-2xl font-extrabold text-white leading-none">{activeSlide.price}</span>
+                    <span className="text-[9px] text-white/40 block uppercase tracking-widest leading-none">
+                      Starting at
+                    </span>
+                    <span className="text-xl sm:text-2xl font-extrabold text-white leading-none">
+                      {activeSlide.price}
+                    </span>
                   </div>
                   <Link
                     href={activeSlide.link}
@@ -168,12 +171,10 @@ export default function WidescreenHeroSlider() {
                     <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
                   </Link>
                 </div>
-
               </div>
 
               {/* Right Column: Floating Product Image */}
               <div className="w-full flex items-center justify-center order-1 md:order-2 relative h-[160px] sm:h-[220px] md:h-full">
-                
                 {/* Colored Ambient Radial Glow */}
                 <div
                   className="absolute w-[150px] h-[150px] sm:w-[240px] sm:h-[240px] md:w-[350px] md:h-[350px] rounded-full blur-[50px] sm:blur-[70px] md:blur-[100px] pointer-events-none opacity-80 z-0"
@@ -202,7 +203,6 @@ export default function WidescreenHeroSlider() {
                   />
                 </motion.div>
               </div>
-
             </div>
           </motion.div>
         </AnimatePresence>
@@ -216,14 +216,15 @@ export default function WidescreenHeroSlider() {
                 key={slide.id}
                 onClick={() => handleDotClick(index)}
                 className={`h-1.5 rounded-full transition-all duration-300 focus:outline-none cursor-pointer ${
-                  isActive ? "bg-white w-5" : "bg-white/20 w-1.5 hover:bg-white/40"
+                  isActive
+                    ? "bg-white w-5"
+                    : "bg-white/20 w-1.5 hover:bg-white/40"
                 }`}
                 aria-label={`Go to slide ${index + 1}`}
               />
             );
           })}
         </div>
-
       </Card>
     </div>
   );
