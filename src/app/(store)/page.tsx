@@ -1,3 +1,5 @@
+import Link from "next/link";
+import Image from "next/image";
 import CampaignHeroBanner from "@/components/layout/campaign-hero-banner";
 import BrandLogoTicker from "@/components/layout/brand-logo-ticker";
 import CollectionSection from "@/components/product/collection-section";
@@ -7,12 +9,12 @@ import LocationMap from "@/components/layout/location-map";
 import CategoryBentoGrid from "@/components/layout/category-bento-grid";
 import { getCollectionProducts } from "@/lib/db";
 import HomePageLoaderWrapper from "@/components/layout/home-page-loader-wrapper";
+import ImageParallaxBanner from "@/components/layout/image-parallax-banner";
 
 export default async function StoreHomePage() {
   // Fetch products and categories for layout rendering
   const onSaleProducts = await getCollectionProducts("on-sale");
   const newArrivalProducts = await getCollectionProducts("new-arrivals");
-  const airPurifierProducts = await getCollectionProducts("air-purifiers");
 
   return (
     <HomePageLoaderWrapper>
@@ -21,30 +23,30 @@ export default async function StoreHomePage() {
 
         <BrandLogoTicker />
 
-        {/* On Sale Section - Carousel layout with red subtitle badge */}
+        {/* On Sale Section - Flash Sale Carousel layout with countdown timer */}
         <CollectionSection
           title="On-Sale"
           subtitle="Limited Stocks"
           badgeBgColor="bg-[#ff0000]"
-          layout="carousel"
+          layout="flash-sale"
           products={onSaleProducts}
           seeAllLink="/products?filter=on-sale"
         />
 
-        {/* New Arrivals Section - Responsive Grid layout */}
-        <CollectionSection
-          title="New Arrivals"
-          layout="grid"
-          products={newArrivalProducts.slice(0, 4)}
-          seeAllLink="/products?sortBy=newest"
+        {/* Promo Banner 1: Workspace/Keyboards (Anker) */}
+        <ImageParallaxBanner
+          imageSrc="/assets/banners/anker-banner.png"
+          alt="Next-Gen Office Gear"
+          href="/products?search=keyboard"
+          heightClass="h-[150px] sm:h-[220px] md:h-[290px]"
         />
 
-        {/* Air Purifiers Section - Carousel layout */}
+        {/* New Arrivals Section - Asymmetric Bento Grid layout */}
         <CollectionSection
-          title="Air Purifiers"
-          layout="carousel"
-          products={airPurifierProducts}
-          seeAllLink="/products?category=air-purifiers"
+          title="New Arrivals"
+          layout="featured-grid"
+          products={newArrivalProducts.slice(0, 6)}
+          seeAllLink="/products?sortBy=newest"
         />
 
         {/* Category Bento Grid Section */}

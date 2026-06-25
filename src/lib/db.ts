@@ -510,6 +510,81 @@ export const MOCK_PRODUCTS: Product[] = [
     countInStock: 11,
     currency: 'LKR',
     createdAt: new Date().toISOString()
+  },
+  {
+    id: 'prod_22',
+    name: 'IVON Dual-Port USB Fast Charger (IV-65)',
+    slug: 'ivon-dual-port-fast-charger',
+    description: 'Supercharge your devices with the IVON Dual-Port Fast Charger. Featuring dual USB outputs with intelligent power distribution and advanced safety protection.',
+    price: 4500,
+    discountPrice: 3890,
+    images: [
+      'https://images.unsplash.com/photo-1622445262465-2481c4574875?q=80&w=600&auto=format&fit=crop'
+    ],
+    category: 'Accessories',
+    brand: 'IVON',
+    specs: {
+      Ports: 'Dual USB-A Ports',
+      Input: '100-240V ~ 50/60Hz 0.5A',
+      Output: '5V=3A / 9V=2A / 12V=1.5A (QC 3.0 compatible)',
+      Safety: 'Short-circuit, over-charging, and thermal protection',
+      Design: 'Compact travel-friendly folding design'
+    },
+    rating: 4.8,
+    numReviews: 15,
+    countInStock: 20,
+    currency: 'LKR',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'prod_23',
+    name: 'IVON Braided USB-C Fast Data Cable (IV-22)',
+    slug: 'ivon-braided-usb-c-cable',
+    description: 'Ultra-durable double-braided nylon charging and data synchronization cable. Built with premium reinforced SR joints to withstand heavy daily use.',
+    price: 2200,
+    discountPrice: 1750,
+    images: [
+      'https://images.unsplash.com/photo-1544725176-7c40e5a71c5e?q=80&w=600&auto=format&fit=crop'
+    ],
+    category: 'Accessories',
+    brand: 'IVON',
+    specs: {
+      Interface: 'USB-A to USB Type-C',
+      Length: '1.2 Meters (4 Feet)',
+      Material: 'High-Density Double Braided Nylon + Aluminum Alloy Shell',
+      Speed: 'Up to 480 Mbps high-speed data transfer',
+      Current: 'Supports up to 3.0A fast charging'
+    },
+    rating: 4.7,
+    numReviews: 24,
+    countInStock: 35,
+    currency: 'LKR',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'prod_24',
+    name: 'IVON True Wireless ANC Earbuds (IV-X9)',
+    slug: 'ivon-true-wireless-anc-earbuds',
+    description: 'Experience pure acoustic clarity and powerful bass. IVON wireless earbuds feature Active Noise Cancellation, voice assistant support, and comfort-fit ergonomics.',
+    price: 9990,
+    discountPrice: 8490,
+    images: [
+      'https://images.unsplash.com/photo-1590658268037-6bf12165a8df?q=80&w=600&auto=format&fit=crop'
+    ],
+    category: 'Audio',
+    brand: 'IVON',
+    specs: {
+      Connectivity: 'Bluetooth v5.3 Auto-Pairing',
+      NoiseControl: 'Active Noise Cancellation (ANC) + Transparency Mode',
+      Drivers: '10mm Dynamic Bass Drivers',
+      Battery: 'Up to 6 hours playtime per charge (28 hours total with case)',
+      Controls: 'Smart Touch Gestures'
+    },
+    rating: 4.6,
+    numReviews: 8,
+    countInStock: 12,
+    currency: 'LKR',
+    createdAt: new Date().toISOString()
   }
 ];
 

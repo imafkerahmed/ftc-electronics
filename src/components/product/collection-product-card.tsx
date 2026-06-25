@@ -1,47 +1,48 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import Link from 'next/link';
-import Image from 'next/image';
-import { Star, Plus, Check } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Product } from '@/types/product';
-import { useCart } from '@/hooks/use-cart';
-import { useUiStore } from '@/store/use-ui-store';
+import { useState } from "react";
+import Link from "next/link";
+import Image from "next/image";
+import { Star, Plus, Check } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { Product } from "@/types/product";
+import { useCart } from "@/hooks/use-cart";
+import { useUiStore } from "@/store/use-ui-store";
 
 interface CollectionProductCardProps {
   product: Product;
+  themeColor?: "red" | "purple" | "teal" | "blue";
 }
 
-export default function CollectionProductCard({ product }: CollectionProductCardProps) {
-  const { 
-    name, 
-    slug, 
-    price, 
-    discountPrice, 
-    images, 
-    rating, 
-    numReviews, 
-    isPreOrder, 
-    currency, 
+export default function CollectionProductCard({
+  product,
+  themeColor = "blue",
+}: CollectionProductCardProps) {
+  const {
+    name,
+    slug,
+    price,
+    discountPrice,
+    images,
+    rating,
+    numReviews,
+    brand,
+    currency,
     countInStock,
-    specs 
   } = product;
 
   const { addItem } = useCart();
   const setCartDrawerOpen = useUiStore((state) => state.setCartDrawerOpen);
-  
+
   const [isAdding, setIsAdding] = useState(false);
-  const [isButtonHovered, setIsButtonHovered] = useState(false);
   const hasDiscount = discountPrice !== undefined;
   const isOutOfStock = countInStock === 0;
-  const isLowStock = countInStock > 0 && countInStock <= 5;
   const hasMultipleImages = images.length > 1;
 
   // Format price helper
   const formatPriceVal = (value: number) => {
-    if (currency === 'LKR') {
-      return `Rs.${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    if (currency === "LKR") {
+      return `Rs.${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
     return `$${value.toFixed(2)}`;
   };
@@ -50,13 +51,13 @@ export default function CollectionProductCard({ product }: CollectionProductCard
   const handleQuickAdd = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    
+
     if (isOutOfStock) return;
-    
+
     setIsAdding(true);
     addItem(product);
-    
-    // Automatically trigger cart drawer slide-in
+
+    // Trigger cart drawer slide-in
     setCartDrawerOpen(true);
 
     setTimeout(() => {
@@ -64,25 +65,50 @@ export default function CollectionProductCard({ product }: CollectionProductCard
     }, 1200);
   };
 
-  // Extract first 2 specs for monospace tags
-  const displaySpecs = Object.values(specs || {})
-    .slice(0, 2);
+  // Glow shadow map for hovered state
+  const getHoverShadowClass = () => {
+    switch (themeColor) {
+      case "red":
+        return "hover:shadow-[0_15px_30px_rgba(239,68,68,0.08)] hover:border-red-500/40 dark:hover:border-red-500/40";
+      case "purple":
+        return "hover:shadow-[0_15px_30px_rgba(139,92,246,0.08)] hover:border-violet-500/40 dark:hover:border-violet-500/40";
+      case "teal":
+        return "hover:shadow-[0_15px_30px_rgba(20,184,166,0.08)] hover:border-teal-500/40 dark:hover:border-teal-500/40";
+      case "blue":
+      default:
+        return "hover:shadow-[0_15px_30px_rgba(59,130,246,0.08)] hover:border-blue-500/40 dark:hover:border-blue-500/40";
+    }
+  };
 
   return (
-    <Link 
-      href={`/products/${slug}`} 
-      className="group flex flex-col w-full min-w-0 select-none cursor-pointer relative"
+    <Link
+      href={`/products/${slug}`}
+      className={`group flex flex-col w-full min-w-0 select-none cursor-pointer relative p-4 rounded-2xl border border-neutral-200/70 dark:border-neutral-800/80 bg-white dark:bg-neutral-900/60 backdrop-blur-md transition-all duration-300 hover:-translate-y-1.5 z-10 ${getHoverShadowClass()}`}
     >
-      {/* Image Container with light gray bg */}
-      <div className="relative aspect-square w-full overflow-hidden rounded-sm bg-[#f5f5f5] dark:bg-neutral-900/40">
-        
+      {/* Image Container with seamless background and dynamic glow */}
+      <div className="relative aspect-[4/3] w-full overflow-hidden flex items-center justify-center mb-4">
+        {/* Soft background ambient circle glow */}
+        <div
+          className={`absolute w-28 h-28 rounded-full blur-[24px] opacity-10 dark:opacity-15 pointer-events-none -z-10 transition-transform duration-500 group-hover:scale-110 ${
+            themeColor === "red"
+              ? "bg-red-500"
+              : themeColor === "purple"
+                ? "bg-purple-500"
+                : themeColor === "teal"
+                  ? "bg-teal-500"
+                  : "bg-blue-500"
+          }`}
+        />
+
         {/* Primary Image */}
         <Image
           src={images[0]}
           alt={name}
           fill
-          className={`object-cover object-center transition-all duration-500 group-hover:scale-105 ${
-            hasMultipleImages ? 'opacity-100 group-hover:opacity-0' : 'opacity-100'
+          className={`object-contain p-2 transition-all duration-500 group-hover:scale-105 ${
+            hasMultipleImages
+              ? "opacity-100 group-hover:opacity-0"
+              : "opacity-100"
           }`}
           sizes="(max-width: 768px) 50vw, (max-width: 1200px) 25vw, 20vw"
           priority={false}
@@ -94,165 +120,147 @@ export default function CollectionProductCard({ product }: CollectionProductCard
             src={images[1]}
             alt={`${name} secondary view`}
             fill
-            className="object-cover object-center absolute inset-0 opacity-0 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
+            className="object-contain p-2 absolute inset-0 opacity-0 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
             sizes="(max-width: 768px) 50vw, (max-width: 1200px) 25vw, 20vw"
             priority={false}
           />
         )}
-        
-        {/* Absolute Badges */}
-        <div className="absolute top-2 left-2 flex flex-col gap-1 z-10">
-          {hasDiscount && (
-            <span className="rounded-[2px] bg-[#ff0000] px-2 py-0.5 text-[9px] font-extrabold text-white uppercase tracking-wider shadow-sm">
-              Sale!
-            </span>
-          )}
-          {isPreOrder && (
-            <span className="rounded-[2px] bg-[#008000] px-2 py-0.5 text-[9px] font-extrabold text-white uppercase tracking-wider shadow-sm">
-              Pre-Order
-            </span>
-          )}
-        </div>
 
         {/* Sold out overlay */}
         {isOutOfStock && (
-          <div className="absolute inset-0 flex items-center justify-center bg-background/55 backdrop-blur-[2px] z-10">
-            <span className="rounded-[2px] bg-background border border-border px-2.5 py-0.5 text-[9px] font-bold text-foreground uppercase tracking-widest">
+          <div className="absolute inset-0 flex items-center justify-center bg-background/60 backdrop-blur-[2px] z-10 rounded-xl">
+            <span className="rounded-md bg-background border border-border px-3 py-1 text-[10px] font-bold text-foreground uppercase tracking-widest shadow-sm">
               Sold Out
             </span>
           </div>
         )}
-
-        {/* Hover Quick-Add Action Button */}
-        {!isOutOfStock && (
-          <div className="absolute bottom-2.5 right-2.5 z-20">
-            <motion.button
-              onMouseEnter={() => setIsButtonHovered(true)}
-              onMouseLeave={() => setIsButtonHovered(false)}
-              onClick={handleQuickAdd}
-              disabled={isOutOfStock}
-              className={`h-8 rounded-full border shadow-md flex items-center justify-center transition-colors focus:outline-none cursor-pointer overflow-hidden opacity-100 sm:opacity-0 translate-y-0 sm:translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 duration-300 ${
-                isAdding 
-                  ? 'bg-blue-600 border-blue-600 text-white' 
-                  : 'bg-white hover:bg-blue-600 text-neutral-800 hover:text-white border-neutral-200/80 hover:border-blue-600'
-              }`}
-              animate={{ 
-                width: isAdding ? 96 : isButtonHovered ? 116 : 32,
-              }}
-              transition={{ type: "spring", stiffness: 350, damping: 24 }}
-              whileTap={{ scale: 0.95 }}
-              aria-label="Add item directly to cart"
-            >
-              <div className="flex items-center justify-center w-full h-full px-2">
-                <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
-                  <AnimatePresence mode="wait">
-                    {isAdding ? (
-                      <motion.div
-                        key="check"
-                        initial={{ opacity: 0, scale: 0.5 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.5 }}
-                        transition={{ duration: 0.15 }}
-                        className="flex items-center justify-center shrink-0"
-                      >
-                        <Check className="h-3.5 w-3.5 stroke-[3]" />
-                      </motion.div>
-                    ) : (
-                      <motion.div
-                        key="plus"
-                        initial={{ opacity: 0, scale: 0.5 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.5 }}
-                        transition={{ duration: 0.15 }}
-                        className="flex items-center justify-center shrink-0"
-                      >
-                        <Plus className="h-3.5 w-3.5 stroke-[3]" />
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  <AnimatePresence>
-                    {(isButtonHovered || isAdding) && (
-                      <motion.span
-                        initial={{ opacity: 0, width: 0 }}
-                        animate={{ opacity: 1, width: 'auto' }}
-                        exit={{ opacity: 0, width: 0 }}
-                        transition={{ duration: 0.15 }}
-                        className="text-[9px] font-black uppercase tracking-wider select-none leading-none"
-                      >
-                        {isAdding ? 'Added' : 'Add to Cart'}
-                      </motion.span>
-                    )}
-                  </AnimatePresence>
-                </div>
-              </div>
-            </motion.button>
-          </div>
-        )}
       </div>
 
-      {/* Product Information Details */}
-      <div className="mt-3 flex flex-col">
-        {/* Product Title */}
-        <h4 className="text-xs sm:text-[13px] md:text-sm font-normal text-neutral-800 dark:text-neutral-200 line-clamp-2 leading-relaxed min-h-[36px] group-hover:text-blue-600 transition-colors">
+      {/* Product Details Section */}
+      <div className="flex flex-col flex-grow">
+        {/* Brand Name Tag */}
+        {brand && (
+          <span className="text-[10px] font-extrabold tracking-wider uppercase text-neutral-450 dark:text-neutral-500 mb-1">
+            {brand}
+          </span>
+        )}
+
+        {/* Product Title (2-line clamp ensures alignment) */}
+        <h4 className="text-xs sm:text-[13px] font-bold text-neutral-850 dark:text-neutral-200 line-clamp-2 leading-snug min-h-[36px] group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors duration-200">
           {name}
         </h4>
 
-        {/* Monospace Tech Spec Tags */}
-        {displaySpecs.length > 0 && (
-          <div className="mt-1 flex flex-wrap gap-1">
-            {displaySpecs.map((spec, index) => (
-              <span 
-                key={index} 
-                className="font-mono text-[9px] font-medium bg-neutral-100 dark:bg-neutral-800/80 text-neutral-500 dark:text-neutral-450 px-1.5 py-0.5 rounded-[2px] max-w-[120px] truncate"
-              >
-                {spec}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Pricing Info */}
-        <div className="mt-2 flex flex-wrap items-baseline gap-1.5">
-          {hasDiscount ? (
-            <>
-              <span className="text-xs sm:text-sm font-bold text-neutral-900 dark:text-white">
-                {formatPriceVal(discountPrice)}
-              </span>
-              <span className="text-[10px] sm:text-xs text-neutral-450 line-through">
-                {formatPriceVal(price)}
-              </span>
-            </>
-          ) : (
-            <span className="text-xs sm:text-sm font-bold text-neutral-900 dark:text-white">
-              {formatPriceVal(price)}
-            </span>
-          )}
-        </div>
-
-        {/* Star Rating & Reviews */}
-        {numReviews > 0 && (
-          <div className="mt-1 flex items-center gap-1.5">
-            <div className="flex text-amber-500">
-              {Array.from({ length: 5 }).map((_, idx) => (
+        {/* Interactive Star Rating Row */}
+        <div className="flex items-center gap-1.5 mt-1.5 mb-3.5">
+          <div className="flex items-center text-amber-400">
+            {Array.from({ length: 5 }).map((_, i) => {
+              const starVal = i + 1;
+              const isFilled = rating >= starVal;
+              return (
                 <Star
-                  key={idx}
+                  key={i}
                   className={`h-3 w-3 ${
-                    idx < Math.floor(rating) ? 'fill-current' : 'text-neutral-200 dark:text-neutral-700'
+                    isFilled
+                      ? "fill-amber-400 text-amber-400"
+                      : "text-neutral-250 dark:text-neutral-750"
                   }`}
                 />
-              ))}
-            </div>
-            <span className="text-[10px] text-neutral-500 font-medium">({numReviews})</span>
+              );
+            })}
           </div>
-        )}
-
-        {/* Low Stock Urgency warning */}
-        {isLowStock && (
-          <span className="mt-1.5 text-[9px] sm:text-[10px] font-bold text-red-600 dark:text-red-500 uppercase tracking-wider animate-pulse">
-            Only {countInStock} left in stock!
+          <span className="text-[10px] font-medium text-neutral-450 dark:text-neutral-500">
+            {rating ? rating.toFixed(1) : "5.0"} ({numReviews || 0})
           </span>
-        )}
+        </div>
+
+        {/* Pricing & Quick Action Row */}
+        <div className="mt-auto pt-3.5 border-t border-neutral-100 dark:border-neutral-800/50 flex items-center justify-between gap-4">
+          {/* Price Container */}
+          <div className="flex flex-col">
+            {hasDiscount ? (
+              <>
+                <span className="text-[10px] text-neutral-400 line-through leading-none mb-1">
+                  {formatPriceVal(price)}
+                </span>
+                <span
+                  className={`text-sm sm:text-base font-black leading-none ${
+                    themeColor === "red"
+                      ? "text-red-500 dark:text-red-400"
+                      : themeColor === "purple"
+                        ? "text-violet-500 dark:text-violet-400"
+                        : themeColor === "teal"
+                          ? "text-teal-600 dark:text-teal-400"
+                          : "text-blue-500 dark:text-blue-400"
+                  }`}
+                >
+                  {formatPriceVal(discountPrice)}
+                </span>
+              </>
+            ) : (
+              <span className="text-sm sm:text-base font-black text-neutral-900 dark:text-white leading-none">
+                {formatPriceVal(price)}
+              </span>
+            )}
+          </div>
+
+          {/* Quick-add Circular Icon Button */}
+          <div className="shrink-0">
+            {isOutOfStock ? (
+              <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-neutral-50 dark:bg-neutral-900/60 text-neutral-400 dark:text-neutral-600 border border-neutral-200/50 dark:border-neutral-800/50">
+                Out
+              </span>
+            ) : (
+              <motion.button
+                onClick={handleQuickAdd}
+                className={`h-9 w-9 rounded-full flex items-center justify-center border transition-all duration-300 focus:outline-none cursor-pointer ${
+                  isAdding
+                    ? themeColor === "red"
+                      ? "bg-red-500 border-red-500 text-white"
+                      : themeColor === "purple"
+                        ? "bg-violet-500 border-violet-500 text-white"
+                        : themeColor === "teal"
+                          ? "bg-teal-500 border-teal-500 text-white"
+                          : "bg-blue-500 border-blue-500 text-white"
+                    : `bg-neutral-50 border-neutral-200 text-neutral-800 dark:bg-neutral-800/50 dark:border-neutral-800 dark:text-neutral-300 hover:scale-105 active:scale-95 ${
+                        themeColor === "red"
+                          ? "hover:bg-red-500 hover:border-red-500 hover:text-white dark:hover:bg-red-500 dark:hover:border-red-500 dark:hover:text-white shadow-md shadow-red-500/5"
+                          : themeColor === "purple"
+                            ? "hover:bg-violet-500 hover:border-violet-500 hover:text-white dark:hover:bg-violet-500 dark:hover:border-violet-500 dark:hover:text-white shadow-md shadow-violet-500/5"
+                            : themeColor === "teal"
+                              ? "hover:bg-teal-500 hover:border-teal-500 hover:text-white dark:hover:bg-teal-500 dark:hover:border-teal-500 dark:hover:text-white shadow-md shadow-teal-500/5"
+                              : "hover:bg-blue-500 hover:border-blue-500 hover:text-white dark:hover:bg-blue-500 dark:hover:border-blue-500 dark:hover:text-white shadow-md shadow-blue-500/5"
+                      }`
+                }`}
+                whileTap={{ scale: 0.9 }}
+                aria-label="Add directly to cart"
+              >
+                <AnimatePresence mode="wait">
+                  {isAdding ? (
+                    <motion.div
+                      key="added"
+                      initial={{ opacity: 0, scale: 0.7 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.7 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      <Check className="h-4 w-4 stroke-[3]" />
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="add"
+                      initial={{ opacity: 0, scale: 0.7 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.7 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      <Plus className="h-4.5 w-4.5 stroke-[2.5]" />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.button>
+            )}
+          </div>
+        </div>
       </div>
     </Link>
   );

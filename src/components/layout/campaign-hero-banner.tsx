@@ -94,6 +94,34 @@ const slides: CampaignSlide[] = [
       );
     },
   },
+  {
+    id: 3,
+    tag: "NEW BRAND // IVON",
+    title: "UNLEASH THE POWER OF IVON.",
+    description: "Elevate your daily connectivity with IVON's premium chargers, armored data cables, and crystal-clear wireless audio. Designed to charge fast and play clean.",
+    ctaText: "Shop IVON Collection",
+    link: "/products?search=IVON",
+    titleGradientClass: "from-[#06b6d4] via-[#0891b2] to-[#eab308] dark:from-[#22d3ee] dark:via-[#06b6d4] dark:to-[#facc15]",
+    rightGlowGradient: "from-cyan-500/20 via-yellow-500/10 to-transparent dark:from-cyan-500/15 dark:via-yellow-500/20 dark:to-transparent",
+    renderVisual: () => (
+      <motion.div 
+        className="relative w-[160px] h-[160px] sm:w-[200px] sm:h-[200px] rounded-2xl p-4 bg-white shadow-[0_20px_50px_rgba(0,188,212,0.15)] border border-neutral-100 dark:shadow-[0_20px_50px_rgba(0,0,0,0.4)] dark:border-neutral-800 flex items-center justify-center overflow-hidden z-10"
+        animate={{ y: [0, -6, 0] }}
+        transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut" }}
+      >
+        <div className="w-full h-full relative flex items-center justify-center bg-white rounded-xl p-2 overflow-hidden">
+          <Image
+            src="/assets/banners/IVON.jpeg"
+            alt="IVON Brand Logo"
+            fill
+            className="object-contain p-1"
+            sizes="200px"
+            priority
+          />
+        </div>
+      </motion.div>
+    ),
+  },
 ];
 
 const AUTO_PLAY_TIME = 7500;
