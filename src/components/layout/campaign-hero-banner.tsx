@@ -4,7 +4,13 @@ import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from "motion/react";
+import {
+  motion,
+  AnimatePresence,
+  useMotionValue,
+  useSpring,
+  useTransform,
+} from "motion/react";
 import { FloatingPaths } from "@/components/ui/background-paths";
 
 interface CampaignSlide {
@@ -24,13 +30,16 @@ const slides: CampaignSlide[] = [
     id: 1,
     tag: "SPECIAL CAMPAIGN // BNPL",
     title: "BUY NOW. PAY IN 3. 0% INTEREST.",
-    description: "Shop your favorite premium tech products today and split the bill into three interest-free monthly installments at checkout with Koko Pay.",
+    description:
+      "Shop your favorite premium tech products today and split the bill into three interest-free monthly installments at checkout with Koko Pay.",
     ctaText: "Learn more about Koko split payments",
     link: "/coming-soon",
-    titleGradientClass: "from-[#0055ff] via-[#7b2cbf] to-[#ff007f] dark:from-[#00d2ff] dark:via-[#9d4edd] dark:to-[#ff00aa]",
-    rightGlowGradient: "from-cyan-500/20 via-violet-500/25 to-transparent dark:from-cyan-500/15 dark:via-violet-500/20 dark:to-transparent",
+    titleGradientClass:
+      "from-[#0055ff] via-[#7b2cbf] to-[#ff007f] dark:from-[#00d2ff] dark:via-[#9d4edd] dark:to-[#ff00aa]",
+    rightGlowGradient:
+      "from-cyan-500/20 via-violet-500/25 to-transparent dark:from-cyan-500/15 dark:via-violet-500/20 dark:to-transparent",
     renderVisual: () => (
-      <motion.div 
+      <motion.div
         className="relative w-[220px] h-[160px] sm:w-[300px] sm:h-[220px] md:w-[360px] md:h-[240px] flex items-center justify-end z-10"
         animate={{ y: [0, -8, 0] }}
         transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
@@ -50,18 +59,41 @@ const slides: CampaignSlide[] = [
     id: 2,
     tag: "AUTHORISED DEALER // WARRANTY",
     title: "OFFICIAL MANUFACTURER WARRANTY.",
-    description: "Shop with peace of mind. All hardware items are sourced directly from authorized channels and include official warranties and dedicated tech support.",
+    description:
+      "Shop with peace of mind. All hardware items are sourced directly from authorized channels and include official warranties and dedicated tech support.",
     ctaText: "View authorized brand partners",
     link: "/products?filter=brands",
-    titleGradientClass: "from-neutral-900 via-neutral-850 to-neutral-700 dark:from-white dark:via-zinc-300 dark:to-zinc-500",
-    rightGlowGradient: "from-blue-500/15 via-indigo-500/10 to-transparent dark:from-blue-500/10 dark:via-indigo-500/5 dark:to-transparent",
+    titleGradientClass:
+      "from-neutral-900 via-neutral-850 to-neutral-700 dark:from-white dark:via-zinc-300 dark:to-zinc-500",
+    rightGlowGradient:
+      "from-blue-500/15 via-indigo-500/10 to-transparent dark:from-blue-500/10 dark:via-indigo-500/5 dark:to-transparent",
     renderVisual: () => {
       const brands = [
-        { name: "APPLE", desc: "Premium Partner", color: "hover:border-zinc-400 dark:hover:border-white/50" },
-        { name: "LOGITECH", desc: "Gaming Gear", color: "hover:border-blue-500" },
-        { name: "ANKER", desc: "Charging Power", color: "hover:border-teal-500" },
-        { name: "SONY", desc: "Studio Acoustics", color: "hover:border-indigo-500" },
-        { name: "ASUS", desc: "Pure Performance", color: "hover:border-red-500" }
+        {
+          name: "APPLE",
+          desc: "Premium Partner",
+          color: "hover:border-zinc-400 dark:hover:border-white/50",
+        },
+        {
+          name: "LOGITECH",
+          desc: "Gaming Gear",
+          color: "hover:border-blue-500",
+        },
+        {
+          name: "ANKER",
+          desc: "Charging Power",
+          color: "hover:border-teal-500",
+        },
+        {
+          name: "SONY",
+          desc: "Studio Acoustics",
+          color: "hover:border-indigo-500",
+        },
+        {
+          name: "ASUS",
+          desc: "Pure Performance",
+          color: "hover:border-red-500",
+        },
       ];
       return (
         <div className="grid grid-cols-3 gap-3 w-full max-w-[340px] z-10">
@@ -98,13 +130,16 @@ const slides: CampaignSlide[] = [
     id: 3,
     tag: "NEW BRAND // IVON",
     title: "UNLEASH THE POWER OF IVON.",
-    description: "Elevate your daily connectivity with IVON's premium chargers, armored data cables, and crystal-clear wireless audio. Designed to charge fast and play clean.",
+    description:
+      "Elevate your daily connectivity with IVON's premium chargers, armored data cables, and crystal-clear wireless audio. Designed to charge fast and play clean.",
     ctaText: "Shop IVON Collection",
     link: "/products?search=IVON",
-    titleGradientClass: "from-[#06b6d4] via-[#0891b2] to-[#eab308] dark:from-[#22d3ee] dark:via-[#06b6d4] dark:to-[#facc15]",
-    rightGlowGradient: "from-cyan-500/20 via-yellow-500/10 to-transparent dark:from-cyan-500/15 dark:via-yellow-500/20 dark:to-transparent",
+    titleGradientClass:
+      "from-[#06b6d4] via-[#0891b2] to-[#eab308] dark:from-[#22d3ee] dark:via-[#06b6d4] dark:to-[#facc15]",
+    rightGlowGradient:
+      "from-cyan-500/20 via-yellow-500/10 to-transparent dark:from-cyan-500/15 dark:via-yellow-500/20 dark:to-transparent",
     renderVisual: () => (
-      <motion.div 
+      <motion.div
         className="relative w-[160px] h-[160px] sm:w-[200px] sm:h-[200px] rounded-2xl p-4 bg-white shadow-[0_20px_50px_rgba(0,188,212,0.15)] border border-neutral-100 dark:shadow-[0_20px_50px_rgba(0,0,0,0.4)] dark:border-neutral-800 flex items-center justify-center overflow-hidden z-10"
         animate={{ y: [0, -6, 0] }}
         transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut" }}
@@ -230,7 +265,7 @@ export default function CampaignHeroBanner() {
 
   return (
     <section
-      className="relative w-full h-[280px] sm:h-[320px] md:h-[340px] bg-gradient-to-br from-white via-zinc-50 to-neutral-100 dark:from-[#0B0B0F] dark:via-neutral-950 dark:to-[#0B0B0F] border-b border-border overflow-hidden select-none z-10 flex items-center"
+      className="relative w-full h-[340px] sm:h-[350px] md:h-[360px] bg-gradient-to-br from-white via-zinc-50 to-neutral-100 dark:from-[#0B0B0F] dark:via-neutral-950 dark:to-[#0B0B0F] border-b border-border overflow-hidden select-none z-10 flex items-center"
       onMouseEnter={() => setIsPlaying(false)}
       onMouseLeave={handleMouseLeave}
       aria-label="Campaign Promotion Banner"
@@ -241,7 +276,7 @@ export default function CampaignHeroBanner() {
       </div>
 
       {/* Right side ambient radial glow behind visuals */}
-      <div 
+      <div
         className={`absolute right-0 top-1/2 -translate-y-1/2 w-[320px] h-[320px] sm:w-[450px] sm:h-[450px] rounded-full blur-[80px] sm:blur-[130px] pointer-events-none bg-gradient-to-br ${activeSlide.rightGlowGradient} transition-all duration-1000 opacity-90 sm:opacity-85 z-0`}
       />
 
@@ -266,21 +301,74 @@ export default function CampaignHeroBanner() {
             className="absolute inset-0 w-full h-full flex items-center z-10"
           >
             <div className="w-full max-w-7xl mx-auto px-6 sm:px-12 lg:px-16 grid grid-cols-1 md:grid-cols-12 items-center gap-6">
-              
               {/* Text content block */}
               <div className="col-span-1 md:col-span-8 flex flex-col justify-center items-start text-left max-w-2xl">
-                
-
                 {/* Main Headline with Premium Gradient */}
-                <h1 className={`text-xl sm:text-3xl md:text-4xl font-extrabold tracking-tight bg-gradient-to-r ${activeSlide.titleGradientClass} bg-clip-text text-transparent leading-none mb-3.5 uppercase`}>
+                <h1
+                  className={`text-xl sm:text-3xl md:text-4xl font-extrabold tracking-tight bg-gradient-to-r ${activeSlide.titleGradientClass} bg-clip-text text-transparent leading-none mb-3.5 uppercase`}
+                >
                   {activeSlide.title}
                 </h1>
-
                 {/* Subtitle Description */}
-                <p className="text-muted-foreground text-xs sm:text-sm md:text-base leading-relaxed mb-6 max-w-xl font-medium">
+                <p className="text-muted-foreground text-xs sm:text-sm md:text-base leading-relaxed mb-4 lg:mb-6 max-w-xl font-medium">
                   {activeSlide.description}
                 </p>
-
+                {/* Inline Visual for Mobile/Tablet View (Option A) */}
+                <div className="md:hidden w-full mb-5 flex items-center justify-start z-10">
+                  {activeSlide.id === 1 && (
+                    <motion.div
+                      className="relative w-[240px] h-[85px]"
+                      animate={{ y: [0, -4, 0] }}
+                      transition={{
+                        duration: 4,
+                        repeat: Infinity,
+                        ease: "easeInOut",
+                      }}
+                    >
+                      <Image
+                        src="/assets/hero/Slider-Banner-Koko.png"
+                        alt="Koko Pay Split Payments"
+                        fill
+                        priority
+                        sizes="240px"
+                        className="object-contain filter drop-shadow-[0_4px_10px_rgba(123,44,191,0.15)] pointer-events-none"
+                      />
+                    </motion.div>
+                  )}
+                  {activeSlide.id === 2 && (
+                    <div className="flex flex-wrap gap-2.5 max-w-full">
+                      {["APPLE", "LOGITECH", "ANKER", "SONY", "ASUS"].map(
+                        (brand) => (
+                          <div
+                            key={brand}
+                            className="flex items-center justify-center px-3.5 py-1.5 rounded-lg bg-neutral-200/50 dark:bg-neutral-800/40 border border-neutral-300/20 dark:border-neutral-700/20 text-neutral-800 dark:text-neutral-200 text-[11px] sm:text-xs font-black tracking-wider shadow-xs"
+                          >
+                            {brand}
+                          </div>
+                        ),
+                      )}
+                    </div>
+                  )}
+                  {activeSlide.id === 3 && (
+                    <motion.div
+                      className="relative w-[120px] h-[120px] rounded-xl overflow-hidden border border-neutral-100 dark:border-neutral-800 bg-white shadow-sm"
+                      animate={{ y: [0, -3, 0] }}
+                      transition={{
+                        duration: 4.5,
+                        repeat: Infinity,
+                        ease: "easeInOut",
+                      }}
+                    >
+                      <Image
+                        src="/assets/banners/IVON.jpeg"
+                        alt="IVON Brand Logo"
+                        fill
+                        className="object-contain p-1.5"
+                        sizes="120px"
+                      />
+                    </motion.div>
+                  )}
+                </div>{" "}
                 {/* Interactive Premium Styled CTA Button */}
                 <Link
                   href={activeSlide.link}
@@ -289,11 +377,10 @@ export default function CampaignHeroBanner() {
                   {activeSlide.ctaText}
                   <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
                 </Link>
-
               </div>
 
               {/* Graphic/Brand Logotypes block (hidden on mobile/small screens) */}
-              <div 
+              <div
                 className="hidden md:flex md:col-span-4 items-center justify-end z-10 h-full w-full"
                 onMouseMove={handleMouseMove}
               >
@@ -308,7 +395,6 @@ export default function CampaignHeroBanner() {
                   {activeSlide.renderVisual()}
                 </motion.div>
               </div>
-
             </div>
           </motion.div>
         </AnimatePresence>
@@ -323,7 +409,9 @@ export default function CampaignHeroBanner() {
               key={slide.id}
               onClick={() => handleDotClick(index)}
               className={`h-1.5 rounded-full transition-all duration-300 focus:outline-none cursor-pointer ${
-                isActive ? "bg-blue-600 w-5" : "bg-muted-foreground/30 w-1.5 hover:bg-muted-foreground/50"
+                isActive
+                  ? "bg-blue-600 w-5"
+                  : "bg-muted-foreground/30 w-1.5 hover:bg-muted-foreground/50"
               }`}
               aria-label={`Go to slide ${index + 1}`}
             />
@@ -333,12 +421,11 @@ export default function CampaignHeroBanner() {
 
       {/* Auto-running Bottom Progress Bar */}
       <div className="absolute bottom-0 left-0 w-full h-[3px] bg-zinc-200 dark:bg-zinc-800/60 z-30 overflow-hidden">
-        <div 
+        <div
           className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-75 ease-linear"
           style={{ width: `${progress}%` }}
         />
       </div>
-
     </section>
   );
 }

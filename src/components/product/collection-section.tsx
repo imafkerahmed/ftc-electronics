@@ -311,7 +311,7 @@ export default function CollectionSection({
               transition={{ duration: 0.6, delay: 0.2 }}
             >
               {/* Left Side Campaign Banner Card */}
-              <div className={`lg:col-span-3 flex flex-col justify-between items-center p-5 sm:p-6 rounded-xl transition-all duration-300 hover:-translate-y-1 z-10 relative overflow-hidden group select-none min-h-[300px] lg:min-h-full py-8 ${
+              <div className={`lg:col-span-3 flex flex-row lg:flex-col justify-between items-center p-5 sm:p-6 rounded-xl transition-all duration-300 hover:-translate-y-1 z-10 relative overflow-hidden group select-none min-h-[72px] sm:min-h-[80px] lg:min-h-full py-4 lg:py-8 ${
                 config.themeColor === "purple" ? "bg-violet-100/35 dark:bg-violet-950/15 border border-violet-200/50 dark:border-violet-900/30 hover:border-violet-500/35 hover:shadow-[0_10px_20px_rgba(139,92,246,0.04)]" :
                 config.themeColor === "red" ? "bg-red-100/35 dark:bg-red-950/15 border border-red-200/50 dark:border-red-900/30 hover:border-red-500/35 hover:shadow-[0_10px_20px_rgba(239,68,68,0.04)]" :
                 config.themeColor === "teal" ? "bg-teal-100/35 dark:bg-teal-950/15 border border-teal-200/50 dark:border-teal-900/30 hover:border-teal-500/35 hover:shadow-[0_10px_20px_rgba(20,184,166,0.04)]" :
@@ -337,10 +337,10 @@ export default function CollectionSection({
                   }}
                 />
 
-                {/* Center Title (Rotated -90 degrees, flows bottom-to-top) */}
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                {/* Center Title (Rotated -90 degrees on desktop, horizontal on mobile/tablet) */}
+                <div className="relative lg:absolute lg:inset-0 flex items-center justify-start lg:justify-center pointer-events-none z-10">
                   <motion.h3 
-                    className="text-3xl sm:text-4xl lg:text-5xl font-black uppercase tracking-[0.25em] font-sans leading-none whitespace-nowrap -rotate-90"
+                    className="text-lg sm:text-2xl lg:text-5xl font-black uppercase tracking-[0.12em] lg:tracking-[0.25em] font-sans leading-none whitespace-nowrap lg:-rotate-90 transform-none lg:transform"
                     animate={{
                       scale: [0.98, 1.02, 0.98]
                     }}
@@ -412,11 +412,12 @@ export default function CollectionSection({
               {/* Smaller Grid of 6 Products on Right (3 columns, 2 rows) */}
               <div className="lg:col-span-9 grid grid-cols-2 md:grid-cols-3 gap-4 sm:gap-5 items-stretch">
                 {products.slice(0, 6).map((product, idx) => (
-                  <CollectionProductCard
-                    key={product.id || idx}
-                    product={product}
-                    themeColor={config.themeColor}
-                  />
+                  <div key={product.id || idx} className={idx >= 4 ? "hidden md:block" : ""}>
+                    <CollectionProductCard
+                      product={product}
+                      themeColor={config.themeColor}
+                    />
+                  </div>
                 ))}
               </div>
             </motion.div>
@@ -432,7 +433,7 @@ export default function CollectionSection({
               >
                 {/* Countdown Timer Promo Card for Flash Sale */}
                 {layout === "flash-sale" && (
-                  <div className="w-[240px] sm:w-[280px] shrink-0 snap-start flex flex-col justify-between p-6 rounded-2xl bg-gradient-to-br from-red-600 via-pink-600 to-red-700 text-white shadow-lg relative overflow-hidden group select-none border border-red-500/20">
+                  <div className="w-[260px] sm:w-[290px] lg:w-[300px] shrink-0 snap-start flex flex-col justify-between p-6 rounded-2xl bg-gradient-to-br from-red-600 via-pink-600 to-red-700 text-white shadow-lg relative overflow-hidden group select-none border border-red-500/20">
                     {/* Floating ambient blobs */}
                     <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-white/10 blur-xl group-hover:scale-125 transition-transform duration-500" />
 
@@ -495,7 +496,7 @@ export default function CollectionSection({
                 {products.map((product, idx) => (
                   <div
                     key={product.id || idx}
-                    className="w-[calc((100%-24px)/2)] sm:w-[calc((100%-48px)/3)] lg:w-[calc((100%-96px)/4)] shrink-0 snap-start"
+                    className="w-[260px] sm:w-[290px] lg:w-[calc((100%-96px)/4)] shrink-0 snap-start"
                   >
                     <CollectionProductCard
                       product={product}

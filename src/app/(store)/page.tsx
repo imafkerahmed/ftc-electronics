@@ -21,15 +21,14 @@ export default async function StoreHomePage() {
       <div className="w-full">
         <CampaignHeroBanner />
 
-        <BrandLogoTicker />
+        {/* Brand Logo Ticker (Mobile view placement directly below hero slider) */}
+        <BrandLogoTicker className="md:hidden" />
 
-        {/* On Sale Section - Flash Sale Carousel layout with countdown timer */}
+        {/* On Sale Section - Bento Grid layout */}
         <CollectionSection
           title="On-Sale"
-          subtitle="Limited Stocks"
-          badgeBgColor="bg-[#ff0000]"
-          layout="flash-sale"
-          products={onSaleProducts}
+          layout="featured-grid"
+          products={onSaleProducts.slice(0, 6)}
           seeAllLink="/products?filter=on-sale"
         />
 
@@ -48,6 +47,9 @@ export default async function StoreHomePage() {
           products={newArrivalProducts.slice(0, 6)}
           seeAllLink="/products?sortBy=newest"
         />
+
+        {/* Clickable Brand Logo Marquee Ticker (Desktop/tablet view placement below New Arrivals) */}
+        <BrandLogoTicker className="hidden md:flex" />
 
         {/* Category Bento Grid Section */}
         <CategoryBentoGrid />
