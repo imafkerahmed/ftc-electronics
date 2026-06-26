@@ -21,9 +21,6 @@ export default async function StoreHomePage() {
       <div className="w-full">
         <CampaignHeroBanner />
 
-        {/* Brand Logo Ticker (Mobile view placement directly below hero slider) */}
-        <BrandLogoTicker className="md:hidden" />
-
         {/* On Sale Section - Bento Grid layout */}
         <CollectionSection
           title="On-Sale"
@@ -48,8 +45,8 @@ export default async function StoreHomePage() {
           seeAllLink="/products?sortBy=newest"
         />
 
-        {/* Clickable Brand Logo Marquee Ticker (Desktop/tablet view placement below New Arrivals) */}
-        <BrandLogoTicker className="hidden md:flex" />
+        {/* Brand Logo Ticker (Placed below New Arrivals for all screens) */}
+        <BrandLogoTicker />
 
         {/* Category Bento Grid Section */}
         <CategoryBentoGrid />

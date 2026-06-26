@@ -3,14 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
-import {
-  motion,
-  AnimatePresence,
-  useMotionValue,
-  useSpring,
-  useTransform,
-} from "motion/react";
+import { ArrowRight, ChevronLeft, ChevronRight } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 import { FloatingPaths } from "@/components/ui/background-paths";
 
 interface CampaignSlide {
@@ -20,8 +14,9 @@ interface CampaignSlide {
   description: string;
   ctaText: string;
   link: string;
-  titleGradientClass: string;
-  rightGlowGradient: string;
+  gradientClass: string;
+  glowColor: string;
+  accentColor: string;
   renderVisual: () => React.ReactNode;
 }
 
@@ -34,13 +29,12 @@ const slides: CampaignSlide[] = [
       "Shop your favorite premium tech products today and split the bill into three interest-free monthly installments at checkout with Koko Pay.",
     ctaText: "Learn more about Koko split payments",
     link: "/coming-soon",
-    titleGradientClass:
-      "from-[#0055ff] via-[#7b2cbf] to-[#ff007f] dark:from-[#00d2ff] dark:via-[#9d4edd] dark:to-[#ff00aa]",
-    rightGlowGradient:
-      "from-cyan-500/20 via-violet-500/25 to-transparent dark:from-cyan-500/15 dark:via-violet-500/20 dark:to-transparent",
+    gradientClass: "from-white via-violet-50/15 to-violet-100/35 dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950/80",
+    glowColor: "rgba(99, 102, 241, 0.08)", // Indigo
+    accentColor: "#6366f1",
     renderVisual: () => (
       <motion.div
-        className="relative w-[220px] h-[160px] sm:w-[300px] sm:h-[220px] md:w-[360px] md:h-[240px] flex items-center justify-end z-10"
+        className="relative w-[180px] h-[80px] sm:w-[260px] sm:h-[160px] md:w-[320px] md:h-[200px] lg:w-[380px] lg:h-[240px] flex items-center justify-center z-10"
         animate={{ y: [0, -8, 0] }}
         transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
       >
@@ -49,8 +43,8 @@ const slides: CampaignSlide[] = [
           alt="Koko Pay Split Payments"
           fill
           priority
-          sizes="(max-width: 768px) 300px, 400px"
-          className="object-contain filter drop-shadow-[0_10px_30px_rgba(123,44,191,0.25)] pointer-events-none"
+          sizes="(max-width: 640px) 180px, (max-width: 1024px) 260px, 380px"
+          className="object-contain filter drop-shadow-[0_10px_25px_rgba(99,102,241,0.15)] pointer-events-none"
         />
       </motion.div>
     ),
@@ -63,63 +57,42 @@ const slides: CampaignSlide[] = [
       "Shop with peace of mind. All hardware items are sourced directly from authorized channels and include official warranties and dedicated tech support.",
     ctaText: "View authorized brand partners",
     link: "/products?filter=brands",
-    titleGradientClass:
-      "from-neutral-900 via-neutral-850 to-neutral-700 dark:from-white dark:via-zinc-300 dark:to-zinc-500",
-    rightGlowGradient:
-      "from-blue-500/15 via-indigo-500/10 to-transparent dark:from-blue-500/10 dark:via-indigo-500/5 dark:to-transparent",
+    gradientClass: "from-white via-blue-50/15 to-blue-100/35 dark:from-zinc-950 dark:via-zinc-900 dark:to-neutral-900",
+    glowColor: "rgba(59, 130, 246, 0.06)", // Blue
+    accentColor: "#3b82f6",
     renderVisual: () => {
       const brands = [
-        {
-          name: "APPLE",
-          desc: "Premium Partner",
-          color: "hover:border-zinc-400 dark:hover:border-white/50",
-        },
-        {
-          name: "LOGITECH",
-          desc: "Gaming Gear",
-          color: "hover:border-blue-500",
-        },
-        {
-          name: "ANKER",
-          desc: "Charging Power",
-          color: "hover:border-teal-500",
-        },
-        {
-          name: "SONY",
-          desc: "Studio Acoustics",
-          color: "hover:border-indigo-500",
-        },
-        {
-          name: "ASUS",
-          desc: "Pure Performance",
-          color: "hover:border-red-500",
-        },
+        { name: "APPLE", desc: "Partner" },
+        { name: "LOGITECH", desc: "Gaming" },
+        { name: "ANKER", desc: "Charging" },
+        { name: "SONY", desc: "Audio" },
+        { name: "ASUS", desc: "Performance" },
       ];
       return (
-        <div className="grid grid-cols-3 gap-3 w-full max-w-[340px] z-10">
+        <div className="grid grid-cols-3 gap-2 w-full max-w-[240px] sm:max-w-[300px] md:max-w-[340px] z-10">
           {brands.map((brand) => (
             <motion.div
               key={brand.name}
-              whileHover={{ y: -4, scale: 1.03 }}
-              className={`flex flex-col items-center justify-center p-3 rounded-xl bg-white/40 dark:bg-[#121217]/50 border border-neutral-200/50 dark:border-neutral-800/40 backdrop-blur-xs select-none shadow-xs transition-colors duration-300 ${brand.color}`}
+              whileHover={{ y: -3, scale: 1.02 }}
+              className="flex flex-col items-center justify-center p-2 rounded-xl bg-white dark:bg-white/5 border border-neutral-200/80 dark:border-white/10 backdrop-blur-xs select-none shadow-xs text-center"
             >
-              <span className="font-sans font-black tracking-tighter text-neutral-800 dark:text-neutral-200 text-xs">
+              <span className="font-sans font-black tracking-tighter text-neutral-850 dark:text-white text-[10px] sm:text-xs">
                 {brand.name}
               </span>
-              <span className="text-[8px] text-muted-foreground mt-0.5">
+              <span className="text-[7px] sm:text-[9px] text-neutral-500 dark:text-zinc-400 mt-0.5 font-medium">
                 {brand.desc}
               </span>
             </motion.div>
           ))}
           <motion.div
-            whileHover={{ y: -4, scale: 1.03 }}
-            className="flex flex-col items-center justify-center p-3 rounded-xl bg-blue-600/5 dark:bg-blue-500/5 border border-dashed border-blue-600/30 dark:border-blue-500/30 text-blue-600 dark:text-blue-400 cursor-pointer"
+            whileHover={{ y: -3, scale: 1.02 }}
+            className="flex flex-col items-center justify-center p-2 rounded-xl bg-blue-50/50 dark:bg-blue-500/10 border border-dashed border-blue-500/30 text-blue-600 dark:text-blue-400 cursor-pointer text-center animate-pulse"
           >
-            <span className="font-mono font-bold text-[9px] tracking-wider uppercase">
+            <span className="font-mono font-bold text-[8px] sm:text-[10px] tracking-wider uppercase">
               + MORE
             </span>
-            <span className="text-[8px] text-blue-600/70 dark:text-blue-400/70 mt-0.5">
-              Partners
+            <span className="text-[7px] sm:text-[9px] text-blue-500/80 dark:text-blue-400/70 mt-0.5 font-medium">
+              Brands
             </span>
           </motion.div>
         </div>
@@ -134,23 +107,22 @@ const slides: CampaignSlide[] = [
       "Elevate your daily connectivity with IVON's premium chargers, armored data cables, and crystal-clear wireless audio. Designed to charge fast and play clean.",
     ctaText: "Shop IVON Collection",
     link: "/products?search=IVON",
-    titleGradientClass:
-      "from-[#06b6d4] via-[#0891b2] to-[#eab308] dark:from-[#22d3ee] dark:via-[#06b6d4] dark:to-[#facc15]",
-    rightGlowGradient:
-      "from-cyan-500/20 via-yellow-500/10 to-transparent dark:from-cyan-500/15 dark:via-yellow-500/20 dark:to-transparent",
+    gradientClass: "from-white via-cyan-50/15 to-cyan-100/30 dark:from-cyan-950 dark:via-zinc-950 dark:to-neutral-900",
+    glowColor: "rgba(6, 182, 212, 0.08)", // Cyan
+    accentColor: "#06b6d4",
     renderVisual: () => (
       <motion.div
-        className="relative w-[160px] h-[160px] sm:w-[200px] sm:h-[200px] rounded-2xl p-4 bg-white shadow-[0_20px_50px_rgba(0,188,212,0.15)] border border-neutral-100 dark:shadow-[0_20px_50px_rgba(0,0,0,0.4)] dark:border-neutral-800 flex items-center justify-center overflow-hidden z-10"
+        className="relative w-[100px] h-[100px] sm:w-[150px] sm:h-[150px] md:w-[180px] md:h-[180px] rounded-2xl p-3 bg-white border border-neutral-150 dark:border-neutral-800 shadow-md flex items-center justify-center overflow-hidden z-10"
         animate={{ y: [0, -6, 0] }}
         transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut" }}
       >
-        <div className="w-full h-full relative flex items-center justify-center bg-white rounded-xl p-2 overflow-hidden">
+        <div className="w-full h-full relative flex items-center justify-center bg-white rounded-xl overflow-hidden">
           <Image
             src="/assets/banners/IVON.jpeg"
             alt="IVON Brand Logo"
             fill
-            className="object-contain p-1"
-            sizes="200px"
+            className="object-contain p-1.5"
+            sizes="(max-width: 640px) 100px, 180px"
             priority
           />
         </div>
@@ -177,16 +149,21 @@ export default function CampaignHeroBanner() {
     setCurrentIndex((prev) => (prev + 1) % slides.length);
   }, []);
 
+  const handlePrev = useCallback(() => {
+    setDirection(-1);
+    setCurrentIndex((prev) => (prev - 1 + slides.length) % slides.length);
+  }, []);
+
   const handleDotClick = (index: number) => {
     setDirection(index > currentIndex ? 1 : -1);
     setCurrentIndex(index);
   };
 
-  // Autoplay & progress management
+  // Autoplay progress bar logic
   useEffect(() => {
     if (!isPlaying) return;
 
-    const step = 50; // Update every 50ms
+    const step = 50;
     const timer = setInterval(() => {
       setProgress((prev) => {
         const nextVal = prev + (step / AUTO_PLAY_TIME) * 100;
@@ -200,7 +177,6 @@ export default function CampaignHeroBanner() {
     return () => clearInterval(timer);
   }, [isPlaying]);
 
-  // Handle slide transition when progress reaches 100
   useEffect(() => {
     if (progress >= 100) {
       handleNext();
@@ -208,37 +184,11 @@ export default function CampaignHeroBanner() {
     }
   }, [progress, handleNext]);
 
-  // Reset progress when index changes
   useEffect(() => {
     setProgress(0);
   }, [currentIndex]);
 
   const activeSlide = slides[currentIndex];
-
-  // Mouse tilt tracking variables
-  const x = useMotionValue(0.5);
-  const y = useMotionValue(0.5);
-
-  const springConfig = { stiffness: 100, damping: 20 };
-  const rotateX = useSpring(useTransform(y, [0, 1], [10, -10]), springConfig);
-  const rotateY = useSpring(useTransform(x, [0, 1], [-10, 10]), springConfig);
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const width = rect.width;
-    const height = rect.height;
-    const mouseX = (e.clientX - rect.left) / width;
-    const mouseY = (e.clientY - rect.top) / height;
-
-    x.set(mouseX);
-    y.set(mouseY);
-  };
-
-  const handleMouseLeave = () => {
-    x.set(0.5);
-    y.set(0.5);
-    setIsPlaying(true);
-  };
 
   const slideVariants = {
     enter: (dir: number) => ({
@@ -249,47 +199,41 @@ export default function CampaignHeroBanner() {
       x: "0%",
       opacity: 1,
       transition: {
-        x: { type: "spring" as const, stiffness: 150, damping: 22 },
-        opacity: { duration: 0.3 },
+        x: { type: "spring" as const, stiffness: 120, damping: 20 },
+        opacity: { duration: 0.35 },
       },
     },
     exit: (dir: number) => ({
       x: dir > 0 ? "-100%" : "100%",
       opacity: 0,
       transition: {
-        x: { type: "spring" as const, stiffness: 150, damping: 22 },
-        opacity: { duration: 0.3 },
+        x: { type: "spring" as const, stiffness: 120, damping: 20 },
+        opacity: { duration: 0.35 },
       },
     }),
   };
 
   return (
     <section
-      className="relative w-full h-[340px] sm:h-[350px] md:h-[360px] bg-gradient-to-br from-white via-zinc-50 to-neutral-100 dark:from-[#0B0B0F] dark:via-neutral-950 dark:to-[#0B0B0F] border-b border-border overflow-hidden select-none z-10 flex items-center"
+      className={`relative w-full h-[360px] sm:h-[340px] md:h-[300px] lg:h-[320px] bg-gradient-to-br ${activeSlide.gradientClass} overflow-hidden select-none z-10 flex items-center transition-all duration-1000 border-b border-border`}
       onMouseEnter={() => setIsPlaying(false)}
-      onMouseLeave={handleMouseLeave}
+      onMouseLeave={() => setIsPlaying(true)}
       aria-label="Campaign Promotion Banner"
     >
       {/* Floating Animated paths in the background (lowered opacity for elegance) */}
-      <div className="absolute inset-0 z-0 opacity-35 dark:opacity-20 pointer-events-none">
+      <div className="absolute inset-0 z-0 opacity-25 dark:opacity-20 pointer-events-none">
         {mounted && <FloatingPaths position={1} />}
       </div>
 
-      {/* Right side ambient radial glow behind visuals */}
+      {/* Ambient radial glow behind visuals */}
       <div
-        className={`absolute right-0 top-1/2 -translate-y-1/2 w-[320px] h-[320px] sm:w-[450px] sm:h-[450px] rounded-full blur-[80px] sm:blur-[130px] pointer-events-none bg-gradient-to-br ${activeSlide.rightGlowGradient} transition-all duration-1000 opacity-90 sm:opacity-85 z-0`}
+        className="absolute right-0 top-1/2 -translate-y-1/2 w-[280px] h-[280px] sm:w-[450px] sm:h-[450px] rounded-full blur-[80px] sm:blur-[120px] pointer-events-none opacity-90 dark:opacity-85 z-0 transition-all duration-1000"
+        style={{
+          background: `radial-gradient(circle, ${activeSlide.glowColor} 0%, transparent 70%)`,
+        }}
       />
 
-      {/* Background grid fine lines */}
-      <div className="absolute inset-0 grid grid-cols-4 pointer-events-none opacity-20 z-0">
-        <div className="border-r border-border h-full" />
-        <div className="border-r border-border h-full hidden sm:block" />
-        <div className="border-r border-border h-full hidden lg:block" />
-        <div className="h-full" />
-      </div>
-
-      {/* Slide frame wrapper */}
-      <div className="relative w-full h-full z-10">
+      <div className="relative w-full h-full z-10 flex items-center">
         <AnimatePresence initial={false} custom={direction} mode="wait">
           <motion.div
             key={currentIndex}
@@ -298,110 +242,67 @@ export default function CampaignHeroBanner() {
             initial="enter"
             animate="center"
             exit="exit"
-            className="absolute inset-0 w-full h-full flex items-center z-10"
+            className="absolute inset-0 w-full h-full flex items-center"
           >
-            <div className="w-full max-w-7xl mx-auto px-6 sm:px-12 lg:px-16 grid grid-cols-1 md:grid-cols-12 items-center gap-6">
-              {/* Text content block */}
-              <div className="col-span-1 md:col-span-8 flex flex-col justify-center items-start text-left max-w-2xl">
-                {/* Main Headline with Premium Gradient */}
-                <h1
-                  className={`text-xl sm:text-3xl md:text-4xl font-extrabold tracking-tight bg-gradient-to-r ${activeSlide.titleGradientClass} bg-clip-text text-transparent leading-none mb-3.5 uppercase`}
-                >
+            <div className="w-full max-w-7xl mx-auto px-6 sm:px-12 lg:px-16 grid grid-cols-1 sm:grid-cols-2 h-full items-center gap-6 sm:gap-12 lg:gap-16">
+              {/* Text Content Block */}
+              <div className="w-full flex flex-col justify-center items-start text-left order-2 sm:order-1 max-w-lg z-10">
+                {/* Slide Monospace Tag */}
+                <div className="mb-3">
+                  <span className="font-mono text-[9px] font-bold tracking-widest text-neutral-500 dark:text-white/50 border border-neutral-250 dark:border-white/10 px-2.5 py-0.5 rounded-md bg-neutral-100/50 dark:bg-white/5 uppercase">
+                    {activeSlide.tag}
+                  </span>
+                </div>
+
+                {/* Main Headline */}
+                <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-extrabold tracking-tight text-neutral-900 dark:text-white leading-tight mb-3.5 uppercase">
                   {activeSlide.title}
                 </h1>
-                {/* Subtitle Description */}
-                <p className="text-muted-foreground text-xs sm:text-sm md:text-base leading-relaxed mb-4 lg:mb-6 max-w-xl font-medium">
+
+                {/* Description */}
+                <p className="text-neutral-600 dark:text-white/70 text-xs sm:text-sm leading-relaxed mb-5 sm:mb-6 max-w-md font-medium">
                   {activeSlide.description}
                 </p>
-                {/* Inline Visual for Mobile/Tablet View (Option A) */}
-                <div className="md:hidden w-full mb-5 flex items-center justify-start z-10">
-                  {activeSlide.id === 1 && (
-                    <motion.div
-                      className="relative w-[240px] h-[85px]"
-                      animate={{ y: [0, -4, 0] }}
-                      transition={{
-                        duration: 4,
-                        repeat: Infinity,
-                        ease: "easeInOut",
-                      }}
-                    >
-                      <Image
-                        src="/assets/hero/Slider-Banner-Koko.png"
-                        alt="Koko Pay Split Payments"
-                        fill
-                        priority
-                        sizes="240px"
-                        className="object-contain filter drop-shadow-[0_4px_10px_rgba(123,44,191,0.15)] pointer-events-none"
-                      />
-                    </motion.div>
-                  )}
-                  {activeSlide.id === 2 && (
-                    <div className="flex flex-wrap gap-2.5 max-w-full">
-                      {["APPLE", "LOGITECH", "ANKER", "SONY", "ASUS"].map(
-                        (brand) => (
-                          <div
-                            key={brand}
-                            className="flex items-center justify-center px-3.5 py-1.5 rounded-lg bg-neutral-200/50 dark:bg-neutral-800/40 border border-neutral-300/20 dark:border-neutral-700/20 text-neutral-800 dark:text-neutral-200 text-[11px] sm:text-xs font-black tracking-wider shadow-xs"
-                          >
-                            {brand}
-                          </div>
-                        ),
-                      )}
-                    </div>
-                  )}
-                  {activeSlide.id === 3 && (
-                    <motion.div
-                      className="relative w-[120px] h-[120px] rounded-xl overflow-hidden border border-neutral-100 dark:border-neutral-800 bg-white shadow-sm"
-                      animate={{ y: [0, -3, 0] }}
-                      transition={{
-                        duration: 4.5,
-                        repeat: Infinity,
-                        ease: "easeInOut",
-                      }}
-                    >
-                      <Image
-                        src="/assets/banners/IVON.jpeg"
-                        alt="IVON Brand Logo"
-                        fill
-                        className="object-contain p-1.5"
-                        sizes="120px"
-                      />
-                    </motion.div>
-                  )}
-                </div>{" "}
+
                 {/* Interactive Premium Styled CTA Button */}
                 <Link
                   href={activeSlide.link}
-                  className="group inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600/10 hover:bg-blue-600 text-blue-600 hover:text-white dark:bg-blue-500/10 dark:hover:bg-blue-500 dark:text-blue-400 dark:hover:text-white font-bold text-xs sm:text-sm transition-all duration-300 border border-blue-600/20 hover:border-blue-600 dark:border-blue-500/20 dark:hover:border-blue-500 shadow-xs cursor-pointer"
+                  className="group relative z-10 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-white dark:bg-white/10 dark:hover:bg-white dark:text-white dark:hover:text-neutral-950 font-bold text-xs sm:text-sm transition-all duration-300 border border-neutral-900 dark:border-white/20 shadow-xs cursor-pointer"
                 >
                   {activeSlide.ctaText}
                   <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
                 </Link>
               </div>
 
-              {/* Graphic/Brand Logotypes block (hidden on mobile/small screens) */}
-              <div
-                className="hidden md:flex md:col-span-4 items-center justify-end z-10 h-full w-full"
-                onMouseMove={handleMouseMove}
-              >
-                <motion.div
-                  style={{
-                    rotateX,
-                    rotateY,
-                    transformStyle: "preserve-3d",
-                  }}
-                  className="w-full flex justify-end"
-                >
-                  {activeSlide.renderVisual()}
-                </motion.div>
+              {/* Graphic Visual Block */}
+              <div className="w-full flex items-center justify-start sm:justify-center order-1 sm:order-2 relative h-[140px] sm:h-full">
+                {activeSlide.renderVisual()}
               </div>
             </div>
           </motion.div>
         </AnimatePresence>
       </div>
 
-      {/* Center Pagination Dots */}
-      <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-30">
+      {/* Manual Left & Right Navigation Arrows */}
+      <div className="hidden sm:flex absolute top-1/2 -translate-y-1/2 left-6 right-6 justify-between pointer-events-none z-30">
+        <button
+          onClick={handlePrev}
+          className="h-9 w-9 rounded-full border border-neutral-200 dark:border-white/10 bg-white/80 dark:bg-white/5 hover:bg-neutral-50 dark:hover:bg-white/15 backdrop-blur-xs text-neutral-600 dark:text-white flex items-center justify-center cursor-pointer pointer-events-auto transition-all duration-200 hover:scale-105 shadow-xs"
+          aria-label="Previous Slide"
+        >
+          <ChevronLeft className="h-4.5 w-4.5" />
+        </button>
+        <button
+          onClick={handleNext}
+          className="h-9 w-9 rounded-full border border-neutral-200 dark:border-white/10 bg-white/80 dark:bg-white/5 hover:bg-neutral-50 dark:hover:bg-white/15 backdrop-blur-xs text-neutral-600 dark:text-white flex items-center justify-center cursor-pointer pointer-events-auto transition-all duration-200 hover:scale-105 shadow-xs"
+          aria-label="Next Slide"
+        >
+          <ChevronRight className="h-4.5 w-4.5" />
+        </button>
+      </div>
+
+      {/* Slide Pagination Dots */}
+      <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-35">
         {slides.map((slide, index) => {
           const isActive = index === currentIndex;
           return (
@@ -409,9 +310,7 @@ export default function CampaignHeroBanner() {
               key={slide.id}
               onClick={() => handleDotClick(index)}
               className={`h-1.5 rounded-full transition-all duration-300 focus:outline-none cursor-pointer ${
-                isActive
-                  ? "bg-blue-600 w-5"
-                  : "bg-muted-foreground/30 w-1.5 hover:bg-muted-foreground/50"
+                isActive ? "bg-neutral-800 dark:bg-white w-5" : "bg-neutral-200 dark:bg-white/20 w-1.5 hover:bg-neutral-350 dark:hover:bg-white/40"
               }`}
               aria-label={`Go to slide ${index + 1}`}
             />
@@ -419,11 +318,14 @@ export default function CampaignHeroBanner() {
         })}
       </div>
 
-      {/* Auto-running Bottom Progress Bar */}
-      <div className="absolute bottom-0 left-0 w-full h-[3px] bg-zinc-200 dark:bg-zinc-800/60 z-30 overflow-hidden">
+      {/* Bottom Autoplay Progress Bar */}
+      <div className="absolute bottom-0 left-0 w-full h-[2px] bg-neutral-200 dark:bg-white/10 z-30 overflow-hidden">
         <div
-          className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-75 ease-linear"
-          style={{ width: `${progress}%` }}
+          className="h-full transition-all duration-75 ease-linear"
+          style={{
+            width: `${progress}%`,
+            backgroundColor: activeSlide.accentColor,
+          }}
         />
       </div>
     </section>
