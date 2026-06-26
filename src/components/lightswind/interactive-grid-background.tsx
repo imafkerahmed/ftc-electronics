@@ -82,6 +82,7 @@ const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
   const idlePositionsRef = useRef<{ x: number; y: number }[]>([]);
   const mouseActiveRef = useRef(false);
   const lastMouseTimeRef = useRef(0);
+  const isVisibleRef = useRef(true);
 
   // Detect dark mode and custom theme colors
   useEffect(() => {
@@ -97,20 +98,31 @@ const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  // Mouse tracking
+  // Mouse tracking with cached bounding rect to prevent layout thrashing
   useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let rect = container.getBoundingClientRect();
+    let docLeft = rect.left + window.scrollX;
+    let docTop = rect.top + window.scrollY;
+
+    const updateRect = () => {
+      const r = container.getBoundingClientRect();
+      rect = r;
+      docLeft = r.left + window.scrollX;
+      docTop = r.top + window.scrollY;
+    };
+
     const handleMouseMove = (e: MouseEvent) => {
-      const container = containerRef.current;
-      if (!container) return;
-      const rect = container.getBoundingClientRect();
-      const rawX = e.clientX - rect.left;
-      const rawY = e.clientY - rect.top;
+      mouseActiveRef.current = true;
+      lastMouseTimeRef.current = Date.now();
+
+      const rawX = e.pageX - docLeft;
+      const rawY = e.pageY - docTop;
 
       if (rawX < 0 || rawY < 0 || rawX > rect.width || rawY > rect.height)
         return;
-
-      mouseActiveRef.current = true;
-      lastMouseTimeRef.current = Date.now();
 
       const snappedX = Math.floor(rawX / gridSize);
       const snappedY = Math.floor(rawY / gridSize);
@@ -122,11 +134,22 @@ const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
       }
     };
 
-    window.addEventListener("mousemove", handleMouseMove);
-    return () => window.removeEventListener("mousemove", handleMouseMove);
+    const handleMouseEnter = () => {
+      updateRect();
+    };
+
+    container.addEventListener("mousemove", handleMouseMove);
+    container.addEventListener("mouseenter", handleMouseEnter);
+    window.addEventListener("resize", updateRect);
+
+    return () => {
+      container.removeEventListener("mousemove", handleMouseMove);
+      container.removeEventListener("mouseenter", handleMouseEnter);
+      window.removeEventListener("resize", updateRect);
+    };
   }, [gridSize, trailLength]);
 
-  // Drawing and Resizing logic
+  // Drawing, Resizing, and Viewport-visibility logic
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -171,8 +194,11 @@ const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
     idlePositionsRef.current = idleTargetsRef.current.map((p) => ({ ...p }));
 
     let animationId: number;
+    let running = true;
 
     const draw = () => {
+      if (!running || !isVisibleRef.current) return;
+
       ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
       // Draw grid lines
@@ -246,11 +272,38 @@ const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
       animationId = requestAnimationFrame(draw);
     };
 
-    draw();
+    // Intersection Observer to pause rendering when component is not in the viewport
+    const intersectionObserver = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        const isVisible = entry.isIntersecting && entry.intersectionRatio > 0;
+        isVisibleRef.current = isVisible;
+        if (isVisible && running) {
+          cancelAnimationFrame(animationId);
+          draw();
+        }
+      },
+      { threshold: [0, 0.01] }
+    );
+
+    const container = containerRef.current;
+    if (container) {
+      intersectionObserver.observe(container);
+    }
+
+    // Start drawing initially if visible
+    if (isVisibleRef.current) {
+      draw();
+    }
 
     return () => {
-      resizeObserver.disconnect();
+      running = false;
       cancelAnimationFrame(animationId);
+      resizeObserver.disconnect();
+      if (container) {
+        intersectionObserver.unobserve(container);
+      }
+      intersectionObserver.disconnect();
     };
   }, [
     gridSize,

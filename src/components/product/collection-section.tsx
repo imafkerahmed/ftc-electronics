@@ -206,14 +206,14 @@ export default function CollectionSection({
     if (layout !== "featured-grid") return "bg-transparent py-2 sm:py-3";
     switch (config.themeColor) {
       case "purple":
-        return "bg-violet-50/50 dark:bg-violet-950/10 border-y border-violet-100 dark:border-violet-900/20 py-6 sm:py-8";
+        return "bg-violet-50/20 dark:bg-violet-950/5 border-y border-violet-100/30 dark:border-violet-900/10 py-8 sm:py-12";
       case "red":
-        return "bg-red-50/50 dark:bg-red-950/10 border-y border-red-100 dark:border-red-900/20 py-6 sm:py-8";
+        return "bg-red-50/20 dark:bg-red-950/5 border-y border-red-100/30 dark:border-red-900/10 py-8 sm:py-12";
       case "teal":
-        return "bg-teal-50/50 dark:bg-teal-950/10 border-y border-teal-100 dark:border-teal-900/20 py-6 sm:py-8";
+        return "bg-teal-50/20 dark:bg-teal-950/5 border-y border-teal-100/30 dark:border-teal-900/10 py-8 sm:py-12";
       case "blue":
       default:
-        return "bg-blue-50/50 dark:bg-blue-950/10 border-y border-blue-100 dark:border-blue-900/20 py-6 sm:py-8";
+        return "bg-blue-50/20 dark:bg-blue-950/5 border-y border-blue-100/30 dark:border-blue-900/10 py-8 sm:py-12";
     }
   };
 
@@ -303,123 +303,127 @@ export default function CollectionSection({
               ))}
             </motion.div>
           ) : layout === "featured-grid" ? (
-            /* Asymmetric Featured Bento Grid Layout */
+            /* Integrated Bento Grid Layout */
             <motion.div
-              className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 items-stretch"
+              className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6 items-stretch"
               initial={{ opacity: 0, y: 20 }}
               animate={isInView ? { opacity: 1, y: 0 } : {}}
               transition={{ duration: 0.6, delay: 0.2 }}
             >
-              {/* Left Side Campaign Banner Card */}
-              <div className={`lg:col-span-3 flex flex-row lg:flex-col justify-between items-center p-5 sm:p-6 rounded-xl transition-all duration-300 hover:-translate-y-1 z-10 relative overflow-hidden group select-none min-h-[72px] sm:min-h-[80px] lg:min-h-full py-4 lg:py-8 ${
-                config.themeColor === "purple" ? "bg-violet-100/35 dark:bg-violet-950/15 border border-violet-200/50 dark:border-violet-900/30 hover:border-violet-500/35 hover:shadow-[0_10px_20px_rgba(139,92,246,0.04)]" :
-                config.themeColor === "red" ? "bg-red-100/35 dark:bg-red-950/15 border border-red-200/50 dark:border-red-900/30 hover:border-red-500/35 hover:shadow-[0_10px_20px_rgba(239,68,68,0.04)]" :
-                config.themeColor === "teal" ? "bg-teal-100/35 dark:bg-teal-950/15 border border-teal-200/50 dark:border-teal-900/30 hover:border-teal-500/35 hover:shadow-[0_10px_20px_rgba(20,184,166,0.04)]" :
-                "bg-blue-100/35 dark:bg-blue-950/15 border border-blue-200/50 dark:border-blue-900/30 hover:border-blue-500/35 hover:shadow-[0_10px_20px_rgba(59,130,246,0.04)]"
+              {/* Campaign Card Embedded inside the Grid */}
+              <div className={`col-span-2 md:col-span-3 lg:col-span-2 flex flex-col justify-between p-6 sm:p-8 rounded-3xl transition-all duration-500 hover:-translate-y-1.5 z-10 relative overflow-hidden group select-none min-h-[220px] border ${
+                config.themeColor === "purple" ? "bg-violet-50/60 dark:bg-violet-950/10 border-violet-200/40 dark:border-violet-900/20 hover:border-violet-500/30 hover:shadow-[0_20px_40px_rgba(139,92,246,0.03)]" :
+                config.themeColor === "red" ? "bg-red-50/60 dark:bg-red-950/10 border-red-200/40 dark:border-red-900/20 hover:border-red-500/30 hover:shadow-[0_20px_40px_rgba(239,68,68,0.03)]" :
+                config.themeColor === "teal" ? "bg-teal-50/60 dark:bg-teal-950/10 border-teal-200/40 dark:border-teal-900/20 hover:border-teal-500/30 hover:shadow-[0_20px_40px_rgba(20,184,166,0.03)]" :
+                "bg-blue-50/60 dark:bg-blue-950/10 border-blue-200/40 dark:border-blue-900/20 hover:border-blue-500/30 hover:shadow-[0_20px_40px_rgba(59,130,246,0.03)]"
               }`}>
                 
+                {/* Background Tech Grid Pattern */}
+                <div className="absolute inset-0 opacity-20 dark:opacity-10 bg-[linear-gradient(rgba(0,0,0,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.03)_1px,transparent_1px)] dark:bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:16px_16px] pointer-events-none -z-10" />
+
+                {/* Diagonal gloss reflection overlay */}
+                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none -z-5">
+                  <div className="absolute -inset-x-40 top-0 bottom-0 bg-gradient-to-r from-transparent via-white/20 dark:via-white/5 to-transparent -skew-x-25 translate-x-[-100%] group-hover:translate-x-[200%] transition-transform duration-[1200ms] ease-in-out" />
+                </div>
+
                 {/* Background light glow matching the product card subtle hover glows */}
                 <motion.div 
-                  className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 rounded-full blur-[60px] pointer-events-none -z-10 ${
+                  className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full blur-[80px] pointer-events-none -z-10 ${
                     config.themeColor === "purple" ? "bg-violet-500/10 dark:bg-violet-500/5" :
                     config.themeColor === "red" ? "bg-red-500/10 dark:bg-red-500/5" :
                     config.themeColor === "teal" ? "bg-teal-500/10 dark:bg-teal-500/5" :
                     "bg-blue-500/10 dark:bg-blue-500/5"
                   }`}
                   animate={{
-                    scale: [1, 1.2, 1],
-                    opacity: [0.6, 0.9, 0.6]
+                    y: [-15, 15, -15],
+                    x: [-10, 10, -10],
+                    scale: [1, 1.15, 1]
                   }}
                   transition={{
-                    duration: 8,
+                    duration: 7,
                     repeat: Infinity,
                     ease: "easeInOut"
                   }}
                 />
 
-                {/* Center Title (Rotated -90 degrees on desktop, horizontal on mobile/tablet) */}
-                <div className="relative lg:absolute lg:inset-0 flex items-center justify-start lg:justify-center pointer-events-none z-10">
-                  <motion.h3 
-                    className="text-lg sm:text-2xl lg:text-5xl font-black uppercase tracking-[0.12em] lg:tracking-[0.25em] font-sans leading-none whitespace-nowrap lg:-rotate-90 transform-none lg:transform"
-                    animate={{
-                      scale: [0.98, 1.02, 0.98]
-                    }}
-                    transition={{
-                      duration: 4,
-                      repeat: Infinity,
-                      ease: "easeInOut"
-                    }}
-                  >
-                    <GradientText
-                      colors={
-                        config.themeColor === "purple" ? ["#a855f7", "#ec4899", "#6366f1", "#a855f7"] :
-                        config.themeColor === "red" ? ["#ef4444", "#f97316", "#e11d48", "#ef4444"] :
-                        config.themeColor === "teal" ? ["#14b8a6", "#06b6d4", "#10b981", "#14b8a6"] :
-                        ["#3b82f6", "#06b6d4", "#2563eb", "#3b82f6"]
-                      }
-                      animationSpeed={6}
-                      showBorder={false}
-                      className="!p-0 !m-0 !cursor-default !bg-transparent !rounded-none !overflow-visible border-none select-none font-black"
-                    >
-                      {title}
-                    </GradientText>
-                  </motion.h3>
-                </div>
+                <div className="flex flex-col h-full justify-between gap-6 z-10 relative">
+                  {/* Top content: Badge and Title */}
+                  <div className="flex flex-col items-start gap-2.5">
+                    {/* Title */}
+                    <h3 className="text-xl sm:text-2xl md:text-3.5xl font-black uppercase tracking-[0.05em] font-sans leading-none text-left mt-1.5">
+                      <GradientText
+                        colors={
+                          config.themeColor === "purple" ? ["#a855f7", "#ec4899", "#6366f1", "#a855f7"] :
+                          config.themeColor === "red" ? ["#ef4444", "#f97316", "#e11d48", "#ef4444"] :
+                          config.themeColor === "teal" ? ["#14b8a6", "#06b6d4", "#10b981", "#14b8a6"] :
+                          ["#3b82f6", "#06b6d4", "#2563eb", "#3b82f6"]
+                        }
+                        animationSpeed={6}
+                        showBorder={false}
+                        className="!p-0 !m-0 !cursor-default !bg-transparent !rounded-none !overflow-visible border-none select-none font-black"
+                      >
+                        {title}
+                      </GradientText>
+                    </h3>
 
-                {/* Bottom CTA Button */}
-                <Link href={seeAllLink} className="relative z-10 mt-2 block">
-                  <motion.button 
-                    initial="initial"
-                    whileHover="hover"
-                    className="group relative inline-flex items-center gap-1.5 pb-1 focus:outline-none cursor-pointer text-[10px] font-black uppercase tracking-widest text-neutral-850 dark:text-neutral-200 transition-colors duration-300 select-none"
-                    whileTap={{ scale: 0.98 }}
-                    aria-label="Explore Collection"
-                  >
-                    <span>Explore Now</span>
-                    <motion.span
-                      variants={{
-                        initial: { x: 0 },
-                        hover: { x: 3 }
-                      }}
-                      transition={{ type: "spring", stiffness: 400, damping: 12 }}
-                    >
-                      <ChevronRight className={`h-3.5 w-3.5 stroke-[3] transition-colors duration-300 ${
-                        config.themeColor === "purple" ? "text-violet-500" :
-                        config.themeColor === "red" ? "text-red-500" :
-                        config.themeColor === "teal" ? "text-teal-550" :
-                        "text-blue-500"
-                      }`} />
-                    </motion.span>
-                    
-                    {/* Interactive expanding underline */}
-                    <motion.span 
-                      className={`absolute bottom-0 left-0 h-[2px] rounded-full ${
-                        config.themeColor === "purple" ? "bg-violet-500" :
-                        config.themeColor === "red" ? "bg-red-500" :
-                        config.themeColor === "teal" ? "bg-teal-550" :
-                        "bg-blue-500"
-                      }`}
-                      variants={{
-                        initial: { width: "0%" },
-                        hover: { width: "100%" }
-                      }}
-                      transition={{ duration: 0.3, ease: "easeInOut" }}
-                    />
-                  </motion.button>
-                </Link>
-              </div>
-
-              {/* Smaller Grid of 6 Products on Right (3 columns, 2 rows) */}
-              <div className="lg:col-span-9 grid grid-cols-2 md:grid-cols-3 gap-4 sm:gap-5 items-stretch">
-                {products.slice(0, 6).map((product, idx) => (
-                  <div key={product.id || idx} className={idx >= 4 ? "hidden md:block" : ""}>
-                    <CollectionProductCard
-                      product={product}
-                      themeColor={config.themeColor}
-                    />
+                    {/* Description */}
+                    <p className="text-xs sm:text-sm text-neutral-600 dark:text-neutral-400 font-medium max-w-sm mt-1.5 leading-relaxed">
+                      {config.defaultSubtitle}. Discover premium hardware with guaranteed performance, curated details, and exclusive checkout options.
+                    </p>
                   </div>
-                ))}
+
+                  {/* Bottom content: Explore Now CTA Link */}
+                  <Link href={seeAllLink} className="relative block shrink-0 mt-4">
+                    <motion.button 
+                      initial="initial"
+                      whileHover="hover"
+                      className="group relative inline-flex items-center gap-1.5 pb-1 focus:outline-none cursor-pointer text-[10px] font-black uppercase tracking-widest text-neutral-850 dark:text-neutral-200 transition-colors duration-300 select-none"
+                      whileTap={{ scale: 0.98 }}
+                      aria-label="Explore Collection"
+                    >
+                      <span>Explore Collection</span>
+                      <motion.span
+                        variants={{
+                          initial: { x: 0 },
+                          hover: { x: 3 }
+                        }}
+                        transition={{ type: "spring", stiffness: 400, damping: 12 }}
+                      >
+                        <ChevronRight className={`h-3.5 w-3.5 stroke-[3] transition-colors duration-300 ${
+                          config.themeColor === "purple" ? "text-violet-500" :
+                          config.themeColor === "red" ? "text-red-500" :
+                          config.themeColor === "teal" ? "text-teal-555" :
+                          "text-blue-500"
+                        }`} />
+                      </motion.span>
+                      
+                      {/* Interactive expanding underline */}
+                      <motion.span 
+                        className={`absolute bottom-0 left-0 h-[2px] rounded-full ${
+                          config.themeColor === "purple" ? "bg-violet-500" :
+                          config.themeColor === "red" ? "bg-red-500" :
+                          config.themeColor === "teal" ? "bg-teal-555" :
+                          "bg-blue-500"
+                        }`}
+                        variants={{
+                          initial: { width: "0%" },
+                          hover: { width: "100%" }
+                        }}
+                        transition={{ duration: 0.3, ease: "easeInOut" }}
+                      />
+                    </motion.button>
+                  </Link>
+                </div>
               </div>
+
+              {/* Grid of Product Cards */}
+              {products.slice(0, 6).map((product, idx) => (
+                <CollectionProductCard
+                  key={product.id || idx}
+                  product={product}
+                  themeColor={config.themeColor}
+                />
+              ))}
             </motion.div>
           ) : (
             /* Carousel Display with 1 row scrolling horizontally (Supports flash-sale promo card injections) */

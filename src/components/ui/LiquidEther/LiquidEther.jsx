@@ -4,6 +4,36 @@ import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import './LiquidEther.css';
 
+function makePaletteTexture(stops) {
+  let arr;
+  if (Array.isArray(stops) && stops.length > 0) {
+    if (stops.length === 1) {
+      arr = [stops[0], stops[0]];
+    } else {
+      arr = stops;
+    }
+  } else {
+    arr = ['#ffffff', '#ffffff'];
+  }
+  const w = arr.length;
+  const data = new Uint8Array(w * 4);
+  for (let i = 0; i < w; i++) {
+    const c = new THREE.Color(arr[i]);
+    data[i * 4 + 0] = Math.round(c.r * 255);
+    data[i * 4 + 1] = Math.round(c.g * 255);
+    data[i * 4 + 2] = Math.round(c.b * 255);
+    data[i * 4 + 3] = 255;
+  }
+  const tex = new THREE.DataTexture(data, w, 1, THREE.RGBAFormat);
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.generateMipmaps = false;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 export default function LiquidEther({
   mouseForce = 20,
   cursorSize = 100,
@@ -32,39 +62,10 @@ export default function LiquidEther({
   const intersectionObserverRef = useRef(null);
   const isVisibleRef = useRef(true);
   const resizeRafRef = useRef(null);
+  const colorsStrRef = useRef('');
 
   useEffect(() => {
     if (!mountRef.current) return;
-
-    function makePaletteTexture(stops) {
-      let arr;
-      if (Array.isArray(stops) && stops.length > 0) {
-        if (stops.length === 1) {
-          arr = [stops[0], stops[0]];
-        } else {
-          arr = stops;
-        }
-      } else {
-        arr = ['#ffffff', '#ffffff'];
-      }
-      const w = arr.length;
-      const data = new Uint8Array(w * 4);
-      for (let i = 0; i < w; i++) {
-        const c = new THREE.Color(arr[i]);
-        data[i * 4 + 0] = Math.round(c.r * 255);
-        data[i * 4 + 1] = Math.round(c.g * 255);
-        data[i * 4 + 2] = Math.round(c.b * 255);
-        data[i * 4 + 3] = 255;
-      }
-      const tex = new THREE.DataTexture(data, w, 1, THREE.RGBAFormat);
-      tex.magFilter = THREE.LinearFilter;
-      tex.minFilter = THREE.LinearFilter;
-      tex.wrapS = THREE.ClampToEdgeWrapping;
-      tex.wrapT = THREE.ClampToEdgeWrapping;
-      tex.generateMipmaps = false;
-      tex.needsUpdate = true;
-      return tex;
-    }
 
     const paletteTex = makePaletteTexture(colors);
     const bgVec4 = new THREE.Vector4(0, 0, 0, 0); // always transparent
@@ -140,97 +141,113 @@ export default function LiquidEther({
         this._onTouchMove = this.onDocumentTouchMove.bind(this);
         this._onTouchEnd = this.onTouchEnd.bind(this);
         this._onDocumentLeave = this.onDocumentLeave.bind(this);
+        this.rect = null;
+        this.docLeft = 0;
+        this.docTop = 0;
+        this._onResize = () => {
+          if (!this.container) return;
+          this.rect = this.container.getBoundingClientRect();
+          this.docLeft = this.rect.left + (window.scrollX || 0);
+          this.docTop = this.rect.top + (window.scrollY || 0);
+        };
       }
       init(container) {
         this.container = container;
         this.docTarget = container.ownerDocument || null;
         const defaultView =
           (this.docTarget && this.docTarget.defaultView) || (typeof window !== 'undefined' ? window : null);
-        if (!defaultView) return;
         this.listenerTarget = defaultView;
-        this.listenerTarget.addEventListener('mousemove', this._onMouseMove);
-        this.listenerTarget.addEventListener('touchstart', this._onTouchStart, { passive: true });
-        this.listenerTarget.addEventListener('touchmove', this._onTouchMove, { passive: true });
-        this.listenerTarget.addEventListener('touchend', this._onTouchEnd);
-        if (this.docTarget) {
-          this.docTarget.addEventListener('mouseleave', this._onDocumentLeave);
+
+        // Initialize positions
+        this._onResize();
+
+        // Listeners on container instead of window
+        this.container.addEventListener('mousemove', this._onMouseMove);
+        this.container.addEventListener('mouseenter', this._onResize);
+        this.container.addEventListener('mouseleave', this._onDocumentLeave);
+        this.container.addEventListener('touchstart', this._onTouchStart, { passive: true });
+        this.container.addEventListener('touchmove', this._onTouchMove, { passive: true });
+        this.container.addEventListener('touchend', this._onTouchEnd);
+        
+        if (defaultView) {
+          defaultView.addEventListener('resize', this._onResize);
         }
       }
       dispose() {
-        if (this.listenerTarget) {
-          this.listenerTarget.removeEventListener('mousemove', this._onMouseMove);
-          this.listenerTarget.removeEventListener('touchstart', this._onTouchStart);
-          this.listenerTarget.removeEventListener('touchmove', this._onTouchMove);
-          this.listenerTarget.removeEventListener('touchend', this._onTouchEnd);
+        if (this.container) {
+          this.container.removeEventListener('mousemove', this._onMouseMove);
+          this.container.removeEventListener('mouseenter', this._onResize);
+          this.container.removeEventListener('mouseleave', this._onDocumentLeave);
+          this.container.removeEventListener('touchstart', this._onTouchStart);
+          this.container.removeEventListener('touchmove', this._onTouchMove);
+          this.container.removeEventListener('touchend', this._onTouchEnd);
         }
-        if (this.docTarget) {
-          this.docTarget.removeEventListener('mouseleave', this._onDocumentLeave);
+        if (this.listenerTarget) {
+          this.listenerTarget.removeEventListener('resize', this._onResize);
         }
         this.listenerTarget = null;
         this.docTarget = null;
         this.container = null;
-      }
-      isPointInside(clientX, clientY) {
-        if (!this.container) return false;
-        const rect = this.container.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) return false;
-        return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
-      }
-      updateHoverState(clientX, clientY) {
-        this.isHoverInside = this.isPointInside(clientX, clientY);
-        return this.isHoverInside;
-      }
-      setCoords(x, y) {
-        if (!this.container) return;
-        if (this.timer) window.clearTimeout(this.timer);
-        const rect = this.container.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) return;
-        const nx = (x - rect.left) / rect.width;
-        const ny = (y - rect.top) / rect.height;
-        this.coords.set(nx * 2 - 1, -(ny * 2 - 1));
-        this.mouseMoved = true;
-        this.timer = window.setTimeout(() => {
-          this.mouseMoved = false;
-        }, 100);
       }
       setNormalized(nx, ny) {
         this.coords.set(nx, ny);
         this.mouseMoved = true;
       }
       onDocumentMouseMove(event) {
-        if (!this.updateHoverState(event.clientX, event.clientY)) return;
+        this.isHoverInside = true;
         if (this.onInteract) this.onInteract();
+        
+        const rawX = event.pageX - this.docLeft;
+        const rawY = event.pageY - this.docTop;
+
         if (this.isAutoActive && !this.hasUserControl && !this.takeoverActive) {
-          if (!this.container) return;
-          const rect = this.container.getBoundingClientRect();
-          if (rect.width === 0 || rect.height === 0) return;
-          const nx = (event.clientX - rect.left) / rect.width;
-          const ny = (event.clientY - rect.top) / rect.height;
           this.takeoverFrom.copy(this.coords);
-          this.takeoverTo.set(nx * 2 - 1, -(ny * 2 - 1));
+          this.takeoverTo.set((rawX / this.rect.width) * 2 - 1, -((rawY / this.rect.height) * 2 - 1));
           this.takeoverStartTime = performance.now();
           this.takeoverActive = true;
           this.hasUserControl = true;
           this.isAutoActive = false;
           return;
         }
-        this.setCoords(event.clientX, event.clientY);
+
+        const nx = rawX / this.rect.width;
+        const ny = rawY / this.rect.height;
+        this.coords.set(nx * 2 - 1, -(ny * 2 - 1));
+        this.mouseMoved = true;
+        if (this.timer) window.clearTimeout(this.timer);
+        this.timer = window.setTimeout(() => {
+          this.mouseMoved = false;
+        }, 100);
+
         this.hasUserControl = true;
       }
       onDocumentTouchStart(event) {
         if (event.touches.length !== 1) return;
         const t = event.touches[0];
-        if (!this.updateHoverState(t.clientX, t.clientY)) return;
+        this.isHoverInside = true;
         if (this.onInteract) this.onInteract();
-        this.setCoords(t.clientX, t.clientY);
+        
+        const rawX = t.pageX - this.docLeft;
+        const rawY = t.pageY - this.docTop;
+        const nx = rawX / this.rect.width;
+        const ny = rawY / this.rect.height;
+        this.coords.set(nx * 2 - 1, -(ny * 2 - 1));
+        this.mouseMoved = true;
+        
         this.hasUserControl = true;
       }
       onDocumentTouchMove(event) {
         if (event.touches.length !== 1) return;
         const t = event.touches[0];
-        if (!this.updateHoverState(t.clientX, t.clientY)) return;
+        this.isHoverInside = true;
         if (this.onInteract) this.onInteract();
-        this.setCoords(t.clientX, t.clientY);
+        
+        const rawX = t.pageX - this.docLeft;
+        const rawY = t.pageY - this.docTop;
+        const nx = rawX / this.rect.width;
+        const ny = rawY / this.rect.height;
+        this.coords.set(nx * 2 - 1, -(ny * 2 - 1));
+        this.mouseMoved = true;
       }
       onTouchEnd() {
         this.isHoverInside = false;
@@ -1096,25 +1113,7 @@ export default function LiquidEther({
       }
       webglRef.current = null;
     };
-  }, [
-    BFECC,
-    cursorSize,
-    dt,
-    isBounce,
-    isViscous,
-    iterationsPoisson,
-    iterationsViscous,
-    mouseForce,
-    resolution,
-    viscous,
-    colors,
-    autoDemo,
-    autoSpeed,
-    autoIntensity,
-    takeoverDuration,
-    autoResumeDelay,
-    autoRampDuration
-  ]);
+  }, []);
 
   useEffect(() => {
     const webgl = webglRef.current;
@@ -1147,6 +1146,17 @@ export default function LiquidEther({
     if (resolution !== prevRes) {
       sim.resize();
     }
+    if (colors && webgl.output?.output?.material?.uniforms?.palette) {
+      const colorsStr = colors ? colors.join(',') : '';
+      if (colorsStr !== colorsStrRef.current) {
+        colorsStrRef.current = colorsStr;
+        const oldTex = webgl.output.output.material.uniforms.palette.value;
+        if (oldTex) {
+          oldTex.dispose();
+        }
+        webgl.output.output.material.uniforms.palette.value = makePaletteTexture(colors);
+      }
+    }
   }, [
     mouseForce,
     cursorSize,
@@ -1163,7 +1173,8 @@ export default function LiquidEther({
     autoIntensity,
     takeoverDuration,
     autoResumeDelay,
-    autoRampDuration
+    autoRampDuration,
+    colors
   ]);
 
   return <div ref={mountRef} className={`liquid-ether-container ${className || ''}`} style={style} />;

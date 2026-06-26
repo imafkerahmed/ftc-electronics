@@ -5,17 +5,16 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, ChevronLeft, ChevronRight } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { FloatingPaths } from "@/components/ui/background-paths";
+import LiquidEther from "@/components/ui/LiquidEther/LiquidEther";
 
 interface CampaignSlide {
   id: number;
-  tag: string;
-  title: string;
+  titlePrefix: string;
+  titleHighlight: string;
+  highlightGradient: string;
   description: string;
   ctaText: string;
   link: string;
-  gradientClass: string;
-  glowColor: string;
   accentColor: string;
   renderVisual: () => React.ReactNode;
 }
@@ -23,42 +22,43 @@ interface CampaignSlide {
 const slides: CampaignSlide[] = [
   {
     id: 1,
-    tag: "SPECIAL CAMPAIGN // BNPL",
-    title: "BUY NOW. PAY IN 3. 0% INTEREST.",
+    titlePrefix: "BUY NOW. ",
+    titleHighlight: "PAY IN 3. 0% INTEREST.",
+    highlightGradient: "from-violet-600 via-indigo-600 to-cyan-600",
     description:
       "Shop your favorite premium tech products today and split the bill into three interest-free monthly installments at checkout with Koko Pay.",
     ctaText: "Learn more about Koko split payments",
     link: "/coming-soon",
-    gradientClass: "from-white via-violet-50/15 to-violet-100/35 dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950/80",
-    glowColor: "rgba(99, 102, 241, 0.08)", // Indigo
     accentColor: "#6366f1",
     renderVisual: () => (
-      <motion.div
-        className="relative w-[180px] h-[80px] sm:w-[260px] sm:h-[160px] md:w-[320px] md:h-[200px] lg:w-[380px] lg:h-[240px] flex items-center justify-center z-10"
-        animate={{ y: [0, -8, 0] }}
-        transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-      >
-        <Image
-          src="/assets/hero/Slider-Banner-Koko.png"
-          alt="Koko Pay Split Payments"
-          fill
-          priority
-          sizes="(max-width: 640px) 180px, (max-width: 1024px) 260px, 380px"
-          className="object-contain filter drop-shadow-[0_10px_25px_rgba(99,102,241,0.15)] pointer-events-none"
-        />
-      </motion.div>
+      <div className="relative w-full h-full flex items-center justify-center">
+        <motion.div
+          className="relative w-[190px] h-[95px] sm:w-[270px] sm:h-[135px] md:w-[320px] md:h-[160px] lg:w-[360px] lg:h-[180px] flex items-center justify-center z-10"
+          animate={{ y: [0, -8, 0] }}
+          transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut" }}
+        >
+          <div className="absolute inset-0 bg-gradient-to-r from-violet-500/20 to-indigo-500/20 rounded-full blur-[40px] pointer-events-none scale-75 opacity-60" />
+          <Image
+            src="/assets/hero/Slider-Banner-Koko.png"
+            alt="Koko Pay Split Payments"
+            fill
+            priority
+            sizes="(max-width: 640px) 190px, (max-width: 1024px) 270px, 360px"
+            className="object-contain filter drop-shadow-[0_12px_24px_rgba(99,102,241,0.25)] pointer-events-none select-none"
+          />
+        </motion.div>
+      </div>
     ),
   },
   {
     id: 2,
-    tag: "AUTHORISED DEALER // WARRANTY",
-    title: "OFFICIAL MANUFACTURER WARRANTY.",
+    titlePrefix: "OFFICIAL ",
+    titleHighlight: "MANUFACTURER WARRANTY.",
+    highlightGradient: "from-blue-600 to-sky-500",
     description:
       "Shop with peace of mind. All hardware items are sourced directly from authorized channels and include official warranties and dedicated tech support.",
     ctaText: "View authorized brand partners",
     link: "/products?filter=brands",
-    gradientClass: "from-white via-blue-50/15 to-blue-100/35 dark:from-zinc-950 dark:via-zinc-900 dark:to-neutral-900",
-    glowColor: "rgba(59, 130, 246, 0.06)", // Blue
     accentColor: "#3b82f6",
     renderVisual: () => {
       const brands = [
@@ -69,31 +69,37 @@ const slides: CampaignSlide[] = [
         { name: "ASUS", desc: "Performance" },
       ];
       return (
-        <div className="grid grid-cols-3 gap-2 w-full max-w-[240px] sm:max-w-[300px] md:max-w-[340px] z-10">
-          {brands.map((brand) => (
-            <motion.div
-              key={brand.name}
-              whileHover={{ y: -3, scale: 1.02 }}
-              className="flex flex-col items-center justify-center p-2 rounded-xl bg-white dark:bg-white/5 border border-neutral-200/80 dark:border-white/10 backdrop-blur-xs select-none shadow-xs text-center"
-            >
-              <span className="font-sans font-black tracking-tighter text-neutral-850 dark:text-white text-[10px] sm:text-xs">
-                {brand.name}
-              </span>
-              <span className="text-[7px] sm:text-[9px] text-neutral-500 dark:text-zinc-400 mt-0.5 font-medium">
-                {brand.desc}
-              </span>
-            </motion.div>
-          ))}
+        <div className="relative w-full h-full flex items-center justify-center">
           <motion.div
-            whileHover={{ y: -3, scale: 1.02 }}
-            className="flex flex-col items-center justify-center p-2 rounded-xl bg-blue-50/50 dark:bg-blue-500/10 border border-dashed border-blue-500/30 text-blue-600 dark:text-blue-400 cursor-pointer text-center animate-pulse"
+            className="relative grid grid-cols-3 gap-2 sm:gap-3 w-full max-w-[240px] sm:max-w-[320px] md:max-w-[360px] z-10 select-none pointer-events-none"
+            animate={{ y: [0, -6, 0] }}
+            transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
           >
-            <span className="font-mono font-bold text-[8px] sm:text-[10px] tracking-wider uppercase">
-              + MORE
-            </span>
-            <span className="text-[7px] sm:text-[9px] text-blue-500/80 dark:text-blue-400/70 mt-0.5 font-medium">
-              Brands
-            </span>
+            <div className="absolute inset-0 bg-blue-500/5 rounded-full blur-[45px] pointer-events-none scale-75 opacity-55" />
+            {brands.map((brand, i) => (
+              <motion.div
+                key={brand.name}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, delay: i * 0.05 }}
+                className="relative flex flex-col items-center justify-center p-2.5 rounded-xl sm:rounded-2xl bg-white/60 border border-neutral-200/80 backdrop-blur-xs text-center shadow-xs"
+              >
+                <span className="font-mono text-[9px] sm:text-xs font-black tracking-widest text-neutral-800">
+                  {brand.name}
+                </span>
+                <span className="text-[6px] sm:text-[8px] text-neutral-500 mt-1 font-bold tracking-wider uppercase">
+                  {brand.desc}
+                </span>
+              </motion.div>
+            ))}
+            <div className="relative flex flex-col items-center justify-center p-2.5 rounded-xl sm:rounded-2xl bg-blue-50/40 border border-dashed border-blue-300/60 text-blue-600 text-center animate-pulse backdrop-blur-xs shadow-xs">
+              <span className="font-mono font-black text-[8px] sm:text-[10px] tracking-wider">
+                + MORE
+              </span>
+              <span className="text-[6px] sm:text-[8px] text-blue-500 mt-1 font-bold tracking-wider uppercase">
+                Brands
+              </span>
+            </div>
           </motion.div>
         </div>
       );
@@ -101,47 +107,68 @@ const slides: CampaignSlide[] = [
   },
   {
     id: 3,
-    tag: "NEW BRAND // IVON",
-    title: "UNLEASH THE POWER OF IVON.",
+    titlePrefix: "UNLEASH THE POWER OF ",
+    titleHighlight: "IVON.",
+    highlightGradient: "from-cyan-600 to-teal-650",
     description:
       "Elevate your daily connectivity with IVON's premium chargers, armored data cables, and crystal-clear wireless audio. Designed to charge fast and play clean.",
     ctaText: "Shop IVON Collection",
     link: "/products?search=IVON",
-    gradientClass: "from-white via-cyan-50/15 to-cyan-100/30 dark:from-cyan-950 dark:via-zinc-950 dark:to-neutral-900",
-    glowColor: "rgba(6, 182, 212, 0.08)", // Cyan
-    accentColor: "#06b6d4",
+    accentColor: "#0891b2",
     renderVisual: () => (
-      <motion.div
-        className="relative w-[100px] h-[100px] sm:w-[150px] sm:h-[150px] md:w-[180px] md:h-[180px] rounded-2xl p-3 bg-white border border-neutral-150 dark:border-neutral-800 shadow-md flex items-center justify-center overflow-hidden z-10"
-        animate={{ y: [0, -6, 0] }}
-        transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut" }}
-      >
-        <div className="w-full h-full relative flex items-center justify-center bg-white rounded-xl overflow-hidden">
+      <div className="relative w-full h-full flex items-center justify-center">
+        <motion.div
+          className="relative w-[190px] h-[95px] sm:w-[270px] sm:h-[135px] md:w-[320px] md:h-[160px] lg:w-[360px] lg:h-[180px] flex items-center justify-center z-10"
+          animate={{ y: [0, -8, 0] }}
+          transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut", delay: 0.2 }}
+        >
+          <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/25 to-teal-500/25 rounded-full blur-[50px] pointer-events-none scale-75 opacity-70" />
           <Image
-            src="/assets/banners/IVON.jpeg"
+            src="/assets/hero/Slider-Banner-Ivon.png"
             alt="IVON Brand Logo"
             fill
-            className="object-contain p-1.5"
-            sizes="(max-width: 640px) 100px, 180px"
             priority
+            sizes="(max-width: 640px) 190px, (max-width: 1024px) 270px, 360px"
+            className="object-contain filter drop-shadow-[0_12px_24px_rgba(6,182,212,0.25)] pointer-events-none select-none"
           />
-        </div>
-      </motion.div>
+        </motion.div>
+      </div>
     ),
   },
 ];
 
 const AUTO_PLAY_TIME = 7500;
+const DISSOLVING_COLORS = ["#6366f1", "#a855f7", "#3b82f6", "#06b6d4"];
+
+interface Particle {
+  id: number;
+  left: string;
+  top: string;
+  size: number;
+  delay: number;
+  duration: number;
+}
 
 export default function CampaignHeroBanner() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [direction, setDirection] = useState(0); // -1 for prev, 1 for next
   const [isPlaying, setIsPlaying] = useState(true);
   const [progress, setProgress] = useState(0);
+  const [particles, setParticles] = useState<Particle[]>([]);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
+    // Generate stardust nodes on client mount to avoid hydration mismatch
+    const generated = Array.from({ length: 25 }).map((_, i) => ({
+      id: i,
+      left: `${Math.random() * 100}%`,
+      top: `${Math.random() * 80 + 10}%`,
+      size: Math.random() * 1.8 + 1.2, // 1.2px to 3px
+      delay: Math.random() * 6,
+      duration: Math.random() * 6 + 6, // 6s to 12s
+    }));
+    setParticles(generated);
   }, []);
 
   const handleNext = useCallback(() => {
@@ -215,21 +242,60 @@ export default function CampaignHeroBanner() {
 
   return (
     <section
-      className={`relative w-full h-[360px] sm:h-[340px] md:h-[300px] lg:h-[320px] bg-gradient-to-br ${activeSlide.gradientClass} overflow-hidden select-none z-10 flex items-center transition-all duration-1000 border-b border-border`}
+      className="relative w-full h-[450px] sm:h-[350px] md:h-[320px] lg:h-[340px] bg-gradient-to-br from-[#f8f9fc] via-[#f1f3f9] to-[#e8ecf4] text-neutral-900 overflow-hidden select-none z-10 flex items-center transition-all duration-1000 border-b border-neutral-200/60"
       onMouseEnter={() => setIsPlaying(false)}
       onMouseLeave={() => setIsPlaying(true)}
       aria-label="Campaign Promotion Banner"
     >
-      {/* Floating Animated paths in the background (lowered opacity for elegance) */}
-      <div className="absolute inset-0 z-0 opacity-25 dark:opacity-20 pointer-events-none">
-        {mounted && <FloatingPaths position={1} />}
+      {/* 1. Interactive Liquid Ether WebGL Background */}
+      <div className="absolute inset-0 z-0 opacity-65 pointer-events-none transition-opacity duration-1000">
+        {mounted && (
+          <LiquidEther 
+            colors={DISSOLVING_COLORS} 
+            mouseForce={16}
+            cursorSize={85}
+            autoDemo={true}
+            autoSpeed={0.35}
+            autoIntensity={1.8}
+          />
+        )}
       </div>
 
-      {/* Ambient radial glow behind visuals */}
+      {/* 2. Frosted Liquid Glass overlay (Blur diffuse layer) */}
+      <div className="absolute inset-0 bg-white/45 backdrop-blur-[30px] pointer-events-none z-[1]" />
+
+      {/* 3. Atmospheric Background Drifting Particles */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none z-[2]">
+        {mounted &&
+          particles.map((p) => (
+            <motion.div
+              key={p.id}
+              className="absolute rounded-full bg-blue-500/20"
+              style={{
+                left: p.left,
+                top: p.top,
+                width: p.size,
+                height: p.size,
+              }}
+              animate={{
+                y: [0, -120],
+                opacity: [0, 0.4, 0],
+              }}
+              transition={{
+                duration: p.duration,
+                repeat: Infinity,
+                delay: p.delay,
+                ease: "linear",
+              }}
+            />
+          ))}
+      </div>
+
+      {/* 4. Dynamic ambient backing glow matching active slide */}
       <div
-        className="absolute right-0 top-1/2 -translate-y-1/2 w-[280px] h-[280px] sm:w-[450px] sm:h-[450px] rounded-full blur-[80px] sm:blur-[120px] pointer-events-none opacity-90 dark:opacity-85 z-0 transition-all duration-1000"
+        className="absolute right-0 top-1/2 -translate-y-1/2 w-[300px] h-[300px] sm:w-[480px] sm:h-[480px] rounded-full blur-[100px] pointer-events-none transition-all duration-1000 z-[2]"
         style={{
-          background: `radial-gradient(circle, ${activeSlide.glowColor} 0%, transparent 70%)`,
+          background: `radial-gradient(circle, ${activeSlide.accentColor}1c 0%, transparent 70%)`,
         }}
       />
 
@@ -244,38 +310,41 @@ export default function CampaignHeroBanner() {
             exit="exit"
             className="absolute inset-0 w-full h-full flex items-center"
           >
-            <div className="w-full max-w-7xl mx-auto px-6 sm:px-12 lg:px-16 grid grid-cols-1 sm:grid-cols-2 h-full items-center gap-6 sm:gap-12 lg:gap-16">
+            <div className="w-full max-w-7xl mx-auto px-6 sm:px-12 lg:px-16 grid grid-cols-1 sm:grid-cols-2 h-full items-center gap-4 sm:gap-12 lg:gap-16 py-8 sm:py-0">
               {/* Text Content Block */}
               <div className="w-full flex flex-col justify-center items-start text-left order-2 sm:order-1 max-w-lg z-10">
-                {/* Slide Monospace Tag */}
-                <div className="mb-3">
-                  <span className="font-mono text-[9px] font-bold tracking-widest text-neutral-500 dark:text-white/50 border border-neutral-250 dark:border-white/10 px-2.5 py-0.5 rounded-md bg-neutral-100/50 dark:bg-white/5 uppercase">
-                    {activeSlide.tag}
-                  </span>
-                </div>
-
                 {/* Main Headline */}
-                <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-extrabold tracking-tight text-neutral-900 dark:text-white leading-tight mb-3.5 uppercase">
-                  {activeSlide.title}
+                <h1 className="text-lg sm:text-2xl md:text-3xl lg:text-4xl font-extrabold tracking-tight text-neutral-900 leading-tight mb-2.5 sm:mb-4 uppercase">
+                  {activeSlide.titlePrefix}
+                  <span className={`bg-gradient-to-r ${activeSlide.highlightGradient} bg-clip-text text-transparent`}>
+                    {activeSlide.titleHighlight}
+                  </span>
                 </h1>
 
                 {/* Description */}
-                <p className="text-neutral-600 dark:text-white/70 text-xs sm:text-sm leading-relaxed mb-5 sm:mb-6 max-w-md font-medium">
+                <p className="text-neutral-600 text-[11px] sm:text-sm leading-relaxed mb-4.5 sm:mb-7 max-w-md font-medium line-clamp-2 sm:line-clamp-none">
                   {activeSlide.description}
                 </p>
 
                 {/* Interactive Premium Styled CTA Button */}
                 <Link
                   href={activeSlide.link}
-                  className="group relative z-10 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-white dark:bg-white/10 dark:hover:bg-white dark:text-white dark:hover:text-neutral-950 font-bold text-xs sm:text-sm transition-all duration-300 border border-neutral-900 dark:border-white/20 shadow-xs cursor-pointer"
+                  className="group relative z-10 overflow-hidden inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-white font-bold text-xs sm:text-sm transition-all duration-300 cursor-pointer shadow-md hover:shadow-lg active:scale-98"
+                  style={{
+                    background: `linear-gradient(135deg, ${activeSlide.accentColor} 0%, ${activeSlide.accentColor}dd 100%)`,
+                    boxShadow: `0 8px 25px -4px ${activeSlide.accentColor}44`,
+                  }}
                 >
-                  {activeSlide.ctaText}
-                  <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
+                  <span className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  <span className="relative z-10 flex items-center gap-2">
+                    {activeSlide.ctaText}
+                    <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
+                  </span>
                 </Link>
               </div>
 
               {/* Graphic Visual Block */}
-              <div className="w-full flex items-center justify-start sm:justify-center order-1 sm:order-2 relative h-[140px] sm:h-full">
+              <div className="w-full flex items-center justify-center order-1 sm:order-2 relative h-[120px] sm:h-full">
                 {activeSlide.renderVisual()}
               </div>
             </div>
@@ -287,31 +356,37 @@ export default function CampaignHeroBanner() {
       <div className="hidden sm:flex absolute top-1/2 -translate-y-1/2 left-6 right-6 justify-between pointer-events-none z-30">
         <button
           onClick={handlePrev}
-          className="h-9 w-9 rounded-full border border-neutral-200 dark:border-white/10 bg-white/80 dark:bg-white/5 hover:bg-neutral-50 dark:hover:bg-white/15 backdrop-blur-xs text-neutral-600 dark:text-white flex items-center justify-center cursor-pointer pointer-events-auto transition-all duration-200 hover:scale-105 shadow-xs"
+          className="h-10 w-10 rounded-full border border-neutral-200 bg-white/60 hover:bg-white/80 backdrop-blur-md text-neutral-800 flex items-center justify-center cursor-pointer pointer-events-auto transition-all duration-355 hover:scale-108 active:scale-95 shadow-md"
           aria-label="Previous Slide"
         >
-          <ChevronLeft className="h-4.5 w-4.5" />
+          <ChevronLeft className="h-5 w-5" />
         </button>
         <button
           onClick={handleNext}
-          className="h-9 w-9 rounded-full border border-neutral-200 dark:border-white/10 bg-white/80 dark:bg-white/5 hover:bg-neutral-50 dark:hover:bg-white/15 backdrop-blur-xs text-neutral-600 dark:text-white flex items-center justify-center cursor-pointer pointer-events-auto transition-all duration-200 hover:scale-105 shadow-xs"
+          className="h-10 w-10 rounded-full border border-neutral-200 bg-white/60 hover:bg-white/80 backdrop-blur-md text-neutral-800 flex items-center justify-center cursor-pointer pointer-events-auto transition-all duration-355 hover:scale-108 active:scale-95 shadow-md"
           aria-label="Next Slide"
         >
-          <ChevronRight className="h-4.5 w-4.5" />
+          <ChevronRight className="h-5 w-5" />
         </button>
       </div>
 
       {/* Slide Pagination Dots */}
-      <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-35">
+      <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-2 z-35">
         {slides.map((slide, index) => {
           const isActive = index === currentIndex;
           return (
             <button
               key={slide.id}
               onClick={() => handleDotClick(index)}
-              className={`h-1.5 rounded-full transition-all duration-300 focus:outline-none cursor-pointer ${
-                isActive ? "bg-neutral-800 dark:bg-white w-5" : "bg-neutral-200 dark:bg-white/20 w-1.5 hover:bg-neutral-350 dark:hover:bg-white/40"
+              className={`h-2 rounded-full transition-all duration-500 focus:outline-none cursor-pointer ${
+                isActive 
+                  ? "w-8 shadow-xs animate-none" 
+                  : "w-2 bg-black/15 hover:bg-black/30"
               }`}
+              style={{
+                backgroundColor: isActive ? activeSlide.accentColor : undefined,
+                boxShadow: isActive ? `0 0 12px ${activeSlide.accentColor}` : undefined
+              }}
               aria-label={`Go to slide ${index + 1}`}
             />
           );
@@ -319,12 +394,13 @@ export default function CampaignHeroBanner() {
       </div>
 
       {/* Bottom Autoplay Progress Bar */}
-      <div className="absolute bottom-0 left-0 w-full h-[2px] bg-neutral-200 dark:bg-white/10 z-30 overflow-hidden">
+      <div className="absolute bottom-0 left-0 w-full h-[1.5px] bg-black/5 z-30 overflow-hidden">
         <div
           className="h-full transition-all duration-75 ease-linear"
           style={{
             width: `${progress}%`,
             backgroundColor: activeSlide.accentColor,
+            boxShadow: `0 0 8px 1px ${activeSlide.accentColor}`,
           }}
         />
       </div>

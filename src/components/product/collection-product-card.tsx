@@ -69,27 +69,28 @@ export default function CollectionProductCard({
   const getHoverShadowClass = () => {
     switch (themeColor) {
       case "red":
-        return "hover:shadow-[0_15px_30px_rgba(239,68,68,0.08)] hover:border-red-500/40 dark:hover:border-red-500/40";
+        return "hover:shadow-[0_20px_40px_rgba(239,68,68,0.06)] hover:border-red-500/35 dark:hover:border-red-500/35";
       case "purple":
-        return "hover:shadow-[0_15px_30px_rgba(139,92,246,0.08)] hover:border-violet-500/40 dark:hover:border-violet-500/40";
+        return "hover:shadow-[0_20px_40px_rgba(139,92,246,0.06)] hover:border-violet-500/35 dark:hover:border-violet-500/35";
       case "teal":
-        return "hover:shadow-[0_15px_30px_rgba(20,184,166,0.08)] hover:border-teal-500/40 dark:hover:border-teal-500/40";
+        return "hover:shadow-[0_20px_40px_rgba(20,184,166,0.06)] hover:border-teal-500/35 dark:hover:border-teal-500/35";
       case "blue":
       default:
-        return "hover:shadow-[0_15px_30px_rgba(59,130,246,0.08)] hover:border-blue-500/40 dark:hover:border-blue-500/40";
+        return "hover:shadow-[0_20px_40px_rgba(59,130,246,0.06)] hover:border-blue-500/35 dark:hover:border-blue-500/35";
     }
   };
 
   return (
     <Link
       href={`/products/${slug}`}
-      className={`group flex flex-col w-full min-w-0 select-none cursor-pointer relative p-4 rounded-2xl border border-neutral-200/70 dark:border-neutral-800/80 bg-white dark:bg-neutral-900/60 backdrop-blur-md transition-all duration-300 hover:-translate-y-1.5 z-10 ${getHoverShadowClass()}`}
+      className={`group flex flex-col w-full min-w-0 select-none cursor-pointer relative p-4 rounded-3xl border border-neutral-200/50 dark:border-neutral-800/50 bg-white/70 dark:bg-neutral-900/40 backdrop-blur-md transition-all duration-500 ease-out hover:-translate-y-2 z-10 ${getHoverShadowClass()}`}
     >
-      {/* Image Container with seamless background and dynamic glow */}
-      <div className="relative aspect-[4/3] w-full overflow-hidden flex items-center justify-center mb-4">
+      {/* Image Stage Container with seamless background and dynamic glow */}
+      <div className="relative aspect-[4/3] w-full overflow-hidden flex items-center justify-center mb-3.5 bg-neutral-50/50 dark:bg-neutral-950/20 rounded-2xl border border-neutral-100 dark:border-neutral-900/30">
+        
         {/* Soft background ambient circle glow */}
         <div
-          className={`absolute w-28 h-28 rounded-full blur-[24px] opacity-10 dark:opacity-15 pointer-events-none -z-10 transition-transform duration-500 group-hover:scale-110 ${
+          className={`absolute w-24 h-24 rounded-full blur-[24px] opacity-15 dark:opacity-20 pointer-events-none -z-10 transition-transform duration-700 group-hover:scale-125 ${
             themeColor === "red"
               ? "bg-red-500"
               : themeColor === "purple"
@@ -105,7 +106,7 @@ export default function CollectionProductCard({
           src={images[0]}
           alt={name}
           fill
-          className={`object-contain p-2 transition-all duration-500 group-hover:scale-105 ${
+          className={`object-contain p-4 transition-all duration-500 ease-out group-hover:scale-108 group-hover:-translate-y-1 ${
             hasMultipleImages
               ? "opacity-100 group-hover:opacity-0"
               : "opacity-100"
@@ -120,7 +121,7 @@ export default function CollectionProductCard({
             src={images[1]}
             alt={`${name} secondary view`}
             fill
-            className="object-contain p-2 absolute inset-0 opacity-0 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
+            className="object-contain p-4 absolute inset-0 opacity-0 group-hover:opacity-100 group-hover:scale-108 group-hover:-translate-y-1 transition-all duration-500 ease-out"
             sizes="(max-width: 768px) 50vw, (max-width: 1200px) 25vw, 20vw"
             priority={false}
           />
@@ -128,8 +129,8 @@ export default function CollectionProductCard({
 
         {/* Sold out overlay */}
         {isOutOfStock && (
-          <div className="absolute inset-0 flex items-center justify-center bg-background/60 backdrop-blur-[2px] z-10 rounded-xl">
-            <span className="rounded-md bg-background border border-border px-3 py-1 text-[10px] font-bold text-foreground uppercase tracking-widest shadow-sm">
+          <div className="absolute inset-0 flex items-center justify-center bg-white/70 dark:bg-neutral-950/70 backdrop-blur-[2px] z-25 rounded-2xl">
+            <span className="rounded-lg bg-white/90 dark:bg-neutral-900/90 border border-neutral-200 dark:border-neutral-800 px-3.5 py-1.5 text-[9px] font-black text-neutral-850 dark:text-neutral-200 uppercase tracking-widest shadow-md">
               Sold Out
             </span>
           </div>
@@ -140,18 +141,18 @@ export default function CollectionProductCard({
       <div className="flex flex-col flex-grow">
         {/* Brand Name Tag */}
         {brand && (
-          <span className="text-[10px] font-extrabold tracking-wider uppercase text-neutral-450 dark:text-neutral-500 mb-1">
+          <span className="text-[9px] font-black tracking-widest uppercase text-neutral-400 dark:text-neutral-500 mb-1.5">
             {brand}
           </span>
         )}
 
         {/* Product Title (2-line clamp ensures alignment) */}
-        <h4 className="text-xs sm:text-[13px] font-bold text-neutral-850 dark:text-neutral-200 line-clamp-2 leading-snug min-h-[36px] group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors duration-200">
+        <h4 className="text-xs sm:text-[13px] font-bold text-neutral-800 dark:text-neutral-200 line-clamp-2 leading-snug min-h-[36px] group-hover:text-neutral-950 dark:group-hover:text-white transition-colors duration-300">
           {name}
         </h4>
 
         {/* Interactive Star Rating Row */}
-        <div className="flex items-center gap-1.5 mt-1.5 mb-3.5">
+        <div className="flex items-center gap-1.5 mt-2 mb-3.5">
           <div className="flex items-center text-amber-400">
             {Array.from({ length: 5 }).map((_, i) => {
               const starVal = i + 1;
@@ -179,7 +180,7 @@ export default function CollectionProductCard({
           <div className="flex flex-col">
             {hasDiscount ? (
               <>
-                <span className="text-[10px] text-neutral-400 line-through leading-none mb-1">
+                <span className="text-[10px] text-neutral-400 line-through leading-none mb-1 font-medium">
                   {formatPriceVal(price)}
                 </span>
                 <span
@@ -197,7 +198,7 @@ export default function CollectionProductCard({
                 </span>
               </>
             ) : (
-              <span className="text-sm sm:text-base font-black text-neutral-900 dark:text-white leading-none">
+              <span className="text-sm sm:text-base font-black text-neutral-850 dark:text-white leading-none">
                 {formatPriceVal(price)}
               </span>
             )}
@@ -206,7 +207,7 @@ export default function CollectionProductCard({
           {/* Quick-add Circular Icon Button */}
           <div className="shrink-0">
             {isOutOfStock ? (
-              <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-neutral-50 dark:bg-neutral-900/60 text-neutral-400 dark:text-neutral-600 border border-neutral-200/50 dark:border-neutral-800/50">
+              <span className="text-[8px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800/40 text-neutral-400 dark:text-neutral-600 border border-neutral-200/50 dark:border-neutral-800/50">
                 Out
               </span>
             ) : (
@@ -221,14 +222,14 @@ export default function CollectionProductCard({
                         : themeColor === "teal"
                           ? "bg-teal-500 border-teal-500 text-white"
                           : "bg-blue-500 border-blue-500 text-white"
-                    : `bg-neutral-50 border-neutral-200 text-neutral-800 dark:bg-neutral-800/50 dark:border-neutral-800 dark:text-neutral-300 hover:scale-105 active:scale-95 ${
+                    : `bg-neutral-50 border-neutral-200 text-neutral-700 dark:bg-neutral-800/40 dark:border-neutral-800 dark:text-neutral-300 hover:scale-108 active:scale-95 group-hover:shadow-xs ${
                         themeColor === "red"
-                          ? "hover:bg-red-500 hover:border-red-500 hover:text-white dark:hover:bg-red-500 dark:hover:border-red-500 dark:hover:text-white shadow-md shadow-red-500/5"
+                          ? "hover:bg-red-500 hover:border-red-500 hover:text-white dark:hover:bg-red-500 dark:hover:border-red-500 dark:hover:text-white"
                           : themeColor === "purple"
-                            ? "hover:bg-violet-500 hover:border-violet-500 hover:text-white dark:hover:bg-violet-500 dark:hover:border-violet-500 dark:hover:text-white shadow-md shadow-violet-500/5"
+                            ? "hover:bg-violet-500 hover:border-violet-500 hover:text-white dark:hover:bg-violet-500 dark:hover:border-violet-500 dark:hover:text-white"
                             : themeColor === "teal"
-                              ? "hover:bg-teal-500 hover:border-teal-500 hover:text-white dark:hover:bg-teal-500 dark:hover:border-teal-500 dark:hover:text-white shadow-md shadow-teal-500/5"
-                              : "hover:bg-blue-500 hover:border-blue-500 hover:text-white dark:hover:bg-blue-500 dark:hover:border-blue-500 dark:hover:text-white shadow-md shadow-blue-500/5"
+                              ? "hover:bg-teal-500 hover:border-teal-500 hover:text-white dark:hover:bg-teal-500 dark:hover:border-teal-500 dark:hover:text-white"
+                              : "hover:bg-blue-500 hover:border-blue-500 hover:text-white dark:hover:bg-blue-500 dark:hover:border-blue-500 dark:hover:text-white"
                       }`
                 }`}
                 whileTap={{ scale: 0.9 }}
@@ -248,6 +249,7 @@ export default function CollectionProductCard({
                   ) : (
                     <motion.div
                       key="add"
+                      className="transition-transform duration-500 group-hover:rotate-90"
                       initial={{ opacity: 0, scale: 0.7 }}
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.7 }}

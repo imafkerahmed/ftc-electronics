@@ -48,26 +48,26 @@ export default function CategoryBentoGrid() {
                   },
                   hover: {
                     y: -6,
-                    boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15)",
+                    boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
                   },
                 }}
                 transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                className="relative bg-white rounded-[24px] border border-neutral-200/80 h-[125px] sm:h-[220px] lg:h-[260px] overflow-hidden p-4 sm:p-6 lg:p-8 flex flex-col justify-between"
+                className="relative bg-white/75 dark:bg-neutral-900/40 rounded-[24px] border border-neutral-200/60 dark:border-white/5 h-[125px] sm:h-[220px] lg:h-[260px] overflow-hidden p-4 sm:p-6 lg:p-8 flex flex-col justify-between backdrop-blur-md transition-colors"
               >
                 {/* Left Content */}
                 <div className="z-10 max-w-[50%] flex flex-col items-start">
-                  <span className="font-mono text-[10px] tracking-widest text-neutral-400 uppercase font-bold">
+                  <span className="font-mono text-[10px] tracking-widest text-neutral-400 dark:text-neutral-500 uppercase font-bold">
                     LAPTOPS
                   </span>
-                  <h3 className="text-lg sm:text-2xl font-black text-neutral-900 uppercase tracking-tight mt-1.5 sm:mt-2 leading-none">
+                  <h3 className="text-lg sm:text-2xl font-black text-neutral-900 dark:text-white uppercase tracking-tight mt-1.5 sm:mt-2 leading-none">
                     Laptops & Computing
                   </h3>
-                  <p className="text-[11px] sm:text-sm text-neutral-500 mt-1 sm:mt-2 leading-relaxed font-medium">
+                  <p className="text-[11px] sm:text-sm text-neutral-550 dark:text-neutral-400 mt-1 sm:mt-2 leading-relaxed font-medium">
                     High-Performance Workstations
                   </p>
 
                   {/* Shop Now CTA link */}
-                  <div className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 group-hover:text-blue-600 mt-3 sm:mt-6 transition-colors duration-300">
+                  <div className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 dark:text-neutral-500 group-hover:text-blue-600 dark:group-hover:text-blue-400 mt-3 sm:mt-6 transition-colors duration-300">
                     <span>Shop Now</span>
                     <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
                   </div>
@@ -75,6 +75,7 @@ export default function CategoryBentoGrid() {
 
                 {/* Right Image Container */}
                 <div className="absolute top-0 right-0 h-full w-[45%] overflow-hidden flex items-center justify-center">
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 sm:w-36 sm:h-36 rounded-full bg-blue-500/10 dark:bg-blue-500/5 blur-[25px] pointer-events-none group-hover:scale-125 transition-transform duration-500" />
                   <motion.div
                     variants={{
                       initial: { scale: 0.8, opacity: 0 },
@@ -120,26 +121,26 @@ export default function CategoryBentoGrid() {
                     },
                     hover: {
                       y: -6,
-                      boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15)",
+                      boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
                     },
                   }}
                   transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                  className="relative bg-white rounded-[24px] border border-neutral-200/80 h-[125px] sm:h-[220px] lg:h-[260px] overflow-hidden p-4 sm:p-6 lg:p-8 flex flex-col justify-between"
+                  className="relative bg-white/75 dark:bg-neutral-900/40 rounded-[24px] border border-neutral-200/60 dark:border-white/5 h-[125px] sm:h-[220px] lg:h-[260px] overflow-hidden p-4 sm:p-6 lg:p-8 flex flex-col justify-between backdrop-blur-md transition-colors"
                 >
                   {/* Content */}
                   <div className="z-10 max-w-[60%] flex flex-col items-start">
-                    <span className="font-mono text-[10px] tracking-widest text-neutral-400 uppercase font-bold">
+                    <span className="font-mono text-[10px] tracking-widest text-neutral-400 dark:text-neutral-500 uppercase font-bold">
                       KEYBOARDS
                     </span>
-                    <h3 className="text-lg sm:text-xl font-black text-neutral-900 uppercase tracking-tight mt-1.5 sm:mt-2 leading-none">
+                    <h3 className="text-lg sm:text-xl font-black text-neutral-900 dark:text-white uppercase tracking-tight mt-1.5 sm:mt-2 leading-none">
                       Keyboards
                     </h3>
-                    <p className="text-[11px] sm:text-xs text-neutral-500 mt-1 sm:mt-1.5 leading-relaxed font-medium">
+                    <p className="text-[11px] sm:text-xs text-neutral-550 dark:text-neutral-400 mt-1 sm:mt-1.5 leading-relaxed font-medium">
                       Mechanical Keyboards
                     </p>
 
                     {/* Shop Now CTA link */}
-                    <div className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 group-hover:text-slate-600 mt-3 sm:mt-6 transition-colors duration-300">
+                    <div className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 dark:text-neutral-500 group-hover:text-slate-600 dark:group-hover:text-neutral-300 mt-3 sm:mt-6 transition-colors duration-300">
                       <span>Shop Now</span>
                       <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
                     </div>
@@ -147,6 +148,7 @@ export default function CategoryBentoGrid() {
 
                   {/* Animated Keyboard Vector */}
                   <div className="absolute right-4 bottom-4 sm:right-6 sm:bottom-6 lg:right-8 lg:bottom-8 select-none pointer-events-none">
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 sm:w-24 sm:h-24 rounded-full bg-slate-500/10 dark:bg-neutral-400/5 blur-[20px] pointer-events-none group-hover:scale-125 transition-transform duration-500" />
                     <motion.div
                       variants={{
                         initial: { scale: 0.8, opacity: 0 },
@@ -166,7 +168,7 @@ export default function CategoryBentoGrid() {
                       }}
                     >
                       <Keyboard
-                        className="w-12 h-12 sm:w-16 lg:w-20 sm:h-16 lg:h-20 text-slate-600"
+                        className="w-12 h-12 sm:w-16 lg:w-20 sm:h-16 lg:h-20 text-slate-600 dark:text-neutral-300"
                         strokeWidth={1.5}
                       />
                     </motion.div>
@@ -188,26 +190,26 @@ export default function CategoryBentoGrid() {
                     },
                     hover: {
                       y: -6,
-                      boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15)",
+                      boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
                     },
                   }}
                   transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                  className="relative bg-white rounded-[24px] border border-neutral-200/80 h-[125px] sm:h-[220px] lg:h-[260px] overflow-hidden p-4 sm:p-6 lg:p-8 flex flex-col justify-between"
+                  className="relative bg-white/75 dark:bg-neutral-900/40 rounded-[24px] border border-neutral-200/60 dark:border-white/5 h-[125px] sm:h-[220px] lg:h-[260px] overflow-hidden p-4 sm:p-6 lg:p-8 flex flex-col justify-between backdrop-blur-md transition-colors"
                 >
                   {/* Content */}
                   <div className="z-10 max-w-[60%] flex flex-col items-start">
-                    <span className="font-mono text-[10px] tracking-widest text-neutral-400 uppercase font-bold">
+                    <span className="font-mono text-[10px] tracking-widest text-neutral-400 dark:text-neutral-500 uppercase font-bold">
                       AUDIO
                     </span>
-                    <h3 className="text-lg sm:text-xl font-black text-neutral-900 uppercase tracking-tight mt-1.5 sm:mt-2 leading-none">
+                    <h3 className="text-lg sm:text-xl font-black text-neutral-900 dark:text-white uppercase tracking-tight mt-1.5 sm:mt-2 leading-none">
                       Audio & Sound
                     </h3>
-                    <p className="text-[11px] sm:text-xs text-neutral-500 mt-1 sm:mt-1.5 leading-relaxed font-medium">
+                    <p className="text-[11px] sm:text-xs text-neutral-550 dark:text-neutral-400 mt-1 sm:mt-1.5 leading-relaxed font-medium">
                       Premium Sound Equipment
                     </p>
 
                     {/* Shop Now CTA link */}
-                    <div className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 group-hover:text-rose-600 mt-3 sm:mt-6 transition-colors duration-300">
+                    <div className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 dark:text-neutral-500 group-hover:text-rose-600 dark:group-hover:text-rose-450 mt-3 sm:mt-6 transition-colors duration-300">
                       <span>Shop Now</span>
                       <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
                     </div>
@@ -215,6 +217,7 @@ export default function CategoryBentoGrid() {
 
                   {/* Animated Headphones Vector */}
                   <div className="absolute right-4 bottom-4 sm:right-6 sm:bottom-6 lg:right-8 lg:bottom-8 select-none pointer-events-none">
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 sm:w-24 sm:h-24 rounded-full bg-rose-500/10 dark:bg-rose-500/5 blur-[20px] pointer-events-none group-hover:scale-125 transition-transform duration-500" />
                     <motion.div
                       variants={{
                         initial: { scale: 0.8, opacity: 0 },
@@ -228,7 +231,7 @@ export default function CategoryBentoGrid() {
                           transition: {
                             duration: 0.8,
                             repeat: Infinity,
-                            ease: "easeInOut" as const,
+                            ease: "easeInOut",
                           },
                         },
                       }}
@@ -262,26 +265,26 @@ export default function CategoryBentoGrid() {
                   },
                   hover: {
                     y: -6,
-                    boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15)",
+                    boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
                   },
                 }}
                 transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                className="relative bg-white rounded-[24px] border border-neutral-200/80 h-[125px] sm:h-full sm:min-h-[350px] lg:min-h-[544px] overflow-hidden p-4 sm:p-6 lg:p-8 flex flex-col justify-between"
+                className="relative bg-white/75 dark:bg-neutral-900/40 rounded-[24px] border border-neutral-200/60 dark:border-white/5 h-[125px] sm:h-full sm:min-h-[350px] lg:min-h-[544px] overflow-hidden p-4 sm:p-6 lg:p-8 flex flex-col justify-between backdrop-blur-md transition-colors"
               >
                 {/* Top Content */}
                 <div className="z-10 max-w-[55%] sm:max-w-none flex flex-col items-start">
-                  <span className="font-mono text-[10px] tracking-widest text-neutral-400 uppercase font-bold">
+                  <span className="font-mono text-[10px] tracking-widest text-neutral-400 dark:text-neutral-500 uppercase font-bold">
                     PHONES
                   </span>
-                  <h3 className="text-lg sm:text-2xl font-black text-neutral-900 uppercase tracking-tight mt-1.5 sm:mt-2 leading-none">
+                  <h3 className="text-lg sm:text-2xl font-black text-neutral-900 dark:text-white uppercase tracking-tight mt-1.5 sm:mt-2 leading-none">
                     Smartphones
                   </h3>
-                  <p className="text-[11px] sm:text-sm text-neutral-500 mt-1 sm:mt-2 leading-relaxed font-medium">
+                  <p className="text-[11px] sm:text-sm text-neutral-550 dark:text-neutral-400 mt-1 sm:mt-2 leading-relaxed font-medium">
                     Flagship Mobile Devices
                   </p>
 
                   {/* Shop Now CTA link */}
-                  <div className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 group-hover:text-emerald-600 mt-3 sm:mt-6 transition-colors duration-300">
+                  <div className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 dark:text-neutral-500 group-hover:text-emerald-600 dark:group-hover:text-emerald-450 mt-3 sm:mt-6 transition-colors duration-300">
                     <span>Shop Now</span>
                     <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
                   </div>
@@ -289,6 +292,7 @@ export default function CategoryBentoGrid() {
 
                 {/* Smartphone Icon Wrapper - Flex container to prevent overflow, scales down micro-proportionally */}
                 <div className="absolute right-4 bottom-4 sm:relative sm:right-0 sm:bottom-0 sm:flex-grow w-[35%] sm:w-full flex items-center justify-end sm:items-center sm:justify-center select-none pointer-events-none mt-0 sm:mt-6 h-[70px] sm:h-auto max-h-[50%] sm:max-h-[55%] md:max-h-[60%]">
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 sm:w-36 sm:h-36 rounded-full bg-emerald-500/10 dark:bg-emerald-500/5 blur-[25px] pointer-events-none group-hover:scale-125 transition-transform duration-500" />
                   <motion.div
                     variants={{
                       initial: { scale: 0.8, opacity: 0 },
