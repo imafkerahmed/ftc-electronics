@@ -22,8 +22,52 @@ export interface InteractiveGridBackgroundProps
   idleRandomCount?: number;
 }
 
-const convertToRgba = (color: string, alpha: number): string => {
-  if (!color) return `rgba(0, 0, 0, ${alpha})`;
+interface Rgb {
+  r: number;
+  g: number;
+  b: number;
+}
+
+function parseToRgb(color: string): Rgb {
+  if (!color) {
+    return { r: 0, g: 0, b: 0 };
+  }
+  
+  if (color.startsWith("rgba") || color.startsWith("rgb")) {
+    const matches = color.match(/\d+/g);
+    if (matches && matches.length >= 3) {
+      return {
+        r: parseInt(matches[0], 10),
+        g: parseInt(matches[1], 10),
+        b: parseInt(matches[2], 10)
+      };
+    }
+  }
+  
+  if (color.startsWith("#")) {
+    const hex = color.replace("#", "");
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    if (hex.length === 3) {
+      r = parseInt(hex[0] + hex[0], 16);
+      g = parseInt(hex[1] + hex[1], 16);
+      b = parseInt(hex[2] + hex[2], 16);
+    } else if (hex.length === 6 || hex.length === 8) {
+      r = parseInt(hex.substring(0, 2), 16);
+      g = parseInt(hex.substring(2, 4), 16);
+      b = parseInt(hex.substring(4, 6), 16);
+    }
+    return { r, g, b };
+  }
+
+  return { r: 0, g: 0, b: 0 };
+}
+
+function convertToRgba(color: string, alpha: number): string {
+  if (!color) {
+    return `rgba(0, 0, 0, ${alpha})`;
+  }
   
   if (color.startsWith("rgba")) {
     return color.replace(/[\d.]+\)$/g, `${alpha})`);
@@ -32,10 +76,12 @@ const convertToRgba = (color: string, alpha: number): string => {
   if (color.startsWith("rgb")) {
     return color.replace("rgb", "rgba").replace(")", `, ${alpha})`);
   }
-
+  
   if (color.startsWith("#")) {
     const hex = color.replace("#", "");
-    let r = 0, g = 0, b = 0;
+    let r = 0;
+    let g = 0;
+    let b = 0;
     if (hex.length === 3) {
       r = parseInt(hex[0] + hex[0], 16);
       g = parseInt(hex[1] + hex[1], 16);
@@ -49,9 +95,9 @@ const convertToRgba = (color: string, alpha: number): string => {
   }
 
   return color;
-};
+}
 
-const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
+export default function InteractiveGridBackground({
   gridSize = 50,
   gridColor = "#cbcbcb",
   darkGridColor = "#303030",
@@ -70,7 +116,7 @@ const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
   idleRandomCount = 5,
   className,
   ...props
-}) => {
+}: InteractiveGridBackgroundProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -86,12 +132,12 @@ const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
 
   // Detect dark mode and custom theme colors
   useEffect(() => {
-    const updateTheme = () => {
+    function updateTheme() {
       setIsDarkMode(document.documentElement.classList.contains("dark"));
       const style = getComputedStyle(document.documentElement);
       setThemeColor(style.getPropertyValue("--island-color").trim());
       setThemeColor2(style.getPropertyValue("--island-color-2").trim());
-    };
+    }
     updateTheme();
     const observer = new MutationObserver(() => updateTheme());
     observer.observe(document.documentElement, { attributes: true });
@@ -107,22 +153,24 @@ const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
     let docLeft = rect.left + window.scrollX;
     let docTop = rect.top + window.scrollY;
 
-    const updateRect = () => {
+    function updateRect() {
+      if (!container) return;
       const r = container.getBoundingClientRect();
       rect = r;
       docLeft = r.left + window.scrollX;
       docTop = r.top + window.scrollY;
-    };
+    }
 
-    const handleMouseMove = (e: MouseEvent) => {
+    function handleMouseMove(e: MouseEvent) {
       mouseActiveRef.current = true;
       lastMouseTimeRef.current = Date.now();
 
       const rawX = e.pageX - docLeft;
       const rawY = e.pageY - docTop;
 
-      if (rawX < 0 || rawY < 0 || rawX > rect.width || rawY > rect.height)
+      if (rawX < 0 || rawY < 0 || rawX > rect.width || rawY > rect.height) {
         return;
+      }
 
       const snappedX = Math.floor(rawX / gridSize);
       const snappedY = Math.floor(rawY / gridSize);
@@ -130,13 +178,15 @@ const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
       const last = trailRef.current[0];
       if (!last || last.x !== snappedX || last.y !== snappedY) {
         trailRef.current.unshift({ x: snappedX, y: snappedY });
-        if (trailRef.current.length > trailLength) trailRef.current.pop();
+        if (trailRef.current.length > trailLength) {
+          trailRef.current.pop();
+        }
       }
-    };
+    }
 
-    const handleMouseEnter = () => {
+    function handleMouseEnter() {
       updateRect();
-    };
+    }
 
     container.addEventListener("mousemove", handleMouseMove);
     container.addEventListener("mouseenter", handleMouseEnter);
@@ -174,14 +224,17 @@ const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
     }
 
     let lineColor = isDarkMode ? darkGridColor : gridColor;
-    let glowColor = isDarkMode ? darkEffectColor : effectColor;
+    let glowColorStr = isDarkMode ? darkEffectColor : effectColor;
 
     if (themeColor) {
       lineColor = convertToRgba(themeColor, isDarkMode ? 0.15 : 0.1);
       // Map Midnight theme color (#0f172a) to bright brand blue (#173eff) for highlights
       const targetGlowColor = themeColor === "#0f172a" ? "#173eff" : (themeColor2 || themeColor);
-      glowColor = convertToRgba(targetGlowColor, isDarkMode ? 0.25 : 0.25);
+      glowColorStr = convertToRgba(targetGlowColor, isDarkMode ? 0.25 : 0.25);
     }
+
+    // Pre-parse glow color channels once outside the loop to avoid CPU-intensive regex inside requestAnimationFrame
+    const rgbGlow = parseToRgb(glowColorStr);
 
     const cols = Math.floor(canvasWidth / gridSize);
     const rows = Math.floor(canvasHeight / gridSize);
@@ -195,27 +248,35 @@ const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
 
     let animationId: number;
     let running = true;
+    let lastTime = performance.now();
 
-    const draw = () => {
-      if (!running || !isVisibleRef.current) return;
+    function draw() {
+      if (!ctx || !running || !isVisibleRef.current) return;
+
+      const now = performance.now();
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+
+      // Frame-rate independent LERP factor calculation using deltaTime
+      // At 60Hz, dt = 0.016s -> factor = idleSpeed
+      // At 144Hz, dt = 0.007s -> factor adjusts smoothly so speeds match perfectly
+      const lerpFactor = 1 - Math.pow(1 - idleSpeed, dt * 60);
 
       ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-      // Draw grid lines
+      // Draw grid lines — batched into 2 paths instead of N individual stroke calls
       ctx.strokeStyle = lineColor;
       ctx.lineWidth = 1;
+      ctx.beginPath();
       for (let x = 0; x <= canvasWidth; x += gridSize) {
-        ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, canvasHeight);
-        ctx.stroke();
       }
       for (let y = 0; y <= canvasHeight; y += gridSize) {
-        ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(canvasWidth, y);
-        ctx.stroke();
       }
+      ctx.stroke();
 
       // Idle animation logic
       const idleThreshold = 2000;
@@ -232,14 +293,14 @@ const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
           const dy = target.y - pos.y;
 
           if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) {
-            // new random target when reached
+            // Pick a new target when reached
             idleTargetsRef.current[i] = {
               x: Math.floor(Math.random() * currentCols),
               y: Math.floor(Math.random() * currentRows),
             };
           } else {
-            pos.x += dx * idleSpeed;
-            pos.y += dy * idleSpeed;
+            pos.x += dx * lerpFactor;
+            pos.y += dy * lerpFactor;
           }
 
           const roundedX = Math.round(pos.x);
@@ -247,30 +308,44 @@ const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
           const last = trailRef.current[0];
           if (!last || last.x !== roundedX || last.y !== roundedY) {
             trailRef.current.unshift({ x: roundedX, y: roundedY });
-            if (trailRef.current.length > trailLength * idleRandomCount)
+            if (trailRef.current.length > trailLength * idleRandomCount) {
               trailRef.current.pop();
+            }
           }
         });
       }
 
-      // Draw trail glow
+      // Draw trail glow (using hardware-accelerated concentric rect overlays instead of shadowBlur)
       trailRef.current.forEach((cell, idx) => {
         const alpha = (1 - idx * (1 / (trailLength + 1))) * 0.7;
-        const rgbaColor = convertToRgba(glowColor, alpha);
 
-        ctx.fillStyle = rgbaColor;
-        if (glow) {
-          ctx.shadowColor = rgbaColor;
-          ctx.shadowBlur = glowRadius;
-        } else {
-          ctx.shadowBlur = 0;
-        }
-
+        // Core fill (Layer 1)
+        ctx.fillStyle = `rgba(${rgbGlow.r}, ${rgbGlow.g}, ${rgbGlow.b}, ${alpha})`;
         ctx.fillRect(cell.x * gridSize, cell.y * gridSize, gridSize, gridSize);
+
+        if (glow) {
+          // Inner glow overlay (Layer 2)
+          ctx.fillStyle = `rgba(${rgbGlow.r}, ${rgbGlow.g}, ${rgbGlow.b}, ${alpha * 0.25})`;
+          ctx.fillRect(
+            (cell.x - 0.5) * gridSize,
+            (cell.y - 0.5) * gridSize,
+            gridSize * 2,
+            gridSize * 2
+          );
+
+          // Outer ambient glow overlay (Layer 3)
+          ctx.fillStyle = `rgba(${rgbGlow.r}, ${rgbGlow.g}, ${rgbGlow.b}, ${alpha * 0.08})`;
+          ctx.fillRect(
+            (cell.x - 1.0) * gridSize,
+            (cell.y - 1.0) * gridSize,
+            gridSize * 3,
+            gridSize * 3
+          );
+        }
       });
 
       animationId = requestAnimationFrame(draw);
-    };
+    }
 
     // Intersection Observer to pause rendering when component is not in the viewport
     const intersectionObserver = new IntersectionObserver(
@@ -280,6 +355,7 @@ const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
         isVisibleRef.current = isVisible;
         if (isVisible && running) {
           cancelAnimationFrame(animationId);
+          lastTime = performance.now();
           draw();
         }
       },
@@ -333,6 +409,7 @@ const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
       <canvas
         ref={canvasRef}
         className="absolute top-0 left-0 z-0 pointer-events-none"
+        style={{ willChange: "transform" }}
       />
 
       {showFade && (
@@ -347,6 +424,4 @@ const InteractiveGridBackground: React.FC<InteractiveGridBackgroundProps> = ({
       <div className="relative z-0 w-full h-full">{children}</div>
     </div>
   );
-};
-
-export default InteractiveGridBackground;
+}

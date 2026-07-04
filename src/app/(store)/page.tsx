@@ -1,5 +1,3 @@
-import Link from "next/link";
-import Image from "next/image";
 import CampaignHeroBanner from "@/components/layout/campaign-hero-banner";
 import BrandLogoTicker from "@/components/layout/brand-logo-ticker";
 import CollectionSection from "@/components/product/collection-section";
@@ -10,6 +8,7 @@ import CategoryBentoGrid from "@/components/layout/category-bento-grid";
 import { getCollectionProducts } from "@/lib/db";
 import HomePageLoaderWrapper from "@/components/layout/home-page-loader-wrapper";
 import ImageParallaxBanner from "@/components/layout/image-parallax-banner";
+import LazyScrollSection from "@/components/layout/lazy-scroll-section";
 
 export default async function StoreHomePage() {
   // Fetch products and categories for layout rendering
@@ -19,46 +18,65 @@ export default async function StoreHomePage() {
   return (
     <HomePageLoaderWrapper>
       <div className="w-full">
+        {/* Hero banner at the top, loaded immediately */}
         <CampaignHeroBanner />
 
-        {/* On Sale Section - Bento Grid layout */}
-        <CollectionSection
-          title="On-Sale"
-          layout="featured-grid"
-          products={onSaleProducts.slice(0, 6)}
-          seeAllLink="/products?filter=on-sale"
-        />
+        {/* On Sale Section - Bento Grid layout (Lazy loaded on scroll) */}
+        <LazyScrollSection heightClass="min-h-[500px]">
+          <CollectionSection
+            title="On-Sale"
+            layout="featured-grid"
+            products={onSaleProducts.slice(0, 6)}
+            seeAllLink="/products?filter=on-sale"
+          />
+        </LazyScrollSection>
 
-        {/* Promo Banner 1: Workspace/Keyboards (Anker) */}
-        <ImageParallaxBanner
-          imageSrc="/assets/banners/anker-banner.png"
-          alt="Next-Gen Office Gear"
-          href="/products?search=keyboard"
-          heightClass="h-[150px] sm:h-[220px] md:h-[290px]"
-        />
+        {/* Promo Banner 1: Workspace/Keyboards (Anker) (Lazy loaded on scroll) */}
+        <LazyScrollSection heightClass="min-h-[220px]">
+          <ImageParallaxBanner
+            imageSrc="/assets/banners/anker-banner.png"
+            alt="Next-Gen Office Gear"
+            href="/products?search=keyboard"
+            heightClass="h-[160px] sm:h-[240px] md:h-[320px]"
+            overlayText="Next-Gen Office Gear"
+            ctaLabel="Shop Keyboards"
+          />
+        </LazyScrollSection>
 
-        {/* New Arrivals Section - Asymmetric Bento Grid layout */}
-        <CollectionSection
-          title="New Arrivals"
-          layout="featured-grid"
-          products={newArrivalProducts.slice(0, 6)}
-          seeAllLink="/products?sortBy=newest"
-        />
+        {/* New Arrivals Section - Asymmetric Bento Grid layout (Lazy loaded on scroll) */}
+        <LazyScrollSection heightClass="min-h-[500px]">
+          <CollectionSection
+            title="New Arrivals"
+            layout="featured-grid"
+            products={newArrivalProducts.slice(0, 6)}
+            seeAllLink="/products?sortBy=newest"
+          />
+        </LazyScrollSection>
 
-        {/* Brand Logo Ticker (Placed below New Arrivals for all screens) */}
-        <BrandLogoTicker />
+        {/* Brand Logo Ticker (Lazy loaded on scroll) */}
+        <LazyScrollSection heightClass="min-h-[130px]">
+          <BrandLogoTicker />
+        </LazyScrollSection>
 
-        {/* Category Bento Grid Section */}
-        <CategoryBentoGrid />
+        {/* Category Bento Grid Section (Lazy loaded on scroll) */}
+        <LazyScrollSection heightClass="min-h-[450px]">
+          <CategoryBentoGrid />
+        </LazyScrollSection>
 
-        {/* Client Reviews Social Proof Carousel */}
-        <ReviewCarousel />
+        {/* Client Reviews Social Proof Carousel (Lazy loaded on scroll) */}
+        <LazyScrollSection heightClass="min-h-[350px]">
+          <ReviewCarousel />
+        </LazyScrollSection>
 
-        {/* Why Choose Us - Bento Grid Section */}
-        <ValuePropositions />
+        {/* Why Choose Us - Bento Grid Section (Lazy loaded on scroll) */}
+        <LazyScrollSection heightClass="min-h-[300px]">
+          <ValuePropositions />
+        </LazyScrollSection>
 
-        {/* Flagship Store Location Map */}
-        <LocationMap />
+        {/* Flagship Store Location Map (Lazy loaded on scroll) */}
+        <LazyScrollSection heightClass="min-h-[400px]">
+          <LocationMap />
+        </LazyScrollSection>
       </div>
     </HomePageLoaderWrapper>
   );

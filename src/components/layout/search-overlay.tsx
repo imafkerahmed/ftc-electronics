@@ -1,27 +1,24 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Search, X } from "lucide-react";
-import { gsap } from "gsap";
+import { AnimatePresence, motion } from "motion/react";
 import { useLenis } from "lenis/react";
 import { MOCK_PRODUCTS } from "@/lib/db";
 
 interface SearchOverlayProps {
   isOpen: boolean;
   onClose: () => void;
-  triggerRect: DOMRect | null;
 }
 
-export default function SearchOverlay({ isOpen, onClose, triggerRect }: SearchOverlayProps) {
+export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
   const router = useRouter();
   const lenis = useLenis();
   const [searchQuery, setSearchQuery] = useState("");
-  const overlayRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const elementsRef = useRef<HTMLDivElement>(null);
 
   const categories = [
     { label: "Laptops", link: "/products?category=laptops" },
@@ -38,7 +35,7 @@ export default function SearchOverlay({ isOpen, onClose, triggerRect }: SearchOv
     { label: "Asus", link: "/products?brand=asus" },
   ];
 
-  // Live filter products as user types (computed during render to avoid useEffect setState warning)
+  // Live filter products as user types
   const searchResults = searchQuery.trim() === ""
     ? []
     : MOCK_PRODUCTS.filter(
@@ -48,127 +45,45 @@ export default function SearchOverlay({ isOpen, onClose, triggerRect }: SearchOv
           p.brand.toLowerCase().includes(searchQuery.toLowerCase())
       );
 
-  // Remove background scroll when search overlay is open
+  // Lock scroll without layout shift: compensate for scrollbar width
   useEffect(() => {
     if (isOpen) {
+      const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
       document.body.style.overflow = "hidden";
-      document.documentElement.style.overflow = "hidden";
       lenis?.stop();
+      // Focus input after transition starts
+      const t = setTimeout(() => inputRef.current?.focus(), 120);
+      return () => clearTimeout(t);
     } else {
       document.body.style.overflow = "";
-      document.documentElement.style.overflow = "";
+      document.body.style.paddingRight = "";
       lenis?.start();
     }
     return () => {
       document.body.style.overflow = "";
-      document.documentElement.style.overflow = "";
+      document.body.style.paddingRight = "";
       lenis?.start();
     };
   }, [isOpen, lenis]);
 
-  // Animate Open/Close
+  // Clear query when closed
   useEffect(() => {
-    const overlay = overlayRef.current;
-    if (!overlay) return;
-
-    if (isOpen) {
-      // 1. Calculate click center
-      const clickX = triggerRect ? triggerRect.left + triggerRect.width / 2 : window.innerWidth / 2;
-      const clickY = triggerRect ? triggerRect.top + triggerRect.height / 2 : window.innerHeight / 2;
-
-      // 2. Calculate maximum circle radius to cover the screen
-      const maxRadius = Math.sqrt(
-        Math.pow(Math.max(clickX, window.innerWidth - clickX), 2) +
-        Math.pow(Math.max(clickY, window.innerHeight - clickY), 2)
-      );
-
-      // 3. Set initial state
-      gsap.killTweensOf([overlay, elementsRef.current?.children]);
-      gsap.set(overlay, {
-        visibility: "visible",
-        opacity: 1,
-        clipPath: `circle(0px at ${clickX}px ${clickY}px)`
-      });
-
-      if (elementsRef.current) {
-        gsap.set(Array.from(elementsRef.current.children), {
-          y: 40,
-          opacity: 0
-        });
-      }
-
-      // 4. Circular zoom open animation
-      gsap.to(overlay, {
-        clipPath: `circle(${maxRadius + 20}px at ${clickX}px ${clickY}px)`,
-        duration: 0.7,
-        ease: "power3.out",
-        onComplete: () => {
-          inputRef.current?.focus();
-        }
-      });
-
-      // 5. Stagger content text in
-      if (elementsRef.current) {
-        gsap.to(Array.from(elementsRef.current.children), {
-          y: 0,
-          opacity: 1,
-          duration: 0.5,
-          stagger: 0.06,
-          delay: 0.2,
-          ease: "power2.out"
-        });
-      }
-    } else {
-      // Close transition
-      const clickX = triggerRect ? triggerRect.left + triggerRect.width / 2 : window.innerWidth / 2;
-      const clickY = triggerRect ? triggerRect.top + triggerRect.height / 2 : window.innerHeight / 2;
-
-      gsap.killTweensOf([overlay, elementsRef.current?.children]);
-
-      // Fade content out first
-      if (elementsRef.current) {
-        gsap.to(Array.from(elementsRef.current.children), {
-          y: -20,
-          opacity: 0,
-          duration: 0.25,
-          stagger: 0.03,
-          ease: "power2.in"
-        });
-      }
-
-      // Shrink clip-path circle back to click point
-      gsap.to(overlay, {
-        clipPath: `circle(0px at ${clickX}px ${clickY}px)`,
-        duration: 0.5,
-        delay: 0.1,
-        ease: "power3.inOut",
-        onComplete: () => {
-          gsap.set(overlay, { visibility: "hidden" });
-          setSearchQuery("");
-        }
-      });
+    if (!isOpen) {
+      const t = setTimeout(() => setSearchQuery(""), 300);
+      return () => clearTimeout(t);
     }
-  }, [isOpen, triggerRect]);
+  }, [isOpen]);
 
   // Escape key to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
-        onClose();
-      }
+      if (e.key === "Escape" && isOpen) onClose();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
-  // Click outside (on backdrop overlay) to close
-  const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target === overlayRef.current) {
-      onClose();
-    }
-  };
-
-  // Submit Search
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (searchQuery.trim()) {
@@ -177,156 +92,177 @@ export default function SearchOverlay({ isOpen, onClose, triggerRect }: SearchOv
     }
   };
 
-  const handleSuggestionClick = (link: string) => {
+  const handleSuggestionClick = useCallback((link: string) => {
     router.push(link);
     onClose();
-  };
+  }, [router, onClose]);
+
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      setMounted(true);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   return (
-    <div
-      ref={overlayRef}
-      onClick={handleOverlayClick}
-      className="fixed inset-0 z-[100] w-screen h-screen bg-background/95 backdrop-blur-[40px] flex items-center justify-center pointer-events-auto"
-      style={{ visibility: "hidden" }}
-      data-lenis-prevent
-    >
-      {/* Close button */}
-      <button
-        onClick={onClose}
-        className="absolute top-6 right-6 p-3 rounded-full bg-muted/30 border border-border/40 hover:bg-muted/70 transition-all text-foreground hover:scale-105 cursor-pointer"
-        aria-label="Close search overlay"
-      >
-        <X className="h-5 w-5" />
-      </button>
+    mounted ? createPortal(
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          key="search-overlay"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.18, ease: "easeOut" }}
+          onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+          className="fixed inset-0 z-[100] flex items-center justify-center"
+          style={{ backgroundColor: "var(--background)" }}
+          data-lenis-prevent
+        >
+          {/* Close button */}
+          <button
+            onClick={onClose}
+            className="absolute top-6 right-6 p-3 rounded-full bg-muted/30 border border-border/40 hover:bg-muted/70 transition-colors text-foreground cursor-pointer"
+            aria-label="Close search overlay"
+          >
+            <X className="h-5 w-5" />
+          </button>
 
-      {/* Main Overlay Content */}
-      <div
-        ref={containerRef}
-        className="w-full max-w-4xl px-6 md:px-12 flex flex-col justify-center"
-      >
-        <div ref={elementsRef} className="flex flex-col space-y-12">
-          {/* Large Title Question */}
-          <div className="space-y-3">
-            <h2 className="text-3xl md:text-5xl lg:text-6xl font-extrabold tracking-tight text-foreground bg-gradient-to-r from-foreground via-foreground/90 to-muted-foreground bg-clip-text text-transparent uppercase">
-              What are you looking for?
-            </h2>
-            <p className="text-muted-foreground/80 text-sm md:text-base font-medium">
-              Search products, categories, or brands inside FTC Electronics.
-            </p>
-          </div>
+          {/* Main Content */}
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            transition={{ duration: 0.22, ease: "easeOut", delay: 0.05 }}
+            className="w-full max-w-4xl px-6 md:px-12 flex flex-col justify-center"
+          >
+            <div className="flex flex-col space-y-12">
+              {/* Title */}
+              <div className="space-y-3">
+                <h2 className="text-3xl md:text-5xl lg:text-6xl font-extrabold tracking-tight text-foreground uppercase">
+                  What are you looking for?
+                </h2>
+                <p className="text-muted-foreground/80 text-sm md:text-base font-medium">
+                  Search products, categories, or brands inside FTC Electronics.
+                </p>
+              </div>
 
-          {/* Large Minimalist Search Form */}
-          <form onSubmit={handleSubmit} className="relative w-full group">
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Type to search..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full text-2xl md:text-4xl lg:text-5xl font-light py-4 pr-16 bg-transparent border-b border-border/80 text-foreground placeholder:text-muted-foreground/30 focus:outline-none focus:border-blue-600 transition-colors"
-            />
-            <button
-              type="submit"
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-muted-foreground/60 hover:text-blue-600 transition-colors cursor-pointer"
-              aria-label="Search"
-            >
-              <Search className="h-7 w-7 md:h-9 md:w-9" />
-            </button>
-          </form>
+              {/* Search Form */}
+              <form onSubmit={handleSubmit} className="relative w-full group">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Type to search..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full text-2xl md:text-4xl lg:text-5xl font-light py-4 pr-16 bg-transparent border-b border-border/80 text-foreground placeholder:text-muted-foreground/30 focus:outline-none focus:border-blue-600 transition-colors"
+                />
+                <button
+                  type="submit"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-muted-foreground/60 hover:text-blue-600 transition-colors cursor-pointer"
+                  aria-label="Search"
+                >
+                  <Search className="h-7 w-7 md:h-9 md:w-9" />
+                </button>
+              </form>
 
-          {/* Live Search Results OR Quick suggestions */}
-          <div className="pt-4">
-            {searchQuery.trim() !== "" ? (
-              <div className="space-y-4">
-                <h3 className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold border-b border-border/50 pb-2">
-                  Matching Products ({searchResults.length})
-                </h3>
-                {searchResults.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[300px] overflow-y-auto pr-2">
-                    {searchResults.map((product) => (
-                      <button
-                        key={product.id}
-                        onClick={() => handleSuggestionClick(`/products/${product.slug}`)}
-                        className="flex items-center gap-4 p-3 rounded-xl border border-border/40 hover:border-blue-500/30 bg-muted/20 hover:bg-muted/40 transition-all text-left group cursor-pointer"
-                      >
-                        <div className="relative w-12 h-12 bg-white rounded-lg flex items-center justify-center p-1 overflow-hidden shrink-0 border border-border/20">
-                          <Image
-                            src={product.images[0]}
-                            alt={product.name}
-                            fill
-                            sizes="48px"
-                            className="object-contain group-hover:scale-105 transition-transform duration-300"
-                          />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h4 className="text-sm font-bold text-foreground truncate group-hover:text-blue-600 transition-colors">
-                            {product.name}
-                          </h4>
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-mono">
-                            {product.brand} {"//"} {product.category}
-                          </p>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <span className="text-xs font-mono font-bold text-foreground block">
-                            ${product.discountPrice || product.price}
-                          </span>
-                          {product.discountPrice && (
-                            <span className="text-[10px] font-mono text-muted-foreground line-through block">
-                              ${product.price}
-                            </span>
-                          )}
-                        </div>
-                      </button>
-                    ))}
+              {/* Results or Quick Suggestions */}
+              <div className="pt-4">
+                {searchQuery.trim() !== "" ? (
+                  <div className="space-y-4">
+                    <h3 className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold border-b border-border/50 pb-2">
+                      Matching Products ({searchResults.length})
+                    </h3>
+                    {searchResults.length > 0 ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[300px] overflow-y-auto pr-2">
+                        {searchResults.map((product) => (
+                          <button
+                            key={product.id}
+                            onClick={() => handleSuggestionClick(`/products/${product.slug}`)}
+                            className="flex items-center gap-4 p-3 rounded-xl border border-border/40 hover:border-blue-500/30 bg-muted/20 hover:bg-muted/40 transition-colors text-left group cursor-pointer"
+                          >
+                            <div className="relative w-12 h-12 bg-white rounded-lg flex items-center justify-center p-1 overflow-hidden shrink-0 border border-border/20">
+                              <Image
+                                src={product.images[0]}
+                                alt={product.name}
+                                fill
+                                sizes="48px"
+                                className="object-contain"
+                              />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-sm font-bold text-foreground truncate group-hover:text-blue-600 transition-colors">
+                                {product.name}
+                              </h4>
+                              <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-mono">
+                                {product.brand} {"//"}  {product.category}
+                              </p>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <span className="text-xs font-mono font-bold text-foreground block">
+                                ${product.discountPrice || product.price}
+                              </span>
+                              {product.discountPrice && (
+                                <span className="text-[10px] font-mono text-muted-foreground line-through block">
+                                  ${product.price}
+                                </span>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="py-8 text-center text-muted-foreground">
+                        No products found matching &ldquo;<span className="text-foreground font-semibold">{searchQuery}</span>&rdquo;.
+                      </div>
+                    )}
                   </div>
                 ) : (
-                  <div className="py-8 text-center text-muted-foreground">
-                    No hardware products found matching &ldquo;<span className="text-foreground font-semibold">{searchQuery}</span>&rdquo;.
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    {/* Categories */}
+                    <div className="space-y-4">
+                      <h3 className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">
+                        Trending Categories
+                      </h3>
+                      <div className="flex flex-wrap gap-2.5">
+                        {categories.map((c) => (
+                          <button
+                            key={c.label}
+                            onClick={() => handleSuggestionClick(c.link)}
+                            className="px-4 py-2 text-xs md:text-sm font-semibold bg-muted/30 border border-border/40 hover:border-blue-500/30 hover:bg-blue-50/50 hover:text-blue-600 rounded-full transition-colors cursor-pointer"
+                          >
+                            {c.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Brands */}
+                    <div className="space-y-4">
+                      <h3 className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">
+                        Popular Brands
+                      </h3>
+                      <div className="flex flex-wrap gap-2.5">
+                        {brands.map((b) => (
+                          <button
+                            key={b.label}
+                            onClick={() => handleSuggestionClick(b.link)}
+                            className="px-4 py-2 text-xs md:text-sm font-semibold bg-muted/30 border border-border/40 hover:border-blue-500/30 hover:bg-blue-50/50 hover:text-blue-600 rounded-full transition-colors cursor-pointer"
+                          >
+                            {b.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {/* Categories */}
-                <div className="space-y-4">
-                  <h3 className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">
-                    Trending Categories
-                  </h3>
-                  <div className="flex flex-wrap gap-2.5">
-                    {categories.map((c) => (
-                      <button
-                        key={c.label}
-                        onClick={() => handleSuggestionClick(c.link)}
-                        className="px-4 py-2 text-xs md:text-sm font-semibold bg-muted/30 border border-border/40 hover:border-blue-500/30 hover:bg-blue-50/50 hover:text-blue-600 rounded-full transition-all cursor-pointer"
-                      >
-                        {c.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Brands */}
-                <div className="space-y-4">
-                  <h3 className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">
-                    Popular Brands
-                  </h3>
-                  <div className="flex flex-wrap gap-2.5">
-                    {brands.map((b) => (
-                      <button
-                        key={b.label}
-                        onClick={() => handleSuggestionClick(b.link)}
-                        className="px-4 py-2 text-xs md:text-sm font-semibold bg-muted/30 border border-border/40 hover:border-blue-500/30 hover:bg-blue-50/50 hover:text-blue-600 rounded-full transition-all cursor-pointer"
-                      >
-                        {b.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>,
+    document.body
+  ) : null);
 }

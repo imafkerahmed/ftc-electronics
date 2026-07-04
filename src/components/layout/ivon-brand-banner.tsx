@@ -1,14 +1,12 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { ArrowRight, Zap, ShieldCheck, Headphones, Sparkles } from "lucide-react";
-import { motion, useScroll, useTransform } from "motion/react";
+import { motion } from "motion/react";
 
 export default function IvonBrandBanner() {
-  const containerRef = useRef<HTMLElement>(null);
-  
   // Particles state to prevent server-side hydration mismatch
   const [particles, setParticles] = useState<Array<{
     id: number;
@@ -31,20 +29,14 @@ export default function IvonBrandBanner() {
       duration: Math.random() * 6 + 6, // 6s to 12s
       color: Math.random() > 0.5 ? "rgba(6, 182, 212, 0.4)" : "rgba(234, 179, 8, 0.3)", // Cyan or Yellow
     }));
-    setParticles(generated);
+    const frame = requestAnimationFrame(() => {
+      setParticles(generated);
+    });
+    return () => cancelAnimationFrame(frame);
   }, []);
-
-  // Hook scroll for simple parallax effects
-  const { scrollYProgress } = useScroll({
-    target: containerRef,
-    offset: ["start end", "end start"],
-  });
-
-  const bannerY = useTransform(scrollYProgress, [0, 1], ["-5%", "5%"]);
 
   return (
     <section
-      ref={containerRef}
       className="w-full py-16 sm:py-24 relative overflow-hidden bg-gradient-to-b from-background via-muted/20 to-background border-y border-border"
     >
       {/* Background ambient glowing orbs */}
@@ -109,7 +101,7 @@ export default function IvonBrandBanner() {
 
             {/* Description Paragraph */}
             <p className="text-sm sm:text-base leading-relaxed text-muted-foreground mb-8 max-w-xl">
-              Elevate your daily connectivity with IVON's high-performance ecosystem. 
+              Elevate your daily connectivity with {"IVON's"} high-performance ecosystem. 
               From intelligent auto-sensing fast chargers to military-grade armored cables 
               and crystal-clear wireless audio, discover engineering-focused design that 
               charges fast and plays clean.

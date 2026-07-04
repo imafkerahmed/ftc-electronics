@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { motion } from 'motion/react';
 import './TrueFocus.css';
 
@@ -25,7 +25,9 @@ const TrueFocus: React.FC<TrueFocusProps> = ({
   animationDuration = 0.5,
   pauseBetweenAnimations = 1
 }) => {
-  const words = sentence.split(separator);
+  // Memoize splitting to avoid processing on every component render
+  const words = useMemo(() => sentence.split(separator), [sentence, separator]);
+  
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [lastActiveIndex, setLastActiveIndex] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -45,7 +47,8 @@ const TrueFocus: React.FC<TrueFocusProps> = ({
     }
   }, [manualMode, animationDuration, pauseBetweenAnimations, words.length]);
 
-  useEffect(() => {
+  // Recalculate focus frames coordinates dynamically
+  const updateFocusRect = useCallback(() => {
     if (currentIndex === null || currentIndex === -1) return;
 
     const currentWordEl = wordRefs.current[currentIndex];
@@ -60,7 +63,16 @@ const TrueFocus: React.FC<TrueFocusProps> = ({
       width: activeRect.width,
       height: activeRect.height
     });
-  }, [currentIndex, words.length]);
+  }, [currentIndex]);
+
+  // Handle window resizing and layout reflows dynamically
+  useEffect(() => {
+    updateFocusRect();
+    window.addEventListener('resize', updateFocusRect);
+    return () => {
+      window.removeEventListener('resize', updateFocusRect);
+    };
+  }, [updateFocusRect]);
 
   const handleMouseEnter = (index: number) => {
     if (manualMode) {

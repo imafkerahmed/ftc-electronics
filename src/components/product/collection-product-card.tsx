@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { Star, Plus, Check } from "lucide-react";
+import { Star, Check } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Product } from "@/types/product";
 import { useCart } from "@/hooks/use-cart";
@@ -25,8 +25,8 @@ export default function CollectionProductCard({
     discountPrice,
     images,
     rating,
-    numReviews,
     brand,
+    category,
     currency,
     countInStock,
   } = product;
@@ -42,7 +42,7 @@ export default function CollectionProductCard({
   // Format price helper
   const formatPriceVal = (value: number) => {
     if (currency === "LKR") {
-      return `Rs.${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return `Rs.${value.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
     }
     return `$${value.toFixed(2)}`;
   };
@@ -65,48 +65,91 @@ export default function CollectionProductCard({
     }, 1200);
   };
 
-  // Glow shadow map for hovered state
-  const getHoverShadowClass = () => {
+  // Subtitle (Category & Brand)
+  const subTitleText = category && brand 
+    ? `${category.charAt(0).toUpperCase() + category.slice(1)}, ${brand}` 
+    : category || brand || "";
+
+  // Badge Text
+  const getBadgeText = () => {
+    if (isOutOfStock) return "Out of Stock";
+    if (hasDiscount) return "On Sale";
+    if (product.isFeatured) return "Featured";
+    return "New Arrival";
+  };
+
+  // Badge Color matching section color
+  const getBadgeColorClass = () => {
+    if (isOutOfStock) {
+      return "bg-neutral-200 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400";
+    }
     switch (themeColor) {
       case "red":
-        return "hover:shadow-[0_20px_40px_rgba(239,68,68,0.06)] hover:border-red-500/35 dark:hover:border-red-500/35";
+        return "bg-red-500 text-white";
       case "purple":
-        return "hover:shadow-[0_20px_40px_rgba(139,92,246,0.06)] hover:border-violet-500/35 dark:hover:border-violet-500/35";
+        return "bg-violet-500 text-white";
       case "teal":
-        return "hover:shadow-[0_20px_40px_rgba(20,184,166,0.06)] hover:border-teal-500/35 dark:hover:border-teal-500/35";
+        return "bg-teal-600 text-white";
       case "blue":
       default:
-        return "hover:shadow-[0_20px_40px_rgba(59,130,246,0.06)] hover:border-blue-500/35 dark:hover:border-blue-500/35";
+        return "bg-blue-600 text-white";
     }
+  };
+
+  // 3-Month Installment Split
+  const getInstallmentAmount = () => {
+    const activePrice = discountPrice || price;
+    const installmentAmt = Math.round(activePrice / 3);
+    if (currency === "LKR") {
+      return `Rs.${installmentAmt.toLocaleString("en-US")}`;
+    }
+    return `$${(activePrice / 3).toFixed(2)}`;
+  };
+
+  const getHoverShadowClass = () => {
+    return "hover:shadow-[0_4px_12px_rgba(0,0,0,0.03)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.2)] hover:border-neutral-300 dark:hover:border-neutral-700";
   };
 
   return (
     <Link
       href={`/products/${slug}`}
-      className={`group flex flex-col w-full min-w-0 select-none cursor-pointer relative p-4 rounded-3xl border border-neutral-200/50 dark:border-neutral-800/50 bg-white/70 dark:bg-neutral-900/40 backdrop-blur-md transition-all duration-500 ease-out hover:-translate-y-2 z-10 ${getHoverShadowClass()}`}
+      className={`group flex flex-col w-full min-w-0 select-none cursor-pointer relative p-4 rounded-xl border border-neutral-200/50 dark:border-neutral-800/50 bg-white dark:bg-neutral-900/20 transition-all duration-300 z-10 ${getHoverShadowClass()}`}
     >
-      {/* Image Stage Container with seamless background and dynamic glow */}
-      <div className="relative aspect-[4/3] w-full overflow-hidden flex items-center justify-center mb-3.5 bg-neutral-50/50 dark:bg-neutral-950/20 rounded-2xl border border-neutral-100 dark:border-neutral-900/30">
-        
-        {/* Soft background ambient circle glow */}
-        <div
-          className={`absolute w-24 h-24 rounded-full blur-[24px] opacity-15 dark:opacity-20 pointer-events-none -z-10 transition-transform duration-700 group-hover:scale-125 ${
-            themeColor === "red"
-              ? "bg-red-500"
-              : themeColor === "purple"
-                ? "bg-purple-500"
-                : themeColor === "teal"
-                  ? "bg-teal-500"
-                  : "bg-blue-500"
-          }`}
-        />
+      {/* Top Details Block */}
+      <div className="flex flex-col items-start mb-3">
+        {/* Brand / Category Subtitle */}
+        {subTitleText && (
+          <span className="text-[10px] font-medium text-neutral-450 dark:text-neutral-500 mb-0.5 leading-none">
+            {subTitleText}
+          </span>
+        )}
+
+        {/* Product Title */}
+        <h4 className="text-xs sm:text-[13px] font-bold text-blue-650 dark:text-blue-400 line-clamp-2 leading-snug min-h-[36px] group-hover:text-blue-800 dark:group-hover:text-blue-300 transition-colors duration-300">
+          {name}
+        </h4>
+
+        {/* Badge tag below Title */}
+        <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md mt-1.5 w-fit ${getBadgeColorClass()}`}>
+          {getBadgeText()}
+        </span>
+      </div>
+
+      {/* Image Stage Container with seamless background */}
+      <div className="relative aspect-[4/3] w-full overflow-hidden flex items-center justify-center mb-3 bg-neutral-50/40 dark:bg-neutral-950/40 rounded-md border border-neutral-100 dark:border-neutral-900/30">
+        {/* Discount Badge overlaid bottom-left */}
+        {hasDiscount && (
+          <div className="absolute bottom-2 left-2 bg-emerald-600 dark:bg-emerald-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-md z-10">
+            -{Math.round(((price - discountPrice) / price) * 100)}%
+          </div>
+        )}
 
         {/* Primary Image */}
         <Image
           src={images[0]}
           alt={name}
           fill
-          className={`object-contain p-4 transition-all duration-500 ease-out group-hover:scale-108 group-hover:-translate-y-1 ${
+          className={`object-contain p-1.5 transition-all duration-300 ease-out group-hover:scale-105 ${
             hasMultipleImages
               ? "opacity-100 group-hover:opacity-0"
               : "opacity-100"
@@ -121,7 +164,7 @@ export default function CollectionProductCard({
             src={images[1]}
             alt={`${name} secondary view`}
             fill
-            className="object-contain p-4 absolute inset-0 opacity-0 group-hover:opacity-100 group-hover:scale-108 group-hover:-translate-y-1 transition-all duration-500 ease-out"
+            className="object-contain p-1.5 absolute inset-0 opacity-0 group-hover:opacity-100 group-hover:scale-105 transition-all duration-300 ease-out"
             sizes="(max-width: 768px) 50vw, (max-width: 1200px) 25vw, 20vw"
             priority={false}
           />
@@ -129,139 +172,107 @@ export default function CollectionProductCard({
 
         {/* Sold out overlay */}
         {isOutOfStock && (
-          <div className="absolute inset-0 flex items-center justify-center bg-white/70 dark:bg-neutral-950/70 backdrop-blur-[2px] z-25 rounded-2xl">
-            <span className="rounded-lg bg-white/90 dark:bg-neutral-900/90 border border-neutral-200 dark:border-neutral-800 px-3.5 py-1.5 text-[9px] font-black text-neutral-850 dark:text-neutral-200 uppercase tracking-widest shadow-md">
+          <div className="absolute inset-0 flex items-center justify-center bg-white/70 dark:bg-neutral-950/70 backdrop-blur-[2px] z-25 rounded-md">
+            <span className="rounded-lg bg-white/90 dark:bg-neutral-900/90 border border-neutral-200 dark:border-neutral-800 px-3.5 py-1.5 text-[9px] font-black text-neutral-850 dark:text-neutral-200 uppercase tracking-widest shadow-sm">
               Sold Out
             </span>
           </div>
         )}
       </div>
 
-      {/* Product Details Section */}
-      <div className="flex flex-col flex-grow">
-        {/* Brand Name Tag */}
-        {brand && (
-          <span className="text-[9px] font-black tracking-widest uppercase text-neutral-400 dark:text-neutral-500 mb-1.5">
-            {brand}
-          </span>
-        )}
-
-        {/* Product Title (2-line clamp ensures alignment) */}
-        <h4 className="text-xs sm:text-[13px] font-bold text-neutral-800 dark:text-neutral-200 line-clamp-2 leading-snug min-h-[36px] group-hover:text-neutral-950 dark:group-hover:text-white transition-colors duration-300">
-          {name}
-        </h4>
-
-        {/* Interactive Star Rating Row */}
-        <div className="flex items-center gap-1.5 mt-2 mb-3.5">
-          <div className="flex items-center text-amber-400">
-            {Array.from({ length: 5 }).map((_, i) => {
-              const starVal = i + 1;
-              const isFilled = rating >= starVal;
-              return (
-                <Star
-                  key={i}
-                  className={`h-3 w-3 ${
-                    isFilled
-                      ? "fill-amber-400 text-amber-400"
-                      : "text-neutral-250 dark:text-neutral-750"
-                  }`}
-                />
-              );
-            })}
-          </div>
-          <span className="text-[10px] font-medium text-neutral-450 dark:text-neutral-500">
-            {rating ? rating.toFixed(1) : "5.0"} ({numReviews || 0})
-          </span>
-        </div>
-
-        {/* Pricing & Quick Action Row */}
-        <div className="mt-auto pt-3.5 border-t border-neutral-100 dark:border-neutral-800/50 flex items-center justify-between gap-4">
+      {/* Pricing & CTA Block */}
+      <div className="flex flex-col w-full">
+        {/* Price & Star Rating Row */}
+        <div className="pt-2.5 border-t border-neutral-100 dark:border-neutral-850/50 flex items-end justify-between">
           {/* Price Container */}
           <div className="flex flex-col">
-            {hasDiscount ? (
-              <>
-                <span className="text-[10px] text-neutral-400 line-through leading-none mb-1 font-medium">
+            <span className="text-[10px] text-neutral-450 dark:text-neutral-500 font-medium leading-none mb-1">
+              Starting
+            </span>
+            <div className="flex items-baseline gap-1">
+              {hasDiscount && (
+                <span className="text-[9px] text-neutral-400 line-through leading-none mr-1 font-medium">
                   {formatPriceVal(price)}
                 </span>
-                <span
-                  className={`text-sm sm:text-base font-black leading-none ${
-                    themeColor === "red"
-                      ? "text-red-500 dark:text-red-400"
-                      : themeColor === "purple"
-                        ? "text-violet-500 dark:text-violet-400"
-                        : themeColor === "teal"
-                          ? "text-teal-600 dark:text-teal-400"
-                          : "text-blue-500 dark:text-blue-400"
-                  }`}
-                >
-                  {formatPriceVal(discountPrice)}
-                </span>
-              </>
-            ) : (
-              <span className="text-sm sm:text-base font-black text-neutral-850 dark:text-white leading-none">
-                {formatPriceVal(price)}
+              )}
+              <span className="text-sm sm:text-base font-black text-red-500 dark:text-red-400 leading-none">
+                {formatPriceVal(discountPrice || price)}
               </span>
-            )}
+            </div>
           </div>
 
-          {/* Quick-add Circular Icon Button */}
-          <div className="shrink-0">
-            {isOutOfStock ? (
-              <span className="text-[8px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800/40 text-neutral-400 dark:text-neutral-600 border border-neutral-200/50 dark:border-neutral-800/50">
-                Out
-              </span>
-            ) : (
-              <motion.button
-                onClick={handleQuickAdd}
-                className={`h-9 w-9 rounded-full flex items-center justify-center border transition-all duration-300 focus:outline-none cursor-pointer ${
-                  isAdding
-                    ? themeColor === "red"
-                      ? "bg-red-500 border-red-500 text-white"
-                      : themeColor === "purple"
-                        ? "bg-violet-500 border-violet-500 text-white"
-                        : themeColor === "teal"
-                          ? "bg-teal-500 border-teal-500 text-white"
-                          : "bg-blue-500 border-blue-500 text-white"
-                    : `bg-neutral-50 border-neutral-200 text-neutral-700 dark:bg-neutral-800/40 dark:border-neutral-800 dark:text-neutral-300 hover:scale-108 active:scale-95 group-hover:shadow-xs ${
-                        themeColor === "red"
-                          ? "hover:bg-red-500 hover:border-red-500 hover:text-white dark:hover:bg-red-500 dark:hover:border-red-500 dark:hover:text-white"
-                          : themeColor === "purple"
-                            ? "hover:bg-violet-500 hover:border-violet-500 hover:text-white dark:hover:bg-violet-500 dark:hover:border-violet-500 dark:hover:text-white"
-                            : themeColor === "teal"
-                              ? "hover:bg-teal-500 hover:border-teal-500 hover:text-white dark:hover:bg-teal-500 dark:hover:border-teal-500 dark:hover:text-white"
-                              : "hover:bg-blue-500 hover:border-blue-500 hover:text-white dark:hover:bg-blue-500 dark:hover:border-blue-500 dark:hover:text-white"
-                      }`
-                }`}
-                whileTap={{ scale: 0.9 }}
-                aria-label="Add directly to cart"
-              >
-                <AnimatePresence mode="wait">
-                  {isAdding ? (
-                    <motion.div
-                      key="added"
-                      initial={{ opacity: 0, scale: 0.7 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.7 }}
-                      transition={{ duration: 0.2 }}
-                    >
-                      <Check className="h-4 w-4 stroke-[3]" />
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      key="add"
-                      className="transition-transform duration-500 group-hover:rotate-90"
-                      initial={{ opacity: 0, scale: 0.7 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.7 }}
-                      transition={{ duration: 0.2 }}
-                    >
-                      <Plus className="h-4.5 w-4.5 stroke-[2.5]" />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </motion.button>
-            )}
+          {/* Star Rating on the right */}
+          <div className="flex items-center gap-1 mb-0.5">
+            <div className="flex items-center text-amber-400">
+              <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" />
+            </div>
+            <span className="text-[10px] font-semibold text-neutral-500 dark:text-neutral-400 leading-none">
+              {rating ? rating.toFixed(1) : "5.0"}
+            </span>
           </div>
+        </div>
+
+        {/* Quick-add Full-Width Buy Now Button */}
+        <div className="mt-3 w-full">
+          {isOutOfStock ? (
+            <span className="w-full h-9 rounded-full flex items-center justify-center bg-neutral-100 dark:bg-neutral-800/40 text-neutral-400 dark:text-neutral-600 border border-neutral-200/50 dark:border-neutral-800/50 text-[10px] font-bold uppercase tracking-wider">
+              Out of Stock
+            </span>
+          ) : (
+            <motion.button
+              onClick={handleQuickAdd}
+              className={`w-full h-9 rounded-full flex items-center justify-center gap-1.5 border transition-all duration-200 focus:outline-none cursor-pointer ${
+                isAdding
+                  ? "bg-emerald-600 border-emerald-600 text-white dark:bg-emerald-500 dark:border-emerald-500"
+                  : "bg-neutral-950 border-neutral-950 text-white dark:bg-neutral-50 dark:border-neutral-50 dark:text-neutral-950 hover:bg-neutral-850 dark:hover:bg-neutral-200"
+              }`}
+              whileTap={{ scale: 0.98 }}
+              aria-label="Buy Now"
+            >
+              <AnimatePresence mode="wait">
+                {isAdding ? (
+                  <motion.div
+                    key="added"
+                    className="flex items-center justify-center gap-1.5"
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <Check className="h-3.5 w-3.5 stroke-[3]" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider">Added</span>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="buy"
+                    className="flex items-center justify-center gap-1.5"
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <span className="text-[10px] font-bold uppercase tracking-wider">Buy Now</span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.button>
+          )}
+        </div>
+
+        {/* Installment Plan widget */}
+        <div className="w-full bg-neutral-50 dark:bg-neutral-900/30 rounded-lg py-1.5 px-2 mt-2.5 text-center border border-neutral-100/50 dark:border-neutral-850/50 flex items-center justify-center gap-1 flex-wrap">
+          <span className="text-[9px] font-medium text-neutral-500 dark:text-neutral-400">
+            or 3 X {getInstallmentAmount()} with
+          </span>
+          <span className="text-[9px] font-black italic tracking-tight text-indigo-600 dark:text-indigo-400 select-none">
+            KOKO
+          </span>
+          <span className="text-[9px] font-medium text-neutral-400 dark:text-neutral-500">
+            or
+          </span>
+          <span className="text-[9px] font-black italic tracking-tight text-sky-500 dark:text-sky-400 select-none">
+            mintpay
+          </span>
         </div>
       </div>
     </Link>

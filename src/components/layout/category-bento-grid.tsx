@@ -11,9 +11,70 @@ import {
 import { motion } from "motion/react";
 import InteractiveGridBackground from "@/components/lightswind/interactive-grid-background";
 
+interface CategoryCard {
+  label: string;
+  title: string;
+  description: string;
+  href: string;
+  count: string;
+  icon: React.ReactNode;
+  glowColor: string;
+  hoverColor: string;
+  iconBg: string;
+}
+
+const categories: CategoryCard[] = [
+  {
+    label: "LAPTOPS",
+    title: "Laptops & Computing",
+    description: "High-Performance Workstations",
+    href: "/products?category=laptops",
+    count: "48+ Products",
+    icon: <Laptop className="w-12 h-12 sm:w-20 lg:w-28 sm:h-20 lg:h-28 text-blue-600" strokeWidth={1.2} />,
+    glowColor: "rgba(59,130,246,0.2)",
+    hoverColor: "group-hover:text-blue-600 dark:group-hover:text-blue-400",
+    iconBg: "bg-blue-500/8 dark:bg-blue-500/5",
+  },
+  {
+    label: "KEYBOARDS",
+    title: "Keyboards",
+    description: "Mechanical & Membrane",
+    href: "/products?category=keyboards",
+    count: "24+ Products",
+    icon: <Keyboard className="w-10 h-10 sm:w-16 lg:w-20 sm:h-16 lg:h-20 text-slate-600 dark:text-neutral-300" strokeWidth={1.2} />,
+    glowColor: "rgba(100,116,139,0.18)",
+    hoverColor: "group-hover:text-slate-600 dark:group-hover:text-neutral-300",
+    iconBg: "bg-slate-500/8 dark:bg-neutral-400/5",
+  },
+  {
+    label: "AUDIO",
+    title: "Audio & Sound",
+    description: "Premium Sound Equipment",
+    href: "/products?category=audio",
+    count: "36+ Products",
+    icon: <Headphones className="w-10 h-10 sm:w-16 lg:w-20 sm:h-16 lg:h-20 text-rose-600" strokeWidth={1.2} />,
+    glowColor: "rgba(244,63,94,0.18)",
+    hoverColor: "group-hover:text-rose-600 dark:group-hover:text-rose-450",
+    iconBg: "bg-rose-500/8 dark:bg-rose-500/5",
+  },
+  {
+    label: "PHONES",
+    title: "Smartphones",
+    description: "Flagship Mobile Devices",
+    href: "/products?category=phones",
+    count: "30+ Products",
+    icon: <Smartphone className="w-auto h-full max-h-[60px] sm:max-h-[160px] lg:max-h-[200px] text-emerald-600" strokeWidth={1.2} />,
+    glowColor: "rgba(16,185,129,0.18)",
+    hoverColor: "group-hover:text-emerald-600 dark:group-hover:text-emerald-450",
+    iconBg: "bg-emerald-500/8 dark:bg-emerald-500/5",
+  },
+];
+
 export default function CategoryBentoGrid() {
+  const [laptops, keyboards, audio, phones] = categories;
+
   return (
-    <section className="w-full py-8 sm:py-16 lg:py-24 border-b border-border bg-zinc-50 dark:bg-neutral-950 text-foreground dark:text-white relative z-10 overflow-hidden">
+    <section className="w-full py-10 sm:py-16 lg:py-24 border-b border-border bg-zinc-50 dark:bg-neutral-950 text-foreground dark:text-white relative z-10 overflow-hidden">
       {/* Background Interactive Grid */}
       <div className="absolute inset-0 z-0 opacity-100 pointer-events-none w-full h-full">
         <InteractiveGridBackground
@@ -30,293 +91,169 @@ export default function CategoryBentoGrid() {
       </div>
 
       <div className="max-w-7xl mx-auto px-6 sm:px-12 lg:px-16 relative z-10">
-        {/* Asymmetric Responsive Grid Structure */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-stretch">
-          {/* Left Column (stacks Laptops horizontally over Keyboards and Audio grids) - Span 8 */}
-          <div className="lg:col-span-8 flex flex-col gap-6">
-            {/* Laptops & Computing (Horizontal Card) */}
-            <Link href="/products?category=laptops" className="group block">
-              <motion.div
-                initial="initial"
-                whileInView="animate"
-                whileHover="hover"
-                viewport={{ once: true, amount: 0.2 }}
-                variants={{
-                  initial: {
-                    y: 0,
-                    boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05)",
-                  },
-                  hover: {
-                    y: -6,
-                    boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
-                  },
-                }}
-                transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                className="relative bg-white/75 dark:bg-neutral-900/40 rounded-[24px] border border-neutral-200/60 dark:border-white/5 h-[125px] sm:h-[220px] lg:h-[260px] overflow-hidden p-4 sm:p-6 lg:p-8 flex flex-col justify-between backdrop-blur-md transition-colors"
-              >
-                {/* Left Content */}
-                <div className="z-10 max-w-[50%] flex flex-col items-start">
-                  <span className="font-mono text-[10px] tracking-widest text-neutral-400 dark:text-neutral-500 uppercase font-bold">
-                    LAPTOPS
-                  </span>
-                  <h3 className="text-lg sm:text-2xl font-black text-neutral-900 dark:text-white uppercase tracking-tight mt-1.5 sm:mt-2 leading-none">
-                    Laptops & Computing
-                  </h3>
-                  <p className="text-[11px] sm:text-sm text-neutral-550 dark:text-neutral-400 mt-1 sm:mt-2 leading-relaxed font-medium">
-                    High-Performance Workstations
-                  </p>
+        {/* ── Section Header ── */}
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-8 sm:mb-12">
+          <div className="relative">
+            {/* Decorative background word */}
+            <span className="absolute -top-3 sm:-top-6 left-0 text-5xl sm:text-8xl font-black text-neutral-100 dark:text-white/[0.03] uppercase tracking-tight leading-none select-none pointer-events-none">
+              EXPLORE
+            </span>
+            <span className="relative text-[10px] font-mono font-bold uppercase tracking-[0.3em] text-neutral-400 dark:text-neutral-500 block mb-2">
+              Shop by Category
+            </span>
+            <h2 className="relative text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight text-neutral-900 dark:text-white uppercase leading-none">
+              Browse Our{" "}
+              <span className="text-blue-600 dark:text-blue-400">Collections</span>
+            </h2>
+          </div>
+          <Link
+            href="/products"
+            className="inline-flex items-center gap-2 text-sm font-bold text-neutral-400 dark:text-neutral-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors duration-300 group shrink-0"
+          >
+            View All Categories
+            <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
+          </Link>
+        </div>
 
-                  {/* Shop Now CTA link */}
-                  <div className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 dark:text-neutral-500 group-hover:text-blue-600 dark:group-hover:text-blue-400 mt-3 sm:mt-6 transition-colors duration-300">
-                    <span>Shop Now</span>
-                    <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
-                  </div>
-                </div>
+        {/* ── Asymmetric Bento Grid ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 items-stretch">
+          {/* Left Column — Laptops on top, Keyboards + Audio below */}
+          <div className="lg:col-span-8 flex flex-col gap-4 sm:gap-5">
+            {/* Laptops Card (wide horizontal) */}
+            <BentoCard card={laptops} heightClass="h-[130px] sm:h-[240px] lg:h-[280px]" wide>
+              <div className="absolute top-0 right-0 h-full w-[45%] overflow-hidden flex items-center justify-center">
+                <div
+                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 sm:w-48 sm:h-48 rounded-full blur-[35px] pointer-events-none group-hover:scale-125 transition-transform duration-700"
+                  style={{ background: `radial-gradient(circle, ${laptops.glowColor} 0%, transparent 70%)` }}
+                />
+                <motion.div
+                  variants={{
+                    initial: { scale: 0.75, opacity: 0 },
+                    animate: { scale: 1, opacity: 1, transition: { duration: 0.55 } },
+                    hover: { scale: 1.08, y: -5, transition: { type: "spring", stiffness: 260, damping: 16 } },
+                  }}
+                  className="flex items-center justify-center"
+                >
+                  {laptops.icon}
+                </motion.div>
+              </div>
+            </BentoCard>
 
-                {/* Right Image Container */}
-                <div className="absolute top-0 right-0 h-full w-[45%] overflow-hidden flex items-center justify-center">
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 sm:w-36 sm:h-36 rounded-full bg-blue-500/10 dark:bg-blue-500/5 blur-[25px] pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+            {/* Bottom row */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
+              {/* Keyboards */}
+              <BentoCard card={keyboards} heightClass="h-[130px] sm:h-[240px] lg:h-[280px]">
+                <div className="absolute right-4 bottom-4 sm:right-6 sm:bottom-6 lg:right-8 lg:bottom-8 select-none pointer-events-none">
+                  <div
+                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 sm:w-28 sm:h-28 rounded-full blur-[25px] pointer-events-none group-hover:scale-125 transition-transform duration-700"
+                    style={{ background: `radial-gradient(circle, ${keyboards.glowColor} 0%, transparent 70%)` }}
+                  />
                   <motion.div
                     variants={{
-                      initial: { scale: 0.8, opacity: 0 },
-                      animate: {
-                        scale: 1,
-                        opacity: 1,
-                        transition: { duration: 0.5 },
-                      },
-                      hover: {
-                        scale: 1.1,
-                        y: -4,
-                        transition: {
-                          type: "spring",
-                          stiffness: 300,
-                          damping: 15,
-                        },
-                      },
+                      initial: { scale: 0.75, opacity: 0 },
+                      animate: { scale: 1, opacity: 1, transition: { duration: 0.55 } },
+                      hover: { scale: 1.1, transition: { type: "spring", stiffness: 260, damping: 16 } },
                     }}
-                    className="flex items-center justify-center"
                   >
-                    <Laptop
-                      className="w-16 h-16 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-blue-600"
-                      strokeWidth={1.5}
-                    />
+                    {keyboards.icon}
                   </motion.div>
                 </div>
-              </motion.div>
-            </Link>
+              </BentoCard>
 
-            {/* Bottom Row Stack: Keyboards & Audio */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-              {/* Keyboards Card */}
-              <Link href="/products?category=keyboards" className="group block">
-                <motion.div
-                  initial="initial"
-                  whileInView="animate"
-                  whileHover="hover"
-                  viewport={{ once: true, amount: 0.2 }}
-                  variants={{
-                    initial: {
-                      y: 0,
-                      boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05)",
-                    },
-                    hover: {
-                      y: -6,
-                      boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
-                    },
-                  }}
-                  transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                  className="relative bg-white/75 dark:bg-neutral-900/40 rounded-[24px] border border-neutral-200/60 dark:border-white/5 h-[125px] sm:h-[220px] lg:h-[260px] overflow-hidden p-4 sm:p-6 lg:p-8 flex flex-col justify-between backdrop-blur-md transition-colors"
-                >
-                  {/* Content */}
-                  <div className="z-10 max-w-[60%] flex flex-col items-start">
-                    <span className="font-mono text-[10px] tracking-widest text-neutral-400 dark:text-neutral-500 uppercase font-bold">
-                      KEYBOARDS
-                    </span>
-                    <h3 className="text-lg sm:text-xl font-black text-neutral-900 dark:text-white uppercase tracking-tight mt-1.5 sm:mt-2 leading-none">
-                      Keyboards
-                    </h3>
-                    <p className="text-[11px] sm:text-xs text-neutral-550 dark:text-neutral-400 mt-1 sm:mt-1.5 leading-relaxed font-medium">
-                      Mechanical Keyboards
-                    </p>
-
-                    {/* Shop Now CTA link */}
-                    <div className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 dark:text-neutral-500 group-hover:text-slate-600 dark:group-hover:text-neutral-300 mt-3 sm:mt-6 transition-colors duration-300">
-                      <span>Shop Now</span>
-                      <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
-                    </div>
-                  </div>
-
-                  {/* Animated Keyboard Vector */}
-                  <div className="absolute right-4 bottom-4 sm:right-6 sm:bottom-6 lg:right-8 lg:bottom-8 select-none pointer-events-none">
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 sm:w-24 sm:h-24 rounded-full bg-slate-500/10 dark:bg-neutral-400/5 blur-[20px] pointer-events-none group-hover:scale-125 transition-transform duration-500" />
-                    <motion.div
-                      variants={{
-                        initial: { scale: 0.8, opacity: 0 },
-                        animate: {
-                          scale: 1,
-                          opacity: 1,
-                          transition: { duration: 0.5 },
-                        },
-                        hover: {
-                          scale: 1.1,
-                          transition: {
-                            type: "spring",
-                            stiffness: 300,
-                            damping: 15,
-                          },
-                        },
-                      }}
-                    >
-                      <Keyboard
-                        className="w-12 h-12 sm:w-16 lg:w-20 sm:h-16 lg:h-20 text-slate-600 dark:text-neutral-300"
-                        strokeWidth={1.5}
-                      />
-                    </motion.div>
-                  </div>
-                </motion.div>
-              </Link>
-
-              {/* Audio & Sound Card */}
-              <Link href="/products?category=audio" className="group block">
-                <motion.div
-                  initial="initial"
-                  whileInView="animate"
-                  whileHover="hover"
-                  viewport={{ once: true, amount: 0.2 }}
-                  variants={{
-                    initial: {
-                      y: 0,
-                      boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05)",
-                    },
-                    hover: {
-                      y: -6,
-                      boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
-                    },
-                  }}
-                  transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                  className="relative bg-white/75 dark:bg-neutral-900/40 rounded-[24px] border border-neutral-200/60 dark:border-white/5 h-[125px] sm:h-[220px] lg:h-[260px] overflow-hidden p-4 sm:p-6 lg:p-8 flex flex-col justify-between backdrop-blur-md transition-colors"
-                >
-                  {/* Content */}
-                  <div className="z-10 max-w-[60%] flex flex-col items-start">
-                    <span className="font-mono text-[10px] tracking-widest text-neutral-400 dark:text-neutral-500 uppercase font-bold">
-                      AUDIO
-                    </span>
-                    <h3 className="text-lg sm:text-xl font-black text-neutral-900 dark:text-white uppercase tracking-tight mt-1.5 sm:mt-2 leading-none">
-                      Audio & Sound
-                    </h3>
-                    <p className="text-[11px] sm:text-xs text-neutral-550 dark:text-neutral-400 mt-1 sm:mt-1.5 leading-relaxed font-medium">
-                      Premium Sound Equipment
-                    </p>
-
-                    {/* Shop Now CTA link */}
-                    <div className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 dark:text-neutral-500 group-hover:text-rose-600 dark:group-hover:text-rose-450 mt-3 sm:mt-6 transition-colors duration-300">
-                      <span>Shop Now</span>
-                      <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
-                    </div>
-                  </div>
-
-                  {/* Animated Headphones Vector */}
-                  <div className="absolute right-4 bottom-4 sm:right-6 sm:bottom-6 lg:right-8 lg:bottom-8 select-none pointer-events-none">
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 sm:w-24 sm:h-24 rounded-full bg-rose-500/10 dark:bg-rose-500/5 blur-[20px] pointer-events-none group-hover:scale-125 transition-transform duration-500" />
-                    <motion.div
-                      variants={{
-                        initial: { scale: 0.8, opacity: 0 },
-                        animate: {
-                          scale: 1,
-                          opacity: 1,
-                          transition: { duration: 0.5 },
-                        },
-                        hover: {
-                          scale: [1, 1.08, 1],
-                          transition: {
-                            duration: 0.8,
-                            repeat: Infinity,
-                            ease: "easeInOut",
-                          },
-                        },
-                      }}
-                    >
-                      <Headphones
-                        className="w-12 h-12 sm:w-16 lg:w-20 sm:h-16 lg:h-20 text-rose-600"
-                        strokeWidth={1.5}
-                      />
-                    </motion.div>
-                  </div>
-                </motion.div>
-              </Link>
+              {/* Audio */}
+              <BentoCard card={audio} heightClass="h-[130px] sm:h-[240px] lg:h-[280px]">
+                <div className="absolute right-4 bottom-4 sm:right-6 sm:bottom-6 lg:right-8 lg:bottom-8 select-none pointer-events-none">
+                  <div
+                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 sm:w-28 sm:h-28 rounded-full blur-[25px] pointer-events-none group-hover:scale-125 transition-transform duration-700"
+                    style={{ background: `radial-gradient(circle, ${audio.glowColor} 0%, transparent 70%)` }}
+                  />
+                  <motion.div
+                    variants={{
+                      initial: { scale: 0.75, opacity: 0 },
+                      animate: { scale: 1, opacity: 1, transition: { duration: 0.55 } },
+                      hover: {
+                        scale: [1, 1.08, 1],
+                        transition: { duration: 0.85, repeat: Infinity, ease: "easeInOut" },
+                      },
+                    }}
+                  >
+                    {audio.icon}
+                  </motion.div>
+                </div>
+              </BentoCard>
             </div>
           </div>
 
-          {/* Right Column: Smartphones (Spans 4, full height) */}
+          {/* Right Column — Phones (full height) */}
           <div className="lg:col-span-4 h-full">
-            <Link
-              href="/products?category=phones"
-              className="group block h-full"
-            >
+            <Link href={phones.href} className="group block h-full">
               <motion.div
                 initial="initial"
                 whileInView="animate"
                 whileHover="hover"
                 viewport={{ once: true, amount: 0.2 }}
                 variants={{
-                  initial: {
-                    y: 0,
-                    boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05)",
-                  },
-                  hover: {
-                    y: -6,
-                    boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
-                  },
+                  initial: { y: 0, boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" },
+                  hover: { y: -6, boxShadow: "0 24px 30px -8px rgba(0,0,0,0.12)" },
                 }}
-                transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                className="relative bg-white/75 dark:bg-neutral-900/40 rounded-[24px] border border-neutral-200/60 dark:border-white/5 h-[125px] sm:h-full sm:min-h-[350px] lg:min-h-[544px] overflow-hidden p-4 sm:p-6 lg:p-8 flex flex-col justify-between backdrop-blur-md transition-colors"
+                transition={{ type: "spring", stiffness: 280, damping: 22 }}
+                className="relative bg-white dark:bg-neutral-900 rounded-[24px] border border-neutral-200/70 dark:border-white/5 h-[130px] sm:h-full sm:min-h-[380px] lg:min-h-[580px] overflow-hidden p-5 sm:p-6 lg:p-8 flex flex-col justify-between transition-colors"
               >
-                {/* Top Content */}
+                {/* Accent glow on hover */}
+                <div
+                  className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none rounded-[24px]"
+                  style={{
+                    background: `radial-gradient(circle at 50% 80%, ${phones.glowColor} 0%, transparent 65%)`,
+                  }}
+                />
+
+                {/* Top colored accent line */}
+                <div className="absolute top-0 left-8 right-8 h-[2px] bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+
+                {/* Content */}
                 <div className="z-10 max-w-[55%] sm:max-w-none flex flex-col items-start">
+                  {/* Product count badge */}
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[9px] font-mono font-bold uppercase tracking-widest mb-2">
+                    {phones.count}
+                  </span>
                   <span className="font-mono text-[10px] tracking-widest text-neutral-400 dark:text-neutral-500 uppercase font-bold">
-                    PHONES
+                    {phones.label}
                   </span>
                   <h3 className="text-lg sm:text-2xl font-black text-neutral-900 dark:text-white uppercase tracking-tight mt-1.5 sm:mt-2 leading-none">
-                    Smartphones
+                    {phones.title}
                   </h3>
-                  <p className="text-[11px] sm:text-sm text-neutral-550 dark:text-neutral-400 mt-1 sm:mt-2 leading-relaxed font-medium">
-                    Flagship Mobile Devices
+                  <p className="text-[11px] sm:text-sm text-neutral-500 dark:text-neutral-400 mt-1 sm:mt-2 leading-relaxed font-medium">
+                    {phones.description}
                   </p>
-
-                  {/* Shop Now CTA link */}
-                  <div className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 dark:text-neutral-500 group-hover:text-emerald-600 dark:group-hover:text-emerald-450 mt-3 sm:mt-6 transition-colors duration-300">
+                  <div className={`inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 dark:text-neutral-500 ${phones.hoverColor} mt-3 sm:mt-6 transition-colors duration-300`}>
                     <span>Shop Now</span>
                     <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
                   </div>
                 </div>
 
-                {/* Smartphone Icon Wrapper - Flex container to prevent overflow, scales down micro-proportionally */}
+                {/* Phone icon */}
                 <div className="absolute right-4 bottom-4 sm:relative sm:right-0 sm:bottom-0 sm:flex-grow w-[35%] sm:w-full flex items-center justify-end sm:items-center sm:justify-center select-none pointer-events-none mt-0 sm:mt-6 h-[70px] sm:h-auto max-h-[50%] sm:max-h-[55%] md:max-h-[60%]">
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 sm:w-36 sm:h-36 rounded-full bg-emerald-500/10 dark:bg-emerald-500/5 blur-[25px] pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+                  <div
+                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 sm:w-44 sm:h-44 rounded-full blur-[30px] pointer-events-none group-hover:scale-125 transition-transform duration-700"
+                    style={{ background: `radial-gradient(circle, ${phones.glowColor} 0%, transparent 70%)` }}
+                  />
                   <motion.div
                     variants={{
-                      initial: { scale: 0.8, opacity: 0 },
-                      animate: {
-                        scale: 1,
-                        opacity: 1,
-                        transition: { duration: 0.5 },
-                      },
+                      initial: { scale: 0.75, opacity: 0 },
+                      animate: { scale: 1, opacity: 1, transition: { duration: 0.55 } },
                       hover: {
                         scale: 1.08,
-                        y: -5,
+                        y: -6,
                         rotate: [0, -2, 2, -2, 0],
                         transition: {
-                          y: { type: "spring", stiffness: 300, damping: 15 },
-                          rotate: { duration: 0.4, ease: "easeInOut" },
+                          y: { type: "spring", stiffness: 280, damping: 16 },
+                          rotate: { duration: 0.45, ease: "easeInOut" },
                         },
                       },
                     }}
                     className="h-full w-full flex items-center justify-end sm:items-center sm:justify-center"
                   >
-                    <Smartphone
-                      className="w-auto h-full max-h-[60px] sm:max-h-[180px] lg:max-h-[220px] text-emerald-600 object-contain"
-                      strokeWidth={1.5}
-                    />
+                    {phones.icon}
                   </motion.div>
                 </div>
               </motion.div>
@@ -325,5 +262,67 @@ export default function CategoryBentoGrid() {
         </div>
       </div>
     </section>
+  );
+}
+
+// ── Reusable Bento Card ──────────────────────────────────
+interface BentoCardProps {
+  card: CategoryCard;
+  heightClass: string;
+  wide?: boolean;
+  children?: React.ReactNode;
+}
+
+function BentoCard({ card, heightClass, wide = false, children }: BentoCardProps) {
+  return (
+    <Link href={card.href} className="group block">
+      <motion.div
+        initial="initial"
+        whileInView="animate"
+        whileHover="hover"
+        viewport={{ once: true, amount: 0.2 }}
+        variants={{
+          initial: { y: 0, boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" },
+          hover: { y: -6, boxShadow: "0 24px 30px -8px rgba(0,0,0,0.12)" },
+        }}
+        transition={{ type: "spring", stiffness: 280, damping: 22 }}
+        className={`relative bg-white dark:bg-neutral-900 rounded-[24px] border border-neutral-200/70 dark:border-white/5 ${heightClass} overflow-hidden p-5 sm:p-6 lg:p-8 flex flex-col justify-between transition-colors`}
+      >
+        {/* Top accent glow line */}
+        <div className="absolute top-0 left-8 right-8 h-[2px] bg-gradient-to-r from-transparent via-current to-transparent opacity-0 group-hover:opacity-30 transition-opacity duration-500" />
+
+        {/* Hover radial glow */}
+        <div
+          className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none rounded-[24px]"
+          style={{
+            background: `radial-gradient(circle at ${wide ? "30% 50%" : "70% 80%"}, ${card.glowColor} 0%, transparent 60%)`,
+          }}
+        />
+
+        {/* Left text content */}
+        <div className={`z-10 ${wide ? "max-w-[50%]" : "max-w-[60%]"} flex flex-col items-start`}>
+          {/* Product count badge */}
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-white/5 border border-neutral-200/70 dark:border-white/10 text-neutral-500 dark:text-neutral-400 text-[9px] font-mono font-bold uppercase tracking-widest mb-2">
+            {card.count}
+          </span>
+
+          <span className="font-mono text-[10px] tracking-widest text-neutral-400 dark:text-neutral-500 uppercase font-bold">
+            {card.label}
+          </span>
+          <h3 className={`${wide ? "text-lg sm:text-2xl" : "text-lg sm:text-xl"} font-black text-neutral-900 dark:text-white uppercase tracking-tight mt-1.5 sm:mt-2 leading-none`}>
+            {card.title}
+          </h3>
+          <p className="text-[11px] sm:text-sm text-neutral-500 dark:text-neutral-400 mt-1 sm:mt-1.5 leading-relaxed font-medium">
+            {card.description}
+          </p>
+          <div className={`inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 dark:text-neutral-500 ${card.hoverColor} mt-3 sm:mt-5 transition-colors duration-300`}>
+            <span>Shop Now</span>
+            <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
+          </div>
+        </div>
+
+        {children}
+      </motion.div>
+    </Link>
   );
 }

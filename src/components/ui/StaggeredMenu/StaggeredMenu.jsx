@@ -1,7 +1,7 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { gsap } from "gsap";
-import { ArrowRight, ArrowLeft, Globe } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import "./StaggeredMenu.css";
 
 export const StaggeredMenu = ({
@@ -468,6 +468,7 @@ export const StaggeredMenu = ({
                       <Link
                         className="group inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-neutral-200/50 dark:hover:bg-neutral-800/80 transition-all duration-300 shadow-xs cursor-pointer"
                         href={it.link}
+                        // eslint-disable-next-line react-hooks/refs
                         onClick={(e) => handleItemClick(e, it)}
                         aria-label="Go Back"
                       >

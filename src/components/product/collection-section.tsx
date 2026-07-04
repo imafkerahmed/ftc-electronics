@@ -2,22 +2,10 @@
 
 import { useRef, useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Sparkles, Flame, Wind, Zap } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { motion, useInView } from "motion/react";
 import { Product } from "@/types/product";
 import CollectionProductCard from "./collection-product-card";
-import GradientTextComponent from "@/components/ui/GradientText/GradientText";
-
-const GradientText = GradientTextComponent as React.ComponentType<{
-  children: React.ReactNode;
-  className?: string;
-  colors?: string[];
-  animationSpeed?: number;
-  showBorder?: boolean;
-  direction?: "horizontal" | "vertical" | "diagonal";
-  pauseOnHover?: boolean;
-  yoyo?: boolean;
-}>;
 
 interface CollectionSectionProps {
   title: string;
@@ -32,8 +20,6 @@ interface CollectionSectionProps {
 
 export default function CollectionSection({
   title,
-  subtitle,
-  badgeBgColor = "bg-[#ff0000]",
   seeAllLink = "/products",
   layout,
   products,
@@ -204,17 +190,13 @@ export default function CollectionSection({
 
   const getSectionBgClass = () => {
     if (layout !== "featured-grid") return "bg-transparent py-2 sm:py-3";
-    switch (config.themeColor) {
-      case "purple":
-        return "bg-violet-50/20 dark:bg-violet-950/5 border-y border-violet-100/30 dark:border-violet-900/10 py-8 sm:py-12";
-      case "red":
-        return "bg-red-50/20 dark:bg-red-950/5 border-y border-red-100/30 dark:border-red-900/10 py-8 sm:py-12";
-      case "teal":
-        return "bg-teal-50/20 dark:bg-teal-950/5 border-y border-teal-100/30 dark:border-teal-900/10 py-8 sm:py-12";
-      case "blue":
-      default:
-        return "bg-blue-50/20 dark:bg-blue-950/5 border-y border-blue-100/30 dark:border-blue-900/10 py-8 sm:py-12";
+    const titleLower = title.toLowerCase();
+    if (titleLower.includes("sale")) {
+      return "relative bg-gradient-to-br from-red-50/70 via-white to-orange-50/40 dark:from-red-950/20 dark:via-neutral-950 dark:to-neutral-950 border-y border-red-100/60 dark:border-red-950/30 py-10 sm:py-16 lg:py-20";
+    } else if (titleLower.includes("new") || titleLower.includes("arrival")) {
+      return "relative bg-gradient-to-br from-violet-50/60 via-white to-blue-50/40 dark:from-violet-950/20 dark:via-neutral-950 dark:to-neutral-950 border-y border-violet-100/60 dark:border-violet-950/30 py-10 sm:py-16 lg:py-20";
     }
+    return "relative bg-white dark:bg-neutral-950 border-y border-neutral-100 dark:border-neutral-900/60 py-10 sm:py-16 lg:py-20";
   };
 
   return (
@@ -223,13 +205,15 @@ export default function CollectionSection({
       className={`w-full relative overflow-hidden z-10 ${getSectionBgClass()}`}
     >
       {/* Aurora Glow Mesh Background */}
-      <div
-        className={`absolute inset-0 pointer-events-none opacity-100 transition-opacity duration-700 -z-10 ${config.glowBg}`}
-      />
+      {layout !== "featured-grid" && (
+        <div
+          className={`absolute inset-0 pointer-events-none opacity-100 transition-opacity duration-700 -z-10 ${config.glowBg}`}
+        />
+      )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col gap-6 md:gap-8">
         {/* Header containing Title on left, and Controls on right */}
-        {layout !== "featured-grid" && (
+        {layout !== "featured-grid" ? (
           <motion.div
             className="w-full flex items-center justify-between"
             initial={{ opacity: 0, y: -10 }}
@@ -282,6 +266,50 @@ export default function CollectionSection({
               )}
             </div>
           </motion.div>
+        ) : (
+          /* Premium Editorial Header for Featured Grid */
+          <motion.div
+            className="w-full relative pb-8 mb-2"
+            initial={{ opacity: 0, y: -12 }}
+            animate={isInView ? { opacity: 1, y: 0 } : {}}
+            transition={{ duration: 0.5, delay: 0.1 }}
+          >
+            {/* Decorative oversized background section numbering */}
+            <span
+              className="absolute -top-2 sm:-top-4 right-0 text-[80px] sm:text-[120px] lg:text-[150px] font-black leading-none select-none pointer-events-none tracking-tighter"
+              style={{
+                color:
+                  config.themeColor === "red"
+                    ? "rgba(239,68,68,0.06)"
+                    : config.themeColor === "purple"
+                    ? "rgba(139,92,246,0.06)"
+                    : "rgba(59,130,246,0.06)",
+              }}
+            >
+              {title.toLowerCase().includes("sale") ? "01" : "02"}
+            </span>
+
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-current/8 pb-7 relative z-10">
+              <div className="flex flex-col gap-3">
+                {/* Title */}
+                <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight uppercase leading-none">
+                  {renderTitle(title)}
+                </h2>
+                <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 font-medium leading-relaxed max-w-lg">
+                  Discover premium hardware with guaranteed performance, curated details, and exclusive checkout options.
+                </p>
+              </div>
+              <Link href={seeAllLink} className="shrink-0">
+                <button
+                  className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 text-[11px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98] bg-neutral-900 dark:bg-neutral-50 text-white dark:text-neutral-950 hover:bg-neutral-800 dark:hover:bg-neutral-200"
+                  aria-label="Explore Collection"
+                >
+                  <span>Explore All</span>
+                  <ChevronRight className="h-3.5 w-3.5 stroke-[2.5]" />
+                </button>
+              </Link>
+            </div>
+          </motion.div>
         )}
 
         {/* Products Display (Full Width) */}
@@ -303,121 +331,15 @@ export default function CollectionSection({
               ))}
             </motion.div>
           ) : layout === "featured-grid" ? (
-            /* Integrated Bento Grid Layout */
+            /* Integrated Bento Grid Layout simplified to pure grid */
             <motion.div
-              className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6 items-stretch"
+              className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 sm:gap-4 items-stretch"
               initial={{ opacity: 0, y: 20 }}
               animate={isInView ? { opacity: 1, y: 0 } : {}}
               transition={{ duration: 0.6, delay: 0.2 }}
             >
-              {/* Campaign Card Embedded inside the Grid */}
-              <div className={`col-span-2 md:col-span-3 lg:col-span-2 flex flex-col justify-between p-6 sm:p-8 rounded-3xl transition-all duration-500 hover:-translate-y-1.5 z-10 relative overflow-hidden group select-none min-h-[220px] border ${
-                config.themeColor === "purple" ? "bg-violet-50/60 dark:bg-violet-950/10 border-violet-200/40 dark:border-violet-900/20 hover:border-violet-500/30 hover:shadow-[0_20px_40px_rgba(139,92,246,0.03)]" :
-                config.themeColor === "red" ? "bg-red-50/60 dark:bg-red-950/10 border-red-200/40 dark:border-red-900/20 hover:border-red-500/30 hover:shadow-[0_20px_40px_rgba(239,68,68,0.03)]" :
-                config.themeColor === "teal" ? "bg-teal-50/60 dark:bg-teal-950/10 border-teal-200/40 dark:border-teal-900/20 hover:border-teal-500/30 hover:shadow-[0_20px_40px_rgba(20,184,166,0.03)]" :
-                "bg-blue-50/60 dark:bg-blue-950/10 border-blue-200/40 dark:border-blue-900/20 hover:border-blue-500/30 hover:shadow-[0_20px_40px_rgba(59,130,246,0.03)]"
-              }`}>
-                
-                {/* Background Tech Grid Pattern */}
-                <div className="absolute inset-0 opacity-20 dark:opacity-10 bg-[linear-gradient(rgba(0,0,0,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.03)_1px,transparent_1px)] dark:bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:16px_16px] pointer-events-none -z-10" />
-
-                {/* Diagonal gloss reflection overlay */}
-                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none -z-5">
-                  <div className="absolute -inset-x-40 top-0 bottom-0 bg-gradient-to-r from-transparent via-white/20 dark:via-white/5 to-transparent -skew-x-25 translate-x-[-100%] group-hover:translate-x-[200%] transition-transform duration-[1200ms] ease-in-out" />
-                </div>
-
-                {/* Background light glow matching the product card subtle hover glows */}
-                <motion.div 
-                  className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full blur-[80px] pointer-events-none -z-10 ${
-                    config.themeColor === "purple" ? "bg-violet-500/10 dark:bg-violet-500/5" :
-                    config.themeColor === "red" ? "bg-red-500/10 dark:bg-red-500/5" :
-                    config.themeColor === "teal" ? "bg-teal-500/10 dark:bg-teal-500/5" :
-                    "bg-blue-500/10 dark:bg-blue-500/5"
-                  }`}
-                  animate={{
-                    y: [-15, 15, -15],
-                    x: [-10, 10, -10],
-                    scale: [1, 1.15, 1]
-                  }}
-                  transition={{
-                    duration: 7,
-                    repeat: Infinity,
-                    ease: "easeInOut"
-                  }}
-                />
-
-                <div className="flex flex-col h-full justify-between gap-6 z-10 relative">
-                  {/* Top content: Badge and Title */}
-                  <div className="flex flex-col items-start gap-2.5">
-                    {/* Title */}
-                    <h3 className="text-xl sm:text-2xl md:text-3.5xl font-black uppercase tracking-[0.05em] font-sans leading-none text-left mt-1.5">
-                      <GradientText
-                        colors={
-                          config.themeColor === "purple" ? ["#a855f7", "#ec4899", "#6366f1", "#a855f7"] :
-                          config.themeColor === "red" ? ["#ef4444", "#f97316", "#e11d48", "#ef4444"] :
-                          config.themeColor === "teal" ? ["#14b8a6", "#06b6d4", "#10b981", "#14b8a6"] :
-                          ["#3b82f6", "#06b6d4", "#2563eb", "#3b82f6"]
-                        }
-                        animationSpeed={6}
-                        showBorder={false}
-                        className="!p-0 !m-0 !cursor-default !bg-transparent !rounded-none !overflow-visible border-none select-none font-black"
-                      >
-                        {title}
-                      </GradientText>
-                    </h3>
-
-                    {/* Description */}
-                    <p className="text-xs sm:text-sm text-neutral-600 dark:text-neutral-400 font-medium max-w-sm mt-1.5 leading-relaxed">
-                      {config.defaultSubtitle}. Discover premium hardware with guaranteed performance, curated details, and exclusive checkout options.
-                    </p>
-                  </div>
-
-                  {/* Bottom content: Explore Now CTA Link */}
-                  <Link href={seeAllLink} className="relative block shrink-0 mt-4">
-                    <motion.button 
-                      initial="initial"
-                      whileHover="hover"
-                      className="group relative inline-flex items-center gap-1.5 pb-1 focus:outline-none cursor-pointer text-[10px] font-black uppercase tracking-widest text-neutral-850 dark:text-neutral-200 transition-colors duration-300 select-none"
-                      whileTap={{ scale: 0.98 }}
-                      aria-label="Explore Collection"
-                    >
-                      <span>Explore Collection</span>
-                      <motion.span
-                        variants={{
-                          initial: { x: 0 },
-                          hover: { x: 3 }
-                        }}
-                        transition={{ type: "spring", stiffness: 400, damping: 12 }}
-                      >
-                        <ChevronRight className={`h-3.5 w-3.5 stroke-[3] transition-colors duration-300 ${
-                          config.themeColor === "purple" ? "text-violet-500" :
-                          config.themeColor === "red" ? "text-red-500" :
-                          config.themeColor === "teal" ? "text-teal-555" :
-                          "text-blue-500"
-                        }`} />
-                      </motion.span>
-                      
-                      {/* Interactive expanding underline */}
-                      <motion.span 
-                        className={`absolute bottom-0 left-0 h-[2px] rounded-full ${
-                          config.themeColor === "purple" ? "bg-violet-500" :
-                          config.themeColor === "red" ? "bg-red-500" :
-                          config.themeColor === "teal" ? "bg-teal-555" :
-                          "bg-blue-500"
-                        }`}
-                        variants={{
-                          initial: { width: "0%" },
-                          hover: { width: "100%" }
-                        }}
-                        transition={{ duration: 0.3, ease: "easeInOut" }}
-                      />
-                    </motion.button>
-                  </Link>
-                </div>
-              </div>
-
               {/* Grid of Product Cards */}
-              {products.slice(0, 6).map((product, idx) => (
+              {products.slice(0, 5).map((product, idx) => (
                 <CollectionProductCard
                   key={product.id || idx}
                   product={product}
@@ -447,10 +369,10 @@ export default function CollectionSection({
                         Flash Deal
                       </div>
                       <h3 className="text-xl sm:text-2xl font-black uppercase tracking-tight leading-tight mt-2">
-                        TODAY'S SPECIALS
+                        TODAY{"'"}S SPECIALS
                       </h3>
                       <p className="text-xs text-white/80 leading-relaxed font-medium">
-                        Exclusive discounts on premium hardware. Don't miss out!
+                        Exclusive discounts on premium hardware. Don{"'"}t miss out!
                       </p>
                     </div>
 

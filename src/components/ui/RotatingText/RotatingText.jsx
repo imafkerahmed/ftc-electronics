@@ -69,6 +69,11 @@ const RotatingText = forwardRef((props, ref) => {
     }));
   }, [texts, currentTextIndex, splitBy]);
 
+  // Compute total characters once outside of layout maps
+  const totalCharacters = useMemo(() => {
+    return elements.reduce((sum, word) => sum + word.characters.length, 0);
+  }, [elements]);
+
   const getStaggerDelay = useCallback(
     (index, totalChars) => {
       const total = totalChars;
@@ -152,32 +157,37 @@ const RotatingText = forwardRef((props, ref) => {
           layout
           aria-hidden="true"
         >
-          {elements.map((wordObj, wordIndex, array) => {
-            const previousCharsCount = array.slice(0, wordIndex).reduce((sum, word) => sum + word.characters.length, 0);
-            return (
-              <span key={wordIndex} className={cn('text-rotate-word', splitLevelClassName)}>
-                {wordObj.characters.map((char, charIndex) => (
-                  <motion.span
-                    key={charIndex}
-                    initial={initial}
-                    animate={animate}
-                    exit={exit}
-                    transition={{
-                      ...transition,
-                      delay: getStaggerDelay(
-                        previousCharsCount + charIndex,
-                        array.reduce((sum, word) => sum + word.characters.length, 0)
-                      )
-                    }}
-                    className={cn('text-rotate-element', elementLevelClassName)}
-                  >
-                    {char}
-                  </motion.span>
-                ))}
-                {wordObj.needsSpace && <span className="text-rotate-space"> </span>}
-              </span>
-            );
-          })}
+          {(() => {
+            let charAccumulator = 0; // Running tally to calculate character position offsets in O(N)
+            return elements.map((wordObj, wordIndex) => {
+              const previousCharsCount = charAccumulator;
+              charAccumulator += wordObj.characters.length;
+
+              return (
+                <span key={wordIndex} className={cn('text-rotate-word', splitLevelClassName)}>
+                  {wordObj.characters.map((char, charIndex) => (
+                    <motion.span
+                      key={charIndex}
+                      initial={initial}
+                      animate={animate}
+                      exit={exit}
+                      transition={{
+                        ...transition,
+                        delay: getStaggerDelay(
+                          previousCharsCount + charIndex,
+                          totalCharacters
+                        )
+                      }}
+                      className={cn('text-rotate-element', elementLevelClassName)}
+                    >
+                      {char}
+                    </motion.span>
+                  ))}
+                  {wordObj.needsSpace && <span className="text-rotate-space"> </span>}
+                </span>
+              );
+            });
+          })()}
         </motion.span>
       </AnimatePresence>
     </motion.span>

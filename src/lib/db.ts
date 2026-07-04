@@ -24,7 +24,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 124,
     countInStock: 15,
     isFeatured: true,
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_2',
@@ -47,7 +47,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 89,
     countInStock: 25,
     isFeatured: true,
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_3',
@@ -71,7 +71,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 242,
     countInStock: 40,
     isFeatured: true,
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_4',
@@ -94,7 +94,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 76,
     countInStock: 8,
     isFeatured: false,
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_5',
@@ -118,7 +118,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 53,
     countInStock: 12,
     isFeatured: false,
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_6',
@@ -145,7 +145,7 @@ export const MOCK_PRODUCTS: Product[] = [
     countInStock: 5,
     isPreOrder: true,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_7',
@@ -171,7 +171,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 14,
     countInStock: 20,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_8',
@@ -197,7 +197,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 32,
     countInStock: 8,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_9',
@@ -223,7 +223,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 1,
     countInStock: 15,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_10',
@@ -247,7 +247,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 8,
     countInStock: 50,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_11',
@@ -271,7 +271,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 12,
     countInStock: 30,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_12',
@@ -295,7 +295,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 6,
     countInStock: 12,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_13',
@@ -319,7 +319,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 18,
     countInStock: 3,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_14',
@@ -343,7 +343,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 19,
     countInStock: 22,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_15',
@@ -366,7 +366,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 4,
     countInStock: 15,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_16',
@@ -389,7 +389,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 9,
     countInStock: 25,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_17',
@@ -413,7 +413,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 5,
     countInStock: 14,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_18',
@@ -437,7 +437,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 42,
     countInStock: 8,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_19',
@@ -462,7 +462,7 @@ export const MOCK_PRODUCTS: Product[] = [
     countInStock: 2,
     isPreOrder: true,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_20',
@@ -486,7 +486,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 1,
     countInStock: 7,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_21',
@@ -509,7 +509,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 16,
     countInStock: 11,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_22',
@@ -534,7 +534,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 15,
     countInStock: 20,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_23',
@@ -559,11 +559,11 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 24,
     countInStock: 35,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   },
   {
     id: 'prod_24',
-    name: 'IVON True Wireless ANC Earbuds (IV-X9)',
+    name: 'IVON Braided USB-C Fast Data Cable (IV-22)',
     slug: 'ivon-true-wireless-anc-earbuds',
     description: 'Experience pure acoustic clarity and powerful bass. IVON wireless earbuds feature Active Noise Cancellation, voice assistant support, and comfort-fit ergonomics.',
     price: 9990,
@@ -584,7 +584,7 @@ export const MOCK_PRODUCTS: Product[] = [
     numReviews: 8,
     countInStock: 12,
     currency: 'LKR',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-06-30T12:00:00.000Z'
   }
 ];
 

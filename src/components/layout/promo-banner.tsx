@@ -51,6 +51,7 @@ export default function PromoBanner({
   }>>([]);
 
   useEffect(() => {
+    let frameId: number;
     if (isCinematic) {
       const generated = Array.from({ length: 25 }, (_, i) => ({
         id: i,
@@ -61,8 +62,13 @@ export default function PromoBanner({
         duration: Math.random() * 8 + 6, // 6s to 14s
         color: Math.random() > 0.4 ? "rgba(255, 255, 255, 0.45)" : "rgba(129, 140, 248, 0.55)",
       }));
-      setParticles(generated);
+      frameId = requestAnimationFrame(() => {
+        setParticles(generated);
+      });
     }
+    return () => {
+      if (frameId) cancelAnimationFrame(frameId);
+    };
   }, [isCinematic]);
 
   // Theme definitions for backgrounds, glows, and button states
