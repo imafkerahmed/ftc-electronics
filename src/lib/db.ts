@@ -181,8 +181,8 @@ export const MOCK_PRODUCTS: Product[] = [
     price: 319000,
     discountPrice: 299990,
     images: [
-      'https://images.unsplash.com/photo-1569698206670-12d20d4000d5?q=80&w=600&auto=format&fit=crop',
-      'https://images.unsplash.com/photo-1589652717521-10c341494de3?q=80&w=600&auto=format&fit=crop'
+      'https://images.unsplash.com/photo-1589652717521-10c341494de3?q=80&w=600&auto=format&fit=crop',
+      'https://images.unsplash.com/photo-1569698206670-12d20d4000d5?q=80&w=600&auto=format&fit=crop'
     ],
     category: 'Vacuum Cleaners',
     brand: 'Eufy',

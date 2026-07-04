@@ -6,6 +6,7 @@ import { Star, ShoppingCart } from 'lucide-react';
 import { Product } from '@/types/product';
 import { useCart } from '@/hooks/use-cart';
 import { Button } from '@/components/ui/button';
+import { formatPrice } from '@/lib/utils';
 
 interface ProductCardProps {
   product: Product;
@@ -13,7 +14,7 @@ interface ProductCardProps {
 
 export default function ProductCard({ product }: ProductCardProps) {
   const { addItem } = useCart();
-  const { name, slug, price, discountPrice, images, brand, rating, countInStock } = product;
+  const { name, slug, price, discountPrice, images, brand, rating, countInStock, currency } = product;
 
   const hasDiscount = discountPrice !== undefined;
   const isOutOfStock = countInStock === 0;
@@ -74,14 +75,20 @@ export default function ProductCard({ product }: ProductCardProps) {
 
         {/* Pricing & Add to Cart button */}
         <div className="mt-auto pt-4 flex items-center justify-between gap-2">
-          <div className="flex flex-col">
-            {hasDiscount ? (
-              <div className="flex items-center gap-1.5">
-                <span className="text-base font-bold text-foreground">${discountPrice}</span>
-                <span className="text-xs text-muted-foreground line-through">${price}</span>
-              </div>
+          <div className="flex flex-col gap-0.5 min-w-0">
+            {hasDiscount && discountPrice !== undefined ? (
+              <>
+                <span className="text-sm sm:text-base font-black text-foreground whitespace-nowrap truncate">
+                  {formatPrice(discountPrice, currency)}
+                </span>
+                <span className="text-[10px] sm:text-xs text-muted-foreground line-through whitespace-nowrap truncate">
+                  {formatPrice(price, currency)}
+                </span>
+              </>
             ) : (
-              <span className="text-base font-bold text-foreground">${price}</span>
+              <span className="text-sm sm:text-base font-black text-foreground whitespace-nowrap truncate">
+                {formatPrice(price, currency)}
+              </span>
             )}
           </div>
 
@@ -89,7 +96,7 @@ export default function ProductCard({ product }: ProductCardProps) {
             size="sm"
             onClick={handleAddToCart}
             disabled={isOutOfStock}
-            className="h-8 w-8 rounded-lg bg-blue-600 hover:bg-blue-700 text-white p-0 flex items-center justify-center cursor-pointer transition-colors"
+            className="h-8 w-8 rounded-lg bg-blue-600 hover:bg-blue-700 text-white p-0 flex items-center justify-center cursor-pointer transition-colors shrink-0"
             aria-label="Add to Cart"
           >
             <ShoppingCart className="h-4 w-4" />
