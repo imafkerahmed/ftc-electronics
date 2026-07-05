@@ -1,7 +1,7 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { gsap } from "gsap";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ChevronRight } from "lucide-react";
 import "./StaggeredMenu.css";
 
 export const StaggeredMenu = ({
@@ -23,6 +23,7 @@ export const StaggeredMenu = ({
 }) => {
   const [open, setOpen] = useState(false);
   const openRef = useRef(false);
+  const [expandedItem, setExpandedItem] = useState(null);
   const [currentView, setCurrentView] = useState({
     type: "main",
     activeItem: null,
@@ -339,6 +340,7 @@ export const StaggeredMenu = ({
       animateColor(false);
       setTimeout(() => {
         setCurrentView({ type: "main", activeItem: null });
+        setExpandedItem(null);
       }, 400);
     }
   }, [playClose, animateColor, onMenuClose]);
@@ -373,7 +375,7 @@ export const StaggeredMenu = ({
 
       if (it.subItems && it.subItems.length > 0) {
         e.preventDefault();
-        transitionToView({ type: "submenu", activeItem: it });
+        setExpandedItem((prev) => (prev === it.label ? null : it.label));
         return;
       }
 
@@ -490,8 +492,47 @@ export const StaggeredMenu = ({
                       aria-label={it.ariaLabel}
                       data-index={idx + 1}
                     >
-                      <span className="sm-panel-itemLabel">{it.label}</span>
+                      <span className="sm-panel-itemLabel" style={{ flex: 1 }}>{it.label}</span>
+                      {it.subItems && it.subItems.length > 0 && (
+                        <ChevronRight
+                          className="sm-chevron"
+                          style={{
+                            width: '1rem',
+                            height: '1rem',
+                            flexShrink: 0,
+                            transition: 'transform 0.3s cubic-bezier(0.16,1,0.3,1)',
+                            transform: expandedItem === it.label ? 'rotate(90deg)' : 'rotate(0deg)',
+                            opacity: 0.5,
+                          }}
+                        />
+                      )}
                     </Link>
+                    {it.subItems && it.subItems.length > 0 && (
+                      <div
+                        className="sm-inline-subitems-wrap"
+                        style={{
+                          maxHeight: expandedItem === it.label ? `${Math.min(it.subItems.length * 2.6, 14)}rem` : '0px',
+                          overflow: 'hidden',
+                          transition: 'max-height 0.38s cubic-bezier(0.16,1,0.3,1)',
+                        }}
+                      >
+                        <div className="sm-inline-subitems-scroll">
+                          <ul className="sm-inline-subitems">
+                            {it.subItems.map((sub, subIdx) => (
+                              <li key={sub.label + subIdx} className="sm-inline-subitem">
+                                <Link
+                                  href={sub.link}
+                                  onClick={closeMenu}
+                                  className="sm-inline-subitem-link"
+                                >
+                                  {sub.label}
+                                </Link>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    )}
                   </li>
                 );
               })

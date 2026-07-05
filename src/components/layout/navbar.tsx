@@ -109,7 +109,7 @@ export default function Navbar() {
   const menuItems = [
     { label: "Home", link: "/" },
     {
-      label: "Shop All",
+      label: "Categories",
       link: "/products",
       subItems: [
         { label: "Laptops", link: "/products?category=laptops" },

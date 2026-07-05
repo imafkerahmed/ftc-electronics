@@ -8,6 +8,8 @@ import { MOCK_PRODUCTS, MOCK_CATEGORIES } from "@/lib/db";
 import FilterSidebar from "@/components/product/filter-sidebar";
 import ProductGrid from "@/components/product/product-grid";
 import { Button } from "@/components/ui/button";
+import { useLenis } from "lenis/react";
+import { createPortal } from "react-dom";
 
 interface PageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -25,6 +27,13 @@ export default function ProductsPage({ searchParams }: PageProps) {
       : "";
 
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
 
   // Initialize filtering logic
   const { filters, filteredProducts, brands, updateFilters, resetFilters } =
@@ -39,6 +48,27 @@ export default function ProductsPage({ searchParams }: PageProps) {
       });
     }
   }, [categoryParam, searchParam, updateFilters]);
+
+  // Lock scrolling when mobile filter drawer is open
+  const lenis = useLenis();
+  useEffect(() => {
+    if (isMobileFiltersOpen) {
+      const scrollbarWidth =
+        window.innerWidth - document.documentElement.clientWidth;
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
+      document.body.style.overflow = "hidden";
+      lenis?.stop();
+    } else {
+      document.body.style.overflow = "";
+      document.body.style.paddingRight = "";
+      lenis?.start();
+    }
+    return () => {
+      document.body.style.overflow = "";
+      document.body.style.paddingRight = "";
+      lenis?.start();
+    };
+  }, [isMobileFiltersOpen, lenis]);
 
   const categoriesList = MOCK_CATEGORIES.map((c) => c.name);
 
@@ -140,8 +170,11 @@ export default function ProductsPage({ searchParams }: PageProps) {
       {/* Catalog Split Layout */}
       <div className="flex flex-col md:flex-row gap-8 items-start">
 
-        {/* Desktop Filter Sidebar — sticky while page scrolls */}
-        <div className="hidden md:block sticky top-24 self-start">
+        {/* Desktop Filter Sidebar — sticky, independently scrollable */}
+        <div
+          className="hidden md:block sticky top-24 self-start"
+          data-lenis-prevent
+        >
           <FilterSidebar
             filters={filters}
             brands={brands}
@@ -178,38 +211,42 @@ export default function ProductsPage({ searchParams }: PageProps) {
       </div>
 
       {/* Mobile filters drawer */}
-      <AnimatePresence>
-        {isMobileFiltersOpen && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsMobileFiltersOpen(false)}
-              className="fixed inset-0 z-40 bg-black/60 backdrop-blur-xs md:hidden"
-            />
-            {/* Drawer Sheet */}
-            <motion.div
-              initial={{ x: "-100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "-100%" }}
-              transition={{ type: "tween", duration: 0.25, ease: "easeOut" }}
-              className="fixed inset-y-0 left-0 z-50 w-full max-w-[280px] bg-card border-r border-border p-6 shadow-2xl flex flex-col md:hidden overflow-y-auto"
-            >
-              <FilterSidebar
-                filters={filters}
-                brands={brands}
-                categories={categoriesList}
-                updateFilters={updateFilters}
-                resetFilters={resetFilters}
-                onClose={() => setIsMobileFiltersOpen(false)}
-                className="border-none bg-transparent p-0 w-full shadow-none"
+      {mounted && typeof document !== "undefined" && createPortal(
+        <AnimatePresence>
+          {isMobileFiltersOpen && (
+            <>
+              {/* Backdrop */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsMobileFiltersOpen(false)}
+                className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-xs md:hidden"
               />
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+              {/* Drawer Sheet */}
+              <motion.div
+                initial={{ x: "-100%" }}
+                animate={{ x: 0 }}
+                exit={{ x: "-100%" }}
+                transition={{ type: "tween", duration: 0.25, ease: "easeOut" }}
+                className="fixed inset-y-0 left-0 z-[100] w-full max-w-[280px] bg-card border-r border-border p-6 shadow-2xl flex flex-col md:hidden overflow-y-auto overscroll-contain [touch-action:pan-y]"
+                data-lenis-prevent
+              >
+                <FilterSidebar
+                  filters={filters}
+                  brands={brands}
+                  categories={categoriesList}
+                  updateFilters={updateFilters}
+                  resetFilters={resetFilters}
+                  onClose={() => setIsMobileFiltersOpen(false)}
+                  className="border-none bg-transparent p-0 w-full shadow-none max-h-none"
+                />
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 }

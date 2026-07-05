@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, MouseEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, MouseEvent } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronLeft, ChevronRight, Maximize2, X, ZoomIn, ZoomOut } from 'lucide-react';
@@ -52,13 +52,13 @@ export default function ProductGallery({ images, name }: ProductGalleryProps) {
     setMousePos({ x, y });
   };
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
     setActiveIndex((prev) => (prev + 1) % images.length);
-  };
+  }, [images.length]);
 
-  const handlePrev = () => {
+  const handlePrev = useCallback(() => {
     setActiveIndex((prev) => (prev - 1 + images.length) % images.length);
-  };
+  }, [images.length]);
 
   // Lightbox keyboard navigation
   useEffect(() => {
@@ -73,7 +73,7 @@ export default function ProductGallery({ images, name }: ProductGalleryProps) {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isLightboxOpen, images.length]);
+  }, [isLightboxOpen, handleNext, handlePrev]);
 
   return (
     <div className="flex flex-col gap-4 w-full">

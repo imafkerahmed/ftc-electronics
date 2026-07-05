@@ -50,7 +50,7 @@ export default function FilterSidebar({
   };
 
   return (
-    <aside className={cn("w-full md:w-66 shrink-0 flex flex-col gap-5 text-foreground bg-card p-5 rounded-2xl border border-border shadow-xs", className)}>
+    <aside className={cn("w-full md:w-66 shrink-0 flex flex-col gap-5 text-foreground bg-card p-5 rounded-2xl border border-border shadow-xs overflow-y-auto overscroll-contain [scrollbar-width:thin] [scrollbar-color:rgba(59,130,246,0.3)_transparent] max-h-[calc(100vh-7rem)]", className)}>
       
       {/* Drawer Header (Mobile only) */}
       {onClose && (

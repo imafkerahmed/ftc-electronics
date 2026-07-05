@@ -17,7 +17,7 @@ export default function MobileNav() {
 
   const links = [
     { name: 'Home', href: '/' },
-    { name: 'Shop All', href: '/products' },
+    { name: 'Categories', href: '/products' },
     { name: 'Laptops', href: '/products?category=laptops' },
     { name: 'Phones', href: '/products?category=phones' },
     { name: 'Audio', href: '/products?category=audio' },
