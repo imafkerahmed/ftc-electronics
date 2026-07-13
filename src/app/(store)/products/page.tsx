@@ -4,7 +4,8 @@ import { useState, use, useEffect } from "react";
 import { SlidersHorizontal, Search, ArrowLeft } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useProducts } from "@/hooks/use-products";
-import { MOCK_PRODUCTS, MOCK_CATEGORIES } from "@/lib/db";
+import { getProducts, getCategories } from "@/lib/db";
+import type { Product } from "@/types/product";
 import FilterSidebar from "@/components/product/filter-sidebar";
 import ProductGrid from "@/components/product/product-grid";
 import { Button } from "@/components/ui/button";
@@ -30,14 +31,26 @@ export default function ProductsPage({ searchParams }: PageProps) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+     
     setMounted(true);
     return () => setMounted(false);
   }, []);
 
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categoriesList, setCategoriesList] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([getProducts(), getCategories()]).then(([prods, cats]) => {
+      setProducts(prods);
+      setCategoriesList(cats.map(c => c.name));
+      setIsLoading(false);
+    });
+  }, []);
+
   // Initialize filtering logic
   const { filters, filteredProducts, brands, updateFilters, resetFilters } =
-    useProducts(MOCK_PRODUCTS);
+    useProducts(products);
 
   // Set initial query filters from URL params if present
   useEffect(() => {
@@ -70,7 +83,7 @@ export default function ProductsPage({ searchParams }: PageProps) {
     };
   }, [isMobileFiltersOpen, lenis]);
 
-  const categoriesList = MOCK_CATEGORIES.map((c) => c.name);
+
 
   // Calculate active filters count
   const activeFiltersCount = [
@@ -147,7 +160,7 @@ export default function ProductsPage({ searchParams }: PageProps) {
           <p className="hidden md:block text-sm text-muted-foreground">
             <span className="font-bold text-foreground tabular-nums">{filteredProducts.length}</span>
             <span className="mx-1.5 text-border">/</span>
-            <span>{MOCK_PRODUCTS.length} products</span>
+            <span>{products.length} products</span>
           </p>
         </div>
 

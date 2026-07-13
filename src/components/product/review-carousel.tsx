@@ -22,102 +22,77 @@ interface MockReview {
   };
 }
 
-const MOCK_REVIEWS: MockReview[] = [
-  {
-    id: "rev_1",
-    name: "Malith K.",
-    rating: 5,
-    date: "June 2, 2026",
-    comment:
-      "Stunned by how fast this vacuum is! The H40 cleans my entire tiled living area and runs super silent. Sourced with official local warranty.",
-    verified: true,
-    product: {
-      name: "Xiaomi Robot Vacuum H40 (Global Version)",
-      slug: "xiaomi-robot-vacuum-h40",
-      image:
-        "https://images.unsplash.com/photo-1618346136472-090de27fe8b4?q=80&w=150",
-      price: 155000,
-      currency: "LKR",
-    },
-  },
-  {
-    id: "rev_2",
-    name: "Shenal R.",
-    rating: 5,
-    date: "May 28, 2026",
-    comment:
-      "Absolute lifesaver for travel. The WiWU travel pouch easily holds all my power bricks, SSDs, and charger cables. Build quality is top-notch.",
-    verified: true,
-    product: {
-      name: "WiWU Minimalis Travel Pouch",
-      slug: "wiwu-minimalis-travel-pouch",
-      image:
-        "https://images.unsplash.com/photo-1622560480605-d83c853bc5c3?q=80&w=150",
-      price: 4500,
-      currency: "LKR",
-    },
-  },
-  {
-    id: "rev_3",
-    name: "Kavindi P.",
-    rating: 5,
-    date: "May 25, 2026",
-    comment:
-      "My cats shed a ton and the Xiaomi Pet Air Purifier has been a game-changer. The active carbon layer completely removes litterbox odors.",
-    verified: true,
-    product: {
-      name: "Xiaomi Smart Pet Care Air Purifier",
-      slug: "xiaomi-smart-pet-care-air-purifier",
-      image:
-        "https://images.unsplash.com/photo-1548767797-d8c844163c4c?q=80&w=150",
-      price: 52500,
-      currency: "LKR",
-    },
-  },
-  {
-    id: "rev_4",
-    name: "Devinda S.",
-    rating: 4,
-    date: "June 1, 2026",
-    comment:
-      "Charges my iPhone 15 Pro Max super fast and snaps onto the back securely without slipping. Very thin design, perfect for pocket carry.",
-    verified: true,
-    product: {
-      name: "Anker MagGo Power Bank (10K, Slim) – A1664",
-      slug: "anker-maggo-power-bank-10k",
-      image:
-        "https://images.unsplash.com/photo-1609592424109-dd9f565d71c3?q=80&w=150",
-      price: 21500,
-      currency: "LKR",
-    },
-  },
-  {
-    id: "rev_5",
-    name: "Nisansala W.",
-    rating: 5,
-    date: "May 19, 2026",
-    comment:
-      "Best air purifier in the market. Silent sleep mode, auto sensor VOC tracking, and full Siri/Alexa app controls. Sourced via authorized channels.",
-    verified: true,
-    product: {
-      name: "Dyson Purifier Cool Air Purifier PC2 TP12",
-      slug: "dyson-purifier-cool-tp12",
-      image:
-        "https://images.unsplash.com/photo-1614292244591-6c5c3c84e1b5?q=80&w=150",
-      price: 225000,
-      currency: "LKR",
-    },
-  },
-];
+import { pbReviews } from "@/lib/pb-collections";
 
 export default function ReviewCarousel() {
   const sectionRef = useRef<HTMLDivElement>(null);
   const isInView = useInView(sectionRef, { once: true, amount: 0.1 });
 
+  const [reviews, setReviews] = useState<MockReview[]>([]);
   const [selectedReview, setSelectedReview] = useState<MockReview | null>(null);
 
-  // Duplicate reviews to create an infinite seamless loop
-  const LOOPED_REVIEWS = [...MOCK_REVIEWS, ...MOCK_REVIEWS];
+  useEffect(() => {
+    const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'https://ftc-db.codix.site';
+    pbReviews.getApproved({ limit: 10 }).then((rawReviews) => {
+      if (!rawReviews || rawReviews.length === 0) return;
+      const formatted = rawReviews.map((rev) => {
+        const prodExpand = rev.expand?.product;
+        let imageUrl = "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?q=80&w=150";
+        if (prodExpand?.images?.[0]) {
+          imageUrl = `${pbUrl}/api/files/${prodExpand.collectionId}/${prodExpand.id}/${prodExpand.images[0]}`;
+        } else if (prodExpand?.slug) {
+          const slugMapping: Record<string, string> = {
+            'apexbook-pro-16': 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?q=80&w=150',
+            'phonix-pro-15-ultra': 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?q=80&w=150',
+            'acoustic-x-anc-headphones': 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?q=80&w=150',
+            'keyforge-q1-mechanical-keyboard': 'https://images.unsplash.com/photo-1618384887929-16ec33fab9ef?q=80&w=150',
+            'visionglide-34-curved-monitor': 'https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?q=80&w=150',
+            'xiaomi-robot-vacuum-h40': 'https://images.unsplash.com/photo-1618346136472-090de27fe8b4?q=80&w=150',
+            'anker-maggo-power-bank-10k': 'https://images.unsplash.com/photo-1609592424109-dd9f565d71c3?q=80&w=150',
+            'eufy-x10-pro-omni': 'https://images.unsplash.com/photo-1589652717521-10c341494de3?q=80&w=150',
+            'eufy-smart-track-card': 'https://images.unsplash.com/photo-1627252879515-d2206173dd09?q=80&w=150',
+            'xiaomi-ballpoint-pen-white': 'https://images.unsplash.com/photo-1583485088034-697b5bc54ccd?q=80&w=150',
+            'xiaomi-color-gel-pen-5pack': 'https://images.unsplash.com/photo-1511556532299-8f662fc26c06?q=80&w=150',
+            'wiwu-skin-armor-laptop-sleeve': 'https://images.unsplash.com/photo-1625766763788-95dcce9bf5ac?q=80&w=150',
+            'wiwu-skin-zero-sleeve': 'https://images.unsplash.com/photo-1585338107529-13afc5f02586?q=80&w=150',
+            'wiwu-minimalis-travel-pouch': 'https://images.unsplash.com/photo-1622560480605-d83c853bc5c3?q=80&w=150',
+            'xiaomi-uniblade-trimmer-head': 'https://images.unsplash.com/photo-1621607512214-68297480165e?q=80&w=150',
+            'xiaomi-water-flosser-tips': 'https://images.unsplash.com/photo-1607613009820-a29f7bb81c04?q=80&w=150',
+            'xiaomi-dust-mite-filter-2pack': 'https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?q=80&w=150',
+            'xiaomi-smart-air-purifier-6': 'https://images.unsplash.com/photo-1585338107529-13afc5f02586?q=80&w=150',
+            'dyson-hushjet-purifier-hj10': 'https://images.unsplash.com/photo-1595246140625-573b715d11dc?q=80&w=150',
+            'dyson-purifier-cool-tp12': 'https://images.unsplash.com/photo-1614292244591-6c5c3c84e1b5?q=80&w=150',
+            'xiaomi-smart-pet-care-air-purifier': 'https://images.unsplash.com/photo-1548767797-d8c844163c4c?q=80&w=150',
+            'ivon-dual-port-fast-charger': 'https://images.unsplash.com/photo-1622445262465-2481c4574875?q=80&w=150',
+            'ivon-braided-usb-c-cable': 'https://images.unsplash.com/photo-1544725176-7c40e5a71c5e?q=80&w=150',
+            'ivon-true-wireless-anc-earbuds': 'https://images.unsplash.com/photo-1590658268037-6bf12165a8df?q=80&w=150',
+          };
+          imageUrl = slugMapping[prodExpand.slug] || imageUrl;
+        }
+
+        return {
+          id: rev.id,
+          name: rev.customerName,
+          rating: rev.rating,
+          date: new Date(rev.created).toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          }),
+          comment: rev.comment,
+          verified: rev.isVerified,
+          product: {
+            name: prodExpand?.name || "Product",
+            slug: prodExpand?.slug || "",
+            image: imageUrl,
+            price: prodExpand?.price || 0,
+            currency: (prodExpand?.currency as "USD" | "LKR") || "LKR",
+          },
+        };
+      });
+      setReviews(formatted);
+    });
+  }, []);
 
   useEffect(() => {
     if (selectedReview) {
@@ -129,6 +104,11 @@ export default function ReviewCarousel() {
       document.body.style.overflow = "unset";
     };
   }, [selectedReview]);
+
+  if (reviews.length === 0) return null;
+
+  // Duplicate reviews to create an infinite seamless loop
+  const LOOPED_REVIEWS = [...reviews, ...reviews];
 
   const formatPriceVal = (value: number, currency: "USD" | "LKR") => {
     if (currency === "LKR") {

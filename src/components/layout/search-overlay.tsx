@@ -7,7 +7,8 @@ import Image from "next/image";
 import { Search, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useLenis } from "lenis/react";
-import { MOCK_PRODUCTS } from "@/lib/db";
+import { getProducts } from "@/lib/db";
+import type { Product } from "@/types/product";
 
 interface SearchOverlayProps {
   isOpen: boolean;
@@ -19,27 +20,34 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
   const lenis = useLenis();
   const [searchQuery, setSearchQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const [products, setProducts] = useState<Product[]>([]);
+
+  useEffect(() => {
+    if (isOpen && products.length === 0) {
+      getProducts().then(setProducts);
+    }
+  }, [isOpen, products.length]);
 
   const categories = [
-    { label: "Laptops", link: "/products?category=laptops" },
-    { label: "Phones", link: "/products?category=phones" },
-    { label: "Audio", link: "/products?category=audio" },
-    { label: "Accessories", link: "/coming-soon" },
+    { label: "Laptops", link: "/products/laptops" },
+    { label: "Phones", link: "/products/phones" },
+    { label: "Audio", link: "/products/audio" },
+    { label: "Keyboards", link: "/products/keyboards" },
   ];
 
   const brands = [
-    { label: "Apple", link: "/products?brand=apple" },
-    { label: "Samsung", link: "/products?brand=samsung" },
-    { label: "Sony", link: "/products?brand=sony" },
-    { label: "Bose", link: "/products?brand=bose" },
-    { label: "Asus", link: "/products?brand=asus" },
+    { label: "Apple", link: "/brands/apple" },
+    { label: "Samsung", link: "/brands/samsung" },
+    { label: "Sony", link: "/brands/sony" },
+    { label: "Bose", link: "/brands/bose" },
+    { label: "Asus", link: "/brands/asus" },
   ];
 
   // Live filter products as user types
   const searchResults =
     searchQuery.trim() === ""
       ? []
-      : MOCK_PRODUCTS.filter(
+      : products.filter(
           (p) =>
             p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
             p.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -89,7 +97,7 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (searchQuery.trim()) {
-      router.push(`/products?search=${encodeURIComponent(searchQuery.trim())}`);
+      router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
       onClose();
     }
   };

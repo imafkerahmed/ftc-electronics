@@ -112,26 +112,26 @@ export default function Navbar() {
       label: "Categories",
       link: "/products",
       subItems: [
-        { label: "Laptops", link: "/products?category=laptops" },
-        { label: "Phones", link: "/products?category=phones" },
-        { label: "Audio", link: "/products?category=audio" },
-        { label: "Accessories", link: "/coming-soon" },
+        { label: "Laptops", link: "/products/laptops" },
+        { label: "Phones", link: "/products/phones" },
+        { label: "Audio", link: "/products/audio" },
+        { label: "Accessories", link: "/products/accessories" },
       ],
     },
     {
       label: "Brands",
-      link: "/products?filter=brands",
+      link: "/products",
       subItems: [
-        { label: "Apple", link: "/products?brand=apple" },
-        { label: "Samsung", link: "/products?brand=samsung" },
-        { label: "Sony", link: "/products?brand=sony" },
-        { label: "Bose", link: "/products?brand=bose" },
-        { label: "Asus", link: "/products?brand=asus" },
+        { label: "Apple", link: "/brands/apple" },
+        { label: "Samsung", link: "/brands/samsung" },
+        { label: "Sony", link: "/brands/sony" },
+        { label: "Bose", link: "/brands/bose" },
+        { label: "Asus", link: "/brands/asus" },
       ],
     },
-    { label: "On Sale", link: "/products?filter=on-sale" },
-    { label: "About", link: "/coming-soon" },
-    { label: "Contact", link: "/coming-soon" },
+    { label: "On Sale", link: "/deals" },
+    { label: "About", link: "/about" },
+    { label: "Contact", link: "/contact" },
   ];
 
   return (
@@ -184,18 +184,19 @@ export default function Navbar() {
           isIntroActive
             ? "border-transparent bg-transparent backdrop-blur-none"
             : isScrolled
-            ? "border-border/80 bg-background/95 shadow-sm shadow-black/5"
-            : "border-border/40 bg-background/80",
+              ? "border-border/80 bg-background/95 shadow-sm shadow-black/5"
+              : "border-border/40 bg-background/80",
         )}
       >
         {/* Subtle bottom glow line when scrolled */}
         <div
           className={cn(
             "absolute bottom-0 left-0 right-0 h-[1px] transition-opacity duration-500",
-            isScrolled ? "opacity-100" : "opacity-0"
+            isScrolled ? "opacity-100" : "opacity-0",
           )}
           style={{
-            background: "linear-gradient(90deg, transparent, rgba(59,130,246,0.4) 40%, rgba(99,102,241,0.4) 60%, transparent)",
+            background:
+              "linear-gradient(90deg, transparent, rgba(59,130,246,0.4) 40%, rgba(99,102,241,0.4) 60%, transparent)",
           }}
         />
 
@@ -278,8 +279,6 @@ export default function Navbar() {
             }}
             className="flex items-center space-x-1 sm:space-x-2"
           >
-
-
             {/* Account */}
             <Link
               href="/account/profile"

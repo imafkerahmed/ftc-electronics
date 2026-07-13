@@ -2,6 +2,7 @@ import Navbar from '@/components/layout/navbar';
 import Footer from '@/components/layout/footer';
 import MobileNav from '@/components/layout/mobile-nav';
 import CartDropdown from '@/components/cart/cart-dropdown';
+import WhatsAppButton from '@/components/ui/whatsapp-button';
 
 export default function StoreLayout({
   children,
@@ -23,6 +24,9 @@ export default function StoreLayout({
       {/* Overlays / Sliders drawers */}
       <MobileNav />
       <CartDropdown />
+
+      {/* Floating WhatsApp Button */}
+      <WhatsAppButton />
 
       {/* Global Footer */}
       <Footer />

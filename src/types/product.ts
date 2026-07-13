@@ -30,6 +30,8 @@ export interface Product {
   currency?: 'USD' | 'LKR';
   reviews?: Review[];
   createdAt: string;
+  badges?: string[];
+  status?: 'draft' | 'published';
 }
 
 export interface Category {
@@ -38,6 +40,14 @@ export interface Category {
   slug: string;
   image?: string;
   count?: number;
+}
+
+export interface Brand {
+  id: string;
+  name: string;
+  slug: string;
+  logo?: string;
+  description?: string;
 }
 
 export interface ProductFilterParams {

@@ -12,8 +12,23 @@ const RotatingText = RotatingTextComponent as React.ComponentType<{
   rotationInterval?: number;
 }>;
 
-export default function ValuePropositions() {
+export default function ValuePropositions({ config }: { config?: any }) {
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const texts =
+    config?.texts && config.texts.length > 0
+      ? config.texts
+      : [
+          "WHY CHOOSE US",
+          "100% GENUINE WARRANTY",
+          "0% INTEREST INSTALLMENTS",
+          "ISLANDWIDE SECURE LOGISTICS",
+          "EXPERT TECH CURATION",
+        ];
+
+  const bodyContent =
+    config?.content ||
+    "As an authorized premium electronics distributor, we offer meticulously vetted hardware with direct manufacturer guarantees. We bridge the gap between engineering-grade quality and raw, reliable configuration performance.";
 
   return (
     <section
@@ -37,13 +52,7 @@ export default function ValuePropositions() {
         <div className="w-full max-w-5xl mb-2 sm:mb-4 flex flex-col items-center justify-center min-h-[55px] sm:min-h-[110px] lg:min-h-[150px]">
           <h2 className="text-3xl sm:text-5xl lg:text-7xl font-extrabold tracking-tight uppercase leading-none text-center">
             <RotatingText
-              texts={[
-                "WHY CHOOSE US",
-                "100% GENUINE WARRANTY",
-                "0% INTEREST INSTALLMENTS",
-                "ISLANDWIDE SECURE LOGISTICS",
-                "EXPERT TECH CURATION",
-              ]}
+              texts={texts}
               mainClassName="text-blue-600 dark:text-blue-500 font-black tracking-tight inline-flex justify-center text-center overflow-hidden py-2"
               staggerDuration={0.025}
               splitBy="characters"
@@ -56,7 +65,7 @@ export default function ValuePropositions() {
         {/* Philosophy paragraph */}
         <div className="max-w-2xl mx-auto">
           <p className="text-neutral-500 dark:text-neutral-400 text-sm sm:text-base leading-relaxed">
-            As an authorized premium electronics distributor, we offer meticulously vetted hardware with direct manufacturer guarantees. We bridge the gap between engineering-grade quality and raw, reliable configuration performance.
+            {bodyContent}
           </p>
         </div>
       </div>

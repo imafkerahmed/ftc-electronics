@@ -3,7 +3,6 @@ import { Geist, Geist_Mono, Inter } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { LenisProvider } from "@/components/layout/lenis-provider";
-import WhatsAppButton from "@/components/ui/whatsapp-button";
 
 const inter = Inter({subsets:['latin'],variable:'--font-sans'});
 
@@ -35,7 +34,6 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <LenisProvider>
           {children}
-          <WhatsAppButton />
         </LenisProvider>
       </body>
     </html>

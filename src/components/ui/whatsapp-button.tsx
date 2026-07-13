@@ -15,7 +15,7 @@ export default function WhatsAppButton({
   const [showTooltip, setShowTooltip] = useState(false);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+     
     setMounted(true);
     const timer = setTimeout(() => setShowTooltip(true), 3000);
     const hideTimer = setTimeout(() => setShowTooltip(false), 8000);

@@ -1,4 +1,4 @@
-@import 'tailwindcss';
+@import "tailwindcss";
 @plugin 'lightswind/plugin';
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -10,6 +10,12 @@
 
 @theme inline {
   --color-blue-650: #2056d4;
+  --color-blue-450: #4a7ff5;
+  --color-sale: #ef4444;
+  --color-sale-dark: #dc2626;
+  --color-new-arrival: #7c3aed;
+  --color-new-arrival-light: #a78bfa;
+  --color-brand-accent: #2056d4;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
@@ -54,19 +60,75 @@
   --animate-marquee: marquee var(--duration) infinite linear;
   --animate-marquee-vertical: marquee-vertical var(--duration) linear infinite;
   @keyframes marquee {
-  from {
-    transform: translateX(0);
+    from {
+      transform: translateX(0);
     }
-  to {
-    transform: translateX(calc(-100% - var(--gap)));
+    to {
+      transform: translateX(calc(-100% - var(--gap)));
     }
   }
   @keyframes marquee-vertical {
-  from {
-    transform: translateY(0);
+    from {
+      transform: translateY(0);
     }
-  to {
-    transform: translateY(calc(-100% - var(--gap)));
+    to {
+      transform: translateY(calc(-100% - var(--gap)));
+    }
+  }
+  @keyframes shimmer {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(200%);
+    }
+  }
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0px);
+    }
+    50% {
+      transform: translateY(-6px);
+    }
+  }
+  @keyframes pulse-glow {
+    0%,
+    100% {
+      opacity: 0.6;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.04);
+    }
+  }
+  @keyframes slide-in-right {
+    from {
+      transform: translateX(8px);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes spin-slow {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
     }
   }
 }
@@ -146,14 +208,20 @@
   }
   body {
     @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
   html {
     @apply font-sans;
   }
+  ::selection {
+    background-color: rgba(32, 86, 212, 0.18);
+  }
 }
 
 /* Lenis smooth scrolling compatibility styles */
-html.lenis, html.lenis body {
+html.lenis,
+html.lenis body {
   height: auto;
 }
 
@@ -171,4 +239,27 @@ html.lenis, html.lenis body {
 
 .lenis-scrolling iframe {
   pointer-events: none;
+}
+
+/* Utility animation classes */
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+.animate-pulse-glow {
+  animation: pulse-glow 2.5s ease-in-out infinite;
+}
+.animate-fade-up {
+  animation: fade-up 0.5s ease-out forwards;
+}
+.animate-spin-slow {
+  animation: spin-slow 8s linear infinite;
+}
+
+/* Hide scrollbar but allow scroll */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
 }

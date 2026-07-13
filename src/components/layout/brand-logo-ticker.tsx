@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { motion } from "motion/react";
 
 interface BrandLogo {
@@ -44,13 +45,15 @@ const brandLogos: BrandLogo[] = [
   },
 ];
 
-export default function BrandLogoTicker({ className }: { className?: string }) {
+export default function BrandLogoTicker({ className, brandLogos: customLogos }: { className?: string; brandLogos?: BrandLogo[] }) {
+  const logos = customLogos && customLogos.length > 0 ? customLogos : brandLogos;
+
   // Duplicate the brand logos list to create a seamless infinite marquee effect
   const duplicatedLogos = [
-    ...brandLogos,
-    ...brandLogos,
-    ...brandLogos,
-    ...brandLogos,
+    ...logos,
+    ...logos,
+    ...logos,
+    ...logos,
   ];
 
   return (
@@ -78,9 +81,10 @@ export default function BrandLogoTicker({ className }: { className?: string }) {
           }}
         >
           {duplicatedLogos.map((logo, index) => (
-            <div
+            <Link
               key={index}
-              className="relative flex items-center justify-center opacity-100 hover:scale-105 transition-all duration-300 cursor-pointer w-[120px] h-[48px]"
+              href={`/brands/${logo.name.toLowerCase()}`}
+              className="relative flex items-center justify-center opacity-100 hover:scale-110 transition-all duration-300 cursor-pointer w-[120px] h-[48px]"
             >
               <Image
                 src={logo.src}
@@ -89,7 +93,7 @@ export default function BrandLogoTicker({ className }: { className?: string }) {
                 height={logo.height}
                 className="object-contain pointer-events-none select-none"
               />
-            </div>
+            </Link>
           ))}
         </motion.div>
       </div>

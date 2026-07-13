@@ -4,12 +4,16 @@ import { useEffect, useState } from "react";
 import { useUiStore } from "@/store/use-ui-store";
 import { motion } from "motion/react";
 
-export default function HomePageLoaderWrapper({ children }: { children: React.ReactNode }) {
+export default function HomePageLoaderWrapper({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const hasIntroPlayed = useUiStore((state) => state.hasIntroPlayed);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+     
     setMounted(true);
   }, []);
 

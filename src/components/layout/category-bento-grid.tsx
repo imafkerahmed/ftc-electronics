@@ -28,9 +28,14 @@ const categories: CategoryCard[] = [
     label: "LAPTOPS",
     title: "Laptops & Computing",
     description: "High-Performance Workstations",
-    href: "/products?category=laptops",
+    href: "/products/laptops",
     count: "48+ Products",
-    icon: <Laptop className="w-12 h-12 sm:w-20 lg:w-28 sm:h-20 lg:h-28 text-blue-600" strokeWidth={1.2} />,
+    icon: (
+      <Laptop
+        className="w-12 h-12 sm:w-20 lg:w-28 sm:h-20 lg:h-28 text-blue-600"
+        strokeWidth={1.2}
+      />
+    ),
     glowColor: "rgba(59,130,246,0.2)",
     hoverColor: "group-hover:text-blue-600 dark:group-hover:text-blue-400",
     iconBg: "bg-blue-500/8 dark:bg-blue-500/5",
@@ -39,9 +44,14 @@ const categories: CategoryCard[] = [
     label: "KEYBOARDS",
     title: "Keyboards",
     description: "Mechanical & Membrane",
-    href: "/products?category=keyboards",
+    href: "/products/keyboards",
     count: "24+ Products",
-    icon: <Keyboard className="w-10 h-10 sm:w-16 lg:w-20 sm:h-16 lg:h-20 text-slate-600 dark:text-neutral-300" strokeWidth={1.2} />,
+    icon: (
+      <Keyboard
+        className="w-10 h-10 sm:w-16 lg:w-20 sm:h-16 lg:h-20 text-slate-600 dark:text-neutral-300"
+        strokeWidth={1.2}
+      />
+    ),
     glowColor: "rgba(100,116,139,0.18)",
     hoverColor: "group-hover:text-slate-600 dark:group-hover:text-neutral-300",
     iconBg: "bg-slate-500/8 dark:bg-neutral-400/5",
@@ -50,28 +60,96 @@ const categories: CategoryCard[] = [
     label: "AUDIO",
     title: "Audio & Sound",
     description: "Premium Sound Equipment",
-    href: "/products?category=audio",
+    href: "/products/audio",
     count: "36+ Products",
-    icon: <Headphones className="w-10 h-10 sm:w-16 lg:w-20 sm:h-16 lg:h-20 text-rose-600" strokeWidth={1.2} />,
+    icon: (
+      <Headphones
+        className="w-10 h-10 sm:w-16 lg:w-20 sm:h-16 lg:h-20 text-rose-600"
+        strokeWidth={1.2}
+      />
+    ),
     glowColor: "rgba(244,63,94,0.18)",
     hoverColor: "group-hover:text-rose-600 dark:group-hover:text-rose-450",
     iconBg: "bg-rose-500/8 dark:bg-rose-500/5",
   },
   {
-    label: "PHONES",
+    label: "SMARTPHONES",
     title: "Smartphones",
-    description: "Flagship Mobile Devices",
-    href: "/products?category=phones",
-    count: "30+ Products",
-    icon: <Smartphone className="w-auto h-full max-h-[60px] sm:max-h-[160px] lg:max-h-[200px] text-emerald-600" strokeWidth={1.2} />,
+    description: "Flagships & Ecosystem Accessories",
+    href: "/products/phones",
+    count: "60+ Products",
+    icon: (
+      <Smartphone
+        className="w-10 h-10 sm:w-16 lg:w-20 sm:h-16 lg:h-20 text-emerald-600"
+        strokeWidth={1.2}
+      />
+    ),
     glowColor: "rgba(16,185,129,0.18)",
-    hoverColor: "group-hover:text-emerald-600 dark:group-hover:text-emerald-450",
+    hoverColor:
+      "group-hover:text-emerald-600 dark:group-hover:text-emerald-400",
     iconBg: "bg-emerald-500/8 dark:bg-emerald-500/5",
   },
 ];
 
-export default function CategoryBentoGrid() {
-  const [laptops, keyboards, audio, phones] = categories;
+export default function CategoryBentoGrid({
+  categories: customCategories,
+}: {
+  categories?: any[];
+}) {
+  // If custom categories are provided, map them to the 4 bento cards
+  const activeCategories = [...categories];
+  if (customCategories && customCategories.length >= 4) {
+    // 0: Laptops
+    activeCategories[0] = {
+      ...categories[0],
+      label: customCategories[0].name.toUpperCase(),
+      title: customCategories[0].name,
+      description:
+        customCategories[0].description ||
+        customCategories[0].tagline ||
+        categories[0].description,
+      href: `/products?category=${customCategories[0].slug}`,
+      count: `${customCategories[0].productCount || 0}+ Products`,
+    };
+    // 1: Keyboards
+    activeCategories[1] = {
+      ...categories[1],
+      label: customCategories[1].name.toUpperCase(),
+      title: customCategories[1].name,
+      description:
+        customCategories[1].description ||
+        customCategories[1].tagline ||
+        categories[1].description,
+      href: `/products?category=${customCategories[1].slug}`,
+      count: `${customCategories[1].productCount || 0}+ Products`,
+    };
+    // 2: Audio
+    activeCategories[2] = {
+      ...categories[2],
+      label: customCategories[2].name.toUpperCase(),
+      title: customCategories[2].name,
+      description:
+        customCategories[2].description ||
+        customCategories[2].tagline ||
+        categories[2].description,
+      href: `/products?category=${customCategories[2].slug}`,
+      count: `${customCategories[2].productCount || 0}+ Products`,
+    };
+    // 3: Phones
+    activeCategories[3] = {
+      ...categories[3],
+      label: customCategories[3].name.toUpperCase(),
+      title: customCategories[3].name,
+      description:
+        customCategories[3].description ||
+        customCategories[3].tagline ||
+        categories[3].description,
+      href: `/products?category=${customCategories[3].slug}`,
+      count: `${customCategories[3].productCount || 0}+ Products`,
+    };
+  }
+
+  const [laptops, keyboards, audio, phones] = activeCategories;
 
   return (
     <section className="w-full py-10 sm:py-16 lg:py-24 border-b border-border bg-zinc-50 dark:bg-neutral-950 text-foreground dark:text-white relative z-10 overflow-hidden">
@@ -103,7 +181,9 @@ export default function CategoryBentoGrid() {
             </span>
             <h2 className="relative text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight text-neutral-900 dark:text-white uppercase leading-none">
               Browse Our{" "}
-              <span className="text-blue-600 dark:text-blue-400">Collections</span>
+              <span className="text-blue-600 dark:text-blue-400">
+                Collections
+              </span>
             </h2>
           </div>
           <Link
@@ -120,17 +200,35 @@ export default function CategoryBentoGrid() {
           {/* Left Column — Laptops on top, Keyboards + Audio below */}
           <div className="lg:col-span-8 flex flex-col gap-4 sm:gap-5">
             {/* Laptops Card (wide horizontal) */}
-            <BentoCard card={laptops} heightClass="h-[130px] sm:h-[240px] lg:h-[280px]" wide>
+            <BentoCard
+              card={laptops}
+              heightClass="h-[130px] sm:h-[240px] lg:h-[280px]"
+              wide
+            >
               <div className="absolute top-0 right-0 h-full w-[45%] overflow-hidden flex items-center justify-center">
                 <div
                   className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 sm:w-48 sm:h-48 rounded-full blur-[35px] pointer-events-none group-hover:scale-125 transition-transform duration-700"
-                  style={{ background: `radial-gradient(circle, ${laptops.glowColor} 0%, transparent 70%)` }}
+                  style={{
+                    background: `radial-gradient(circle, ${laptops.glowColor} 0%, transparent 70%)`,
+                  }}
                 />
                 <motion.div
                   variants={{
                     initial: { scale: 0.75, opacity: 0 },
-                    animate: { scale: 1, opacity: 1, transition: { duration: 0.55 } },
-                    hover: { scale: 1.08, y: -5, transition: { type: "spring", stiffness: 260, damping: 16 } },
+                    animate: {
+                      scale: 1,
+                      opacity: 1,
+                      transition: { duration: 0.55 },
+                    },
+                    hover: {
+                      scale: 1.08,
+                      y: -5,
+                      transition: {
+                        type: "spring",
+                        stiffness: 260,
+                        damping: 16,
+                      },
+                    },
                   }}
                   className="flex items-center justify-center"
                 >
@@ -142,17 +240,33 @@ export default function CategoryBentoGrid() {
             {/* Bottom row */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
               {/* Keyboards */}
-              <BentoCard card={keyboards} heightClass="h-[130px] sm:h-[240px] lg:h-[280px]">
+              <BentoCard
+                card={keyboards}
+                heightClass="h-[130px] sm:h-[240px] lg:h-[280px]"
+              >
                 <div className="absolute right-4 bottom-4 sm:right-6 sm:bottom-6 lg:right-8 lg:bottom-8 select-none pointer-events-none">
                   <div
                     className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 sm:w-28 sm:h-28 rounded-full blur-[25px] pointer-events-none group-hover:scale-125 transition-transform duration-700"
-                    style={{ background: `radial-gradient(circle, ${keyboards.glowColor} 0%, transparent 70%)` }}
+                    style={{
+                      background: `radial-gradient(circle, ${keyboards.glowColor} 0%, transparent 70%)`,
+                    }}
                   />
                   <motion.div
                     variants={{
                       initial: { scale: 0.75, opacity: 0 },
-                      animate: { scale: 1, opacity: 1, transition: { duration: 0.55 } },
-                      hover: { scale: 1.1, transition: { type: "spring", stiffness: 260, damping: 16 } },
+                      animate: {
+                        scale: 1,
+                        opacity: 1,
+                        transition: { duration: 0.55 },
+                      },
+                      hover: {
+                        scale: 1.1,
+                        transition: {
+                          type: "spring",
+                          stiffness: 260,
+                          damping: 16,
+                        },
+                      },
                     }}
                   >
                     {keyboards.icon}
@@ -161,19 +275,32 @@ export default function CategoryBentoGrid() {
               </BentoCard>
 
               {/* Audio */}
-              <BentoCard card={audio} heightClass="h-[130px] sm:h-[240px] lg:h-[280px]">
+              <BentoCard
+                card={audio}
+                heightClass="h-[130px] sm:h-[240px] lg:h-[280px]"
+              >
                 <div className="absolute right-4 bottom-4 sm:right-6 sm:bottom-6 lg:right-8 lg:bottom-8 select-none pointer-events-none">
                   <div
                     className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 sm:w-28 sm:h-28 rounded-full blur-[25px] pointer-events-none group-hover:scale-125 transition-transform duration-700"
-                    style={{ background: `radial-gradient(circle, ${audio.glowColor} 0%, transparent 70%)` }}
+                    style={{
+                      background: `radial-gradient(circle, ${audio.glowColor} 0%, transparent 70%)`,
+                    }}
                   />
                   <motion.div
                     variants={{
                       initial: { scale: 0.75, opacity: 0 },
-                      animate: { scale: 1, opacity: 1, transition: { duration: 0.55 } },
+                      animate: {
+                        scale: 1,
+                        opacity: 1,
+                        transition: { duration: 0.55 },
+                      },
                       hover: {
                         scale: [1, 1.08, 1],
-                        transition: { duration: 0.85, repeat: Infinity, ease: "easeInOut" },
+                        transition: {
+                          duration: 0.85,
+                          repeat: Infinity,
+                          ease: "easeInOut",
+                        },
                       },
                     }}
                   >
@@ -193,8 +320,14 @@ export default function CategoryBentoGrid() {
                 whileHover="hover"
                 viewport={{ once: true, amount: 0.2 }}
                 variants={{
-                  initial: { y: 0, boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" },
-                  hover: { y: -6, boxShadow: "0 24px 30px -8px rgba(0,0,0,0.12)" },
+                  initial: {
+                    y: 0,
+                    boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)",
+                  },
+                  hover: {
+                    y: -6,
+                    boxShadow: "0 24px 30px -8px rgba(0,0,0,0.12)",
+                  },
                 }}
                 transition={{ type: "spring", stiffness: 280, damping: 22 }}
                 className="relative bg-white dark:bg-neutral-900 rounded-[24px] border border-neutral-200/70 dark:border-white/5 h-[130px] sm:h-full sm:min-h-[380px] lg:min-h-[580px] overflow-hidden p-5 sm:p-6 lg:p-8 flex flex-col justify-between transition-colors"
@@ -225,7 +358,9 @@ export default function CategoryBentoGrid() {
                   <p className="text-[11px] sm:text-sm text-neutral-500 dark:text-neutral-400 mt-1 sm:mt-2 leading-relaxed font-medium">
                     {phones.description}
                   </p>
-                  <div className={`inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 dark:text-neutral-500 ${phones.hoverColor} mt-3 sm:mt-6 transition-colors duration-300`}>
+                  <div
+                    className={`inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 dark:text-neutral-500 ${phones.hoverColor} mt-3 sm:mt-6 transition-colors duration-300`}
+                  >
                     <span>Shop Now</span>
                     <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
                   </div>
@@ -235,12 +370,18 @@ export default function CategoryBentoGrid() {
                 <div className="absolute right-4 bottom-4 sm:relative sm:right-0 sm:bottom-0 sm:flex-grow w-[35%] sm:w-full flex items-center justify-end sm:items-center sm:justify-center select-none pointer-events-none mt-0 sm:mt-6 h-[70px] sm:h-auto max-h-[50%] sm:max-h-[55%] md:max-h-[60%]">
                   <div
                     className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 sm:w-44 sm:h-44 rounded-full blur-[30px] pointer-events-none group-hover:scale-125 transition-transform duration-700"
-                    style={{ background: `radial-gradient(circle, ${phones.glowColor} 0%, transparent 70%)` }}
+                    style={{
+                      background: `radial-gradient(circle, ${phones.glowColor} 0%, transparent 70%)`,
+                    }}
                   />
                   <motion.div
                     variants={{
                       initial: { scale: 0.75, opacity: 0 },
-                      animate: { scale: 1, opacity: 1, transition: { duration: 0.55 } },
+                      animate: {
+                        scale: 1,
+                        opacity: 1,
+                        transition: { duration: 0.55 },
+                      },
                       hover: {
                         scale: 1.08,
                         y: -6,
@@ -273,7 +414,12 @@ interface BentoCardProps {
   children?: React.ReactNode;
 }
 
-function BentoCard({ card, heightClass, wide = false, children }: BentoCardProps) {
+function BentoCard({
+  card,
+  heightClass,
+  wide = false,
+  children,
+}: BentoCardProps) {
   return (
     <Link href={card.href} className="group block">
       <motion.div
@@ -300,7 +446,9 @@ function BentoCard({ card, heightClass, wide = false, children }: BentoCardProps
         />
 
         {/* Left text content */}
-        <div className={`z-10 ${wide ? "max-w-[50%]" : "max-w-[60%]"} flex flex-col items-start`}>
+        <div
+          className={`z-10 ${wide ? "max-w-[50%]" : "max-w-[60%]"} flex flex-col items-start`}
+        >
           {/* Product count badge */}
           <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-white/5 border border-neutral-200/70 dark:border-white/10 text-neutral-500 dark:text-neutral-400 text-[9px] font-mono font-bold uppercase tracking-widest mb-2">
             {card.count}
@@ -309,13 +457,17 @@ function BentoCard({ card, heightClass, wide = false, children }: BentoCardProps
           <span className="font-mono text-[10px] tracking-widest text-neutral-400 dark:text-neutral-500 uppercase font-bold">
             {card.label}
           </span>
-          <h3 className={`${wide ? "text-lg sm:text-2xl" : "text-lg sm:text-xl"} font-black text-neutral-900 dark:text-white uppercase tracking-tight mt-1.5 sm:mt-2 leading-none`}>
+          <h3
+            className={`${wide ? "text-lg sm:text-2xl" : "text-lg sm:text-xl"} font-black text-neutral-900 dark:text-white uppercase tracking-tight mt-1.5 sm:mt-2 leading-none`}
+          >
             {card.title}
           </h3>
           <p className="text-[11px] sm:text-sm text-neutral-500 dark:text-neutral-400 mt-1 sm:mt-1.5 leading-relaxed font-medium">
             {card.description}
           </p>
-          <div className={`inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 dark:text-neutral-500 ${card.hoverColor} mt-3 sm:mt-5 transition-colors duration-300`}>
+          <div
+            className={`inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 dark:text-neutral-500 ${card.hoverColor} mt-3 sm:mt-5 transition-colors duration-300`}
+          >
             <span>Shop Now</span>
             <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
           </div>

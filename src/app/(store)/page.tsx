@@ -5,78 +5,286 @@ import ReviewCarousel from "@/components/product/review-carousel";
 import ValuePropositions from "@/components/layout/value-propositions";
 import LocationMap from "@/components/layout/location-map";
 import CategoryBentoGrid from "@/components/layout/category-bento-grid";
-import { getCollectionProducts } from "@/lib/db";
+import {
+  pbHomepageBlocks,
+  pbBrands,
+  pbCategories,
+  pbProducts,
+  pbSiteSettings,
+  pbHeroBanners,
+} from "@/lib/pb-collections";
 import HomePageLoaderWrapper from "@/components/layout/home-page-loader-wrapper";
 import ImageParallaxBanner from "@/components/layout/image-parallax-banner";
 import LazyScrollSection from "@/components/layout/lazy-scroll-section";
 
 export default async function StoreHomePage() {
-  // Fetch products and categories for layout rendering
-  const onSaleProducts = await getCollectionProducts("on-sale");
-  const newArrivalProducts = await getCollectionProducts("new-arrivals");
+  // Fetch active homepage blocks from the database
+  const blocks = await pbHomepageBlocks.getActive();
+
+  // If the database has no configured blocks, fall back to the default layout
+  const activeBlocks =
+    blocks && blocks.length > 0
+      ? blocks
+      : [
+          {
+            id: "def-hero",
+            type: "hero-banner",
+            title: "Hero Carousel",
+            config: {},
+            deviceVisibility: "all",
+          },
+          {
+            id: "def-sale",
+            type: "product-carousel",
+            title: "On-Sale",
+            config: { source: "on-sale", layout: "featured-grid", limit: 6 },
+            deviceVisibility: "all",
+          },
+          {
+            id: "def-promo",
+            type: "promo-banner",
+            title: "Office Gear",
+            config: {
+              imageSrc: "/assets/banners/anker-banner.png",
+              alt: "Next-Gen Office Gear",
+              href: "/products?search=keyboard",
+              overlayText: "Next-Gen Office Gear",
+              ctaLabel: "Shop Keyboards",
+            },
+            deviceVisibility: "all",
+          },
+          {
+            id: "def-new",
+            type: "product-carousel",
+            title: "New Arrivals",
+            config: { source: "newest", layout: "featured-grid", limit: 6 },
+            deviceVisibility: "all",
+          },
+          {
+            id: "def-brands",
+            type: "brand-logo-strip",
+            title: "Brands Strip",
+            config: {},
+            deviceVisibility: "all",
+          },
+          {
+            id: "def-categories",
+            type: "category-grid",
+            title: "Category Grid",
+            config: {},
+            deviceVisibility: "all",
+          },
+          {
+            id: "def-reviews",
+            type: "reviews-carousel",
+            title: "Customer Reviews",
+            config: {},
+            deviceVisibility: "all",
+          },
+          {
+            id: "def-text",
+            type: "text-content",
+            title: "Why Choose Us",
+            config: {},
+            deviceVisibility: "all",
+          },
+          {
+            id: "def-map",
+            type: "store-locator",
+            title: "Experience Center",
+            config: {},
+            deviceVisibility: "all",
+          },
+        ];
+
+  const pbUrl =
+    process.env.NEXT_PUBLIC_POCKETBASE_URL || "https://ftc-db.codix.site";
+
+  // 1. Pre-fetch shared data to optimize rendering
+  const allBrands = await pbBrands.getAll().catch(() => []);
+  const allCategories = await pbCategories.getAll().catch(() => []);
+
+  // Fetch active hero banner slides from PocketBase (admin-managed)
+  // Build the full image URL server-side using the PocketBase file API pattern
+  const rawHeroBanners = await pbHeroBanners.getActive().catch(() => []);
+  const activeHeroBanners = rawHeroBanners.map((banner) => ({
+    ...banner,
+    imageUrl: pbHeroBanners.getImageUrl(banner, pbUrl),
+  }));
+
+
+  const contactSetting = await pbSiteSettings
+    .get<any>("contact")
+    .catch(() => null);
+  const hoursSetting = await pbSiteSettings.get<any>("hours").catch(() => null);
+
+  const locatorSettings = {
+    address: contactSetting?.address,
+    phone: contactSetting?.phone,
+    email: contactSetting?.email,
+    hours: hoursSetting?.hours,
+    googleMapsLink: contactSetting?.googleMapsLink,
+    whatsappLink: contactSetting?.whatsappLink,
+  };
+
+  const brandLogos = allBrands
+    .filter((b: any) => b.show_in_strip === true && b.logo)
+    .map((b: any) => ({
+      name: b.name,
+      src: `${pbUrl}/api/files/${b.collectionId}/${b.id}/${b.logo}`,
+      width:
+        b.name === "Samsung" || b.name === "Anker" || b.name === "Ugreen"
+          ? 95
+          : b.name === "Wiwu"
+            ? 85
+            : 32,
+      height: 32,
+    }));
 
   return (
     <HomePageLoaderWrapper>
       <div className="w-full">
-        {/* Hero banner at the top, loaded immediately */}
-        <CampaignHeroBanner />
+        {await Promise.all(
+          activeBlocks.map(async (block: any) => {
+            // Resolve device visibility class
+            let visibilityClass = "block";
+            if (block.deviceVisibility === "desktop-only") {
+              visibilityClass = "hidden md:block";
+            } else if (block.deviceVisibility === "mobile-only") {
+              visibilityClass = "block md:hidden";
+            }
 
-        {/* On Sale Section - Bento Grid layout (Lazy loaded on scroll) */}
-        <LazyScrollSection heightClass="min-h-[500px]">
-          <CollectionSection
-            title="On-Sale"
-            layout="featured-grid"
-            products={onSaleProducts.slice(0, 6)}
-            seeAllLink="/products?filter=on-sale"
-          />
-        </LazyScrollSection>
+            // Fetch products dynamically for carousel
+            let products: any[] = [];
+            if (block.type === "product-carousel") {
+              const source = block.config?.source || "newest";
+              const limit = parseInt(block.config?.limit) || 8;
 
-        {/* Promo Banner 1: Workspace/Keyboards (Anker) (Lazy loaded on scroll) */}
-        <LazyScrollSection heightClass="min-h-[220px]">
-          <ImageParallaxBanner
-            imageSrc="/assets/banners/anker-banner.png"
-            alt="Next-Gen Office Gear"
-            href="/products?search=keyboard"
-            heightClass="h-[160px] sm:h-[240px] md:h-[320px]"
-            overlayText="Next-Gen Office Gear"
-            ctaLabel="Shop Keyboards"
-          />
-        </LazyScrollSection>
+              try {
+                if (source === "on-sale") {
+                  products = await pbProducts.getByCollection("on-sale", limit);
+                } else if (source === "newest") {
+                  products = await pbProducts.getByCollection(
+                    "new-arrivals",
+                    limit,
+                  );
+                } else if (source === "featured") {
+                  products = await pbProducts.getByCollection(
+                    "featured",
+                    limit,
+                  );
+                } else if (source === "category") {
+                  const categorySlug =
+                    block.config?.value || block.config?.category;
+                  const categoryRecord = allCategories.find(
+                    (c: any) =>
+                      c.slug === categorySlug || c.id === categorySlug,
+                  );
+                  if (categoryRecord) {
+                    const res = await pbProducts.getAll({
+                      category: categoryRecord.name,
+                      perPage: limit,
+                    });
+                    products = res.items;
+                  }
+                } else if (source === "brand") {
+                  const brandSlug = block.config?.value || block.config?.brand;
+                  const brandRecord = allBrands.find(
+                    (b: any) => b.slug === brandSlug || b.id === brandSlug,
+                  );
+                  if (brandRecord) {
+                    const res = await pbProducts.getAll({
+                      brand: brandRecord.name,
+                      perPage: limit,
+                    });
+                    products = res.items;
+                  }
+                }
+              } catch (err) {
+                console.error(
+                  `Failed to load products for block ${block.title}:`,
+                  err,
+                );
+              }
+            }
 
-        {/* New Arrivals Section - Asymmetric Bento Grid layout (Lazy loaded on scroll) */}
-        <LazyScrollSection heightClass="min-h-[500px]">
-          <CollectionSection
-            title="New Arrivals"
-            layout="featured-grid"
-            products={newArrivalProducts.slice(0, 6)}
-            seeAllLink="/products?sortBy=newest"
-          />
-        </LazyScrollSection>
+            const seeAllLink =
+              block.config?.seeAllLink ||
+              (block.config?.source === "on-sale"
+                ? "/products?filter=on-sale"
+                : block.config?.source === "newest"
+                  ? "/products?sortBy=newest"
+                  : "/products");
 
-        {/* Brand Logo Ticker (Lazy loaded on scroll) */}
-        <LazyScrollSection heightClass="min-h-[130px]">
-          <BrandLogoTicker />
-        </LazyScrollSection>
+            return (
+              <div key={block.id} className={visibilityClass}>
+                {block.type === "hero-banner" && (
+                  <CampaignHeroBanner
+                    config={block.config}
+                    dbSlides={activeHeroBanners as any}
+                  />
+                )}
 
-        {/* Category Bento Grid Section (Lazy loaded on scroll) */}
-        <LazyScrollSection heightClass="min-h-[450px]">
-          <CategoryBentoGrid />
-        </LazyScrollSection>
+                {block.type === "product-carousel" && (
+                  <LazyScrollSection heightClass="min-h-[500px]">
+                    <CollectionSection
+                      title={block.title || "Products"}
+                      layout={block.config?.layout || "featured-grid"}
+                      products={products}
+                      seeAllLink={seeAllLink}
+                    />
+                  </LazyScrollSection>
+                )}
 
-        {/* Client Reviews Social Proof Carousel (Lazy loaded on scroll) */}
-        <LazyScrollSection heightClass="min-h-[350px]">
-          <ReviewCarousel />
-        </LazyScrollSection>
+                {block.type === "promo-banner" && (
+                  <LazyScrollSection heightClass="min-h-[220px]">
+                    <ImageParallaxBanner
+                      imageSrc={
+                        block.config?.imageSrc ||
+                        "/assets/banners/anker-banner.png"
+                      }
+                      alt={block.config?.alt || "Promo Banner"}
+                      href={block.config?.href || "/products"}
+                      heightClass="h-[160px] sm:h-[240px] md:h-[320px]"
+                      overlayText={block.config?.overlayText || ""}
+                      ctaLabel={block.config?.ctaLabel || ""}
+                    />
+                  </LazyScrollSection>
+                )}
 
-        {/* Why Choose Us - Bento Grid Section (Lazy loaded on scroll) */}
-        <LazyScrollSection heightClass="min-h-[300px]">
-          <ValuePropositions />
-        </LazyScrollSection>
+                {block.type === "brand-logo-strip" && (
+                  <LazyScrollSection heightClass="min-h-[130px]">
+                    <BrandLogoTicker brandLogos={brandLogos} />
+                  </LazyScrollSection>
+                )}
 
-        {/* Flagship Store Location Map (Lazy loaded on scroll) */}
-        <LazyScrollSection heightClass="min-h-[400px]">
-          <LocationMap />
-        </LazyScrollSection>
+                {block.type === "category-grid" && (
+                  <LazyScrollSection heightClass="min-h-[450px]">
+                    <CategoryBentoGrid categories={allCategories} />
+                  </LazyScrollSection>
+                )}
+
+                {block.type === "reviews-carousel" && (
+                  <LazyScrollSection heightClass="min-h-[350px]">
+                    <ReviewCarousel />
+                  </LazyScrollSection>
+                )}
+
+                {block.type === "text-content" && (
+                  <LazyScrollSection heightClass="min-h-[300px]">
+                    <ValuePropositions config={block.config} />
+                  </LazyScrollSection>
+                )}
+
+                {block.type === "store-locator" && (
+                  <LazyScrollSection heightClass="min-h-[400px]">
+                    <LocationMap settings={locatorSettings} />
+                  </LazyScrollSection>
+                )}
+              </div>
+            );
+          }),
+        )}
       </div>
     </HomePageLoaderWrapper>
   );

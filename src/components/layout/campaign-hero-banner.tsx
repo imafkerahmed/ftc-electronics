@@ -1,249 +1,229 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, ChevronLeft, ChevronRight } from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 
-interface CampaignSlide {
-  id: number;
+interface CampaignSlideConfig {
   eyebrow: string;
-  titlePrefix: string;
+  titlePrefix?: string;
   titleHighlight: string;
-  highlightGradient: string;
   description: string;
   ctaText: string;
   ctaSecondary?: string;
   link: string;
-  accentColor: string;
-  blobColor1: string;
-  blobColor2: string;
-  renderVisual: () => React.ReactNode;
+  secondaryLink?: string;
+  accentColor?: string;
+  imageSrc?: string;
+  imageAlt?: string;
 }
 
-const slides: CampaignSlide[] = [
-  {
-    id: 1,
-    eyebrow: "Zero Interest · 3 Easy Payments",
-    titlePrefix: "BUY NOW.\n",
-    titleHighlight: "PAY IN 3.\n0% INTEREST.",
-    highlightGradient: "from-violet-600 via-indigo-500 to-cyan-500",
-    description:
-      "Shop your favorite premium tech today and split the cost into three interest-free monthly installments at checkout via Koko Pay.",
-    ctaText: "Learn About Koko Pay",
-    ctaSecondary: "Shop All",
-    link: "/coming-soon",
-    accentColor: "#6366f1",
-    blobColor1: "rgba(99,102,241,0.18)",
-    blobColor2: "rgba(139,92,246,0.12)",
-    renderVisual: () => (
-      <div className="relative w-full h-full flex items-center justify-center">
-        <div className="relative w-[200px] h-[100px] sm:w-[300px] sm:h-[150px] md:w-[380px] md:h-[190px] lg:w-[440px] lg:h-[220px] flex items-center justify-center z-10">
-          <div className="absolute inset-0 bg-gradient-to-r from-violet-500/20 to-indigo-500/20 rounded-full blur-[60px] pointer-events-none scale-75 opacity-70" />
-          <Image
-            src="/assets/hero/Slider-Banner-Koko.png"
-            alt="Koko Pay Split Payments"
-            fill
-            priority
-            sizes="(max-width: 640px) 200px, (max-width: 1024px) 300px, 440px"
-            className="object-contain filter drop-shadow-[0_20px_40px_rgba(99,102,241,0.3)] pointer-events-none select-none"
-          />
-        </div>
-      </div>
-    ),
-  },
-  {
-    id: 2,
-    eyebrow: "Authorized Distributor",
-    titlePrefix: "OFFICIAL ",
-    titleHighlight: "MANUFACTURER WARRANTY.",
-    highlightGradient: "from-blue-600 to-sky-400",
-    description:
-      "Shop with total confidence. Every item is sourced directly from authorized channels and carries an official manufacturer warranty with dedicated tech support.",
-    ctaText: "View Brand Partners",
-    ctaSecondary: "Shop All Brands",
-    link: "/products?filter=brands",
-    accentColor: "#3b82f6",
-    blobColor1: "rgba(59,130,246,0.18)",
-    blobColor2: "rgba(56,189,248,0.12)",
-    renderVisual: () => {
-      const brands = [
-        { name: "APPLE", desc: "Partner", bg: "bg-neutral-50" },
-        { name: "LOGITECH", desc: "Gaming", bg: "bg-blue-50/60" },
-        { name: "ANKER", desc: "Charging", bg: "bg-sky-50/60" },
-        { name: "SONY", desc: "Audio", bg: "bg-indigo-50/60" },
-        { name: "ASUS", desc: "Performance", bg: "bg-blue-50/60" },
-      ];
-      return (
-        <div className="relative w-full h-full flex items-center justify-center">
-          <div className="relative grid grid-cols-3 gap-2 sm:gap-3 w-full max-w-[260px] sm:max-w-[340px] md:max-w-[400px] z-10 select-none pointer-events-none">
-            <div className="absolute inset-0 bg-blue-500/8 rounded-full blur-[55px] pointer-events-none scale-75 opacity-60" />
-            {brands.map((brand, i) => (
-              <motion.div
-                key={brand.name}
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: i * 0.06 }}
-                className={`relative flex flex-col items-center justify-center p-3 rounded-2xl ${brand.bg} border border-neutral-200/80 backdrop-blur-xs text-center shadow-sm`}
-              >
-                <span className="font-mono text-[9px] sm:text-xs font-black tracking-widest text-neutral-800">
-                  {brand.name}
-                </span>
-                <span className="text-[6px] sm:text-[8px] text-neutral-500 mt-1 font-bold tracking-wider uppercase">
-                  {brand.desc}
-                </span>
-              </motion.div>
-            ))}
-            <div className="relative flex flex-col items-center justify-center p-3 rounded-2xl bg-blue-50/50 border border-dashed border-blue-300/70 text-blue-600 text-center backdrop-blur-xs shadow-sm">
-              <span className="font-mono font-black text-[8px] sm:text-[11px] tracking-wider">
-                + MORE
-              </span>
-              <span className="text-[6px] sm:text-[8px] text-blue-500 mt-1 font-bold tracking-wider uppercase">
-                Brands
-              </span>
-            </div>
-          </div>
-        </div>
-      );
-    },
-  },
-  {
-    id: 3,
-    eyebrow: "Premium Connectivity Brand",
-    titlePrefix: "UNLEASH THE\nPOWER OF ",
-    titleHighlight: "IVON.",
-    highlightGradient: "from-cyan-500 to-teal-500",
-    description:
-      "Elevate your daily connectivity with IVON's premium chargers, armored data cables, and crystal-clear wireless audio — designed to charge fast and play clean.",
-    ctaText: "Shop IVON Collection",
-    ctaSecondary: "View All Cables",
-    link: "/products?search=IVON",
-    accentColor: "#0891b2",
-    blobColor1: "rgba(6,182,212,0.18)",
-    blobColor2: "rgba(20,184,166,0.12)",
-    renderVisual: () => (
-      <div className="relative w-full h-full flex items-center justify-center">
-        <div className="relative w-[200px] h-[100px] sm:w-[300px] sm:h-[150px] md:w-[380px] md:h-[190px] lg:w-[440px] lg:h-[220px] flex items-center justify-center z-10">
-          <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/25 to-teal-500/25 rounded-full blur-[60px] pointer-events-none scale-75 opacity-80" />
-          <Image
-            src="/assets/hero/Slider-Banner-Ivon.png"
-            alt="IVON Brand Logo"
-            fill
-            priority
-            sizes="(max-width: 640px) 200px, (max-width: 1024px) 300px, 440px"
-            className="object-contain filter drop-shadow-[0_20px_40px_rgba(6,182,212,0.3)] pointer-events-none select-none"
-          />
-        </div>
-      </div>
-    ),
-  },
-];
+interface CampaignHeroBannerConfig {
+  slides?: CampaignSlideConfig[];
+}
 
-const AUTO_PLAY_TIME = 7500;
+interface HeroSlide {
+  eyebrow: string;
+  titlePrefix: string;
+  titleHighlight: string;
+  description: string;
+  ctaText: string;
+  ctaSecondary?: string;
+  link: string;
+  secondaryLink?: string;
+  accentColor: string;
+  imageSrc: string;
+  imageAlt: string;
+}
 
-export default function CampaignHeroBanner() {
+// DB record type (matching PBHeroBanner shape from PocketBase)
+// `image` = raw filename in PocketBase, `imageUrl` = full URL precomputed server-side
+interface DBHeroBanner {
+  id: string;
+  collectionId: string;
+  eyebrow: string;
+  titlePrefix: string;
+  titleHighlight: string;
+  description: string;
+  ctaText: string;
+  ctaSecondary?: string;
+  link: string;
+  secondaryLink?: string;
+  accentColor?: string;
+  image?: string;
+  imageUrl?: string;
+  imageAlt?: string;
+  sortOrder: number;
+  isEnabled: boolean;
+}
+
+function dbBannerToSlide(banner: DBHeroBanner, index: number): HeroSlide {
+  const accentDefaults = ["#111827", "#6d28d9", "#0891b2"];
+  return {
+    eyebrow: banner.eyebrow,
+    titlePrefix: banner.titlePrefix ?? "",
+    titleHighlight: banner.titleHighlight,
+    description: banner.description,
+    ctaText: banner.ctaText,
+    ctaSecondary: banner.ctaSecondary,
+    link: banner.link,
+    secondaryLink: banner.secondaryLink ?? "/products",
+    accentColor: banner.accentColor ?? accentDefaults[index % accentDefaults.length],
+    imageSrc: banner.imageUrl ?? "",
+    imageAlt: banner.imageAlt ?? banner.titleHighlight,
+  };
+}
+
+function hasValidContent(slide: {
+  titleHighlight?: string;
+  eyebrow?: string;
+  imageSrc?: string;
+}) {
+  return Boolean(
+    (slide.titleHighlight && slide.titleHighlight.trim() !== "") ||
+      (slide.eyebrow && slide.eyebrow.trim() !== "") ||
+      (slide.imageSrc && slide.imageSrc.trim() !== ""),
+  );
+}
+
+function buildSlides(
+  dbSlides?: DBHeroBanner[],
+  config?: CampaignHeroBannerConfig,
+): HeroSlide[] {
+  // Priority 1: DB slides fetched server-side
+  if (dbSlides && dbSlides.length > 0) {
+    const validDbSlides = dbSlides.filter((b) =>
+      hasValidContent({
+        titleHighlight: b.titleHighlight,
+        eyebrow: b.eyebrow,
+        imageSrc: b.imageUrl || b.image,
+      }),
+    );
+    if (validDbSlides.length > 0) {
+      return validDbSlides.map(dbBannerToSlide);
+    }
+  }
+
+  // Priority 2: Config slides embedded in homepage_blocks config
+  if (config?.slides && config.slides.length > 0) {
+    const validConfigSlides = config.slides.filter((s) =>
+      hasValidContent({
+        titleHighlight: s.titleHighlight,
+        eyebrow: s.eyebrow,
+        imageSrc: s.imageSrc,
+      }),
+    );
+    if (validConfigSlides.length > 0) {
+      return validConfigSlides.map((slide, index) => ({
+        eyebrow: slide.eyebrow,
+        titlePrefix: slide.titlePrefix ?? "",
+        titleHighlight: slide.titleHighlight,
+        description: slide.description,
+        ctaText: slide.ctaText,
+        ctaSecondary: slide.ctaSecondary,
+        link: slide.link,
+        secondaryLink: slide.secondaryLink ?? "/products",
+        accentColor:
+          slide.accentColor ?? ["#111827", "#6d28d9", "#0891b2"][index % 3],
+        imageSrc: slide.imageSrc ?? "",
+        imageAlt: slide.imageAlt ?? slide.titleHighlight,
+      }));
+    }
+  }
+
+  // No valid slides configured → return empty array (renders null)
+  return [];
+}
+
+export default function CampaignHeroBanner({
+  config,
+  dbSlides,
+}: {
+  config?: CampaignHeroBannerConfig;
+  dbSlides?: DBHeroBanner[];
+}) {
+  const slides = buildSlides(dbSlides, config);
+
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [direction, setDirection] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
-  const [progress, setProgress] = useState(0);
+  const [direction, setDirection] = useState(1);
 
   const handleNext = useCallback(() => {
+    if (slides.length === 0) return;
     setDirection(1);
     setCurrentIndex((prev) => (prev + 1) % slides.length);
-    setProgress(0);
-  }, []);
+  }, [slides.length]);
 
   const handlePrev = useCallback(() => {
+    if (slides.length === 0) return;
     setDirection(-1);
     setCurrentIndex((prev) => (prev - 1 + slides.length) % slides.length);
-    setProgress(0);
-  }, []);
+  }, [slides.length]);
 
   const handleDotClick = (index: number) => {
+    if (index === currentIndex) return;
     setDirection(index > currentIndex ? 1 : -1);
     setCurrentIndex(index);
-    setProgress(0);
   };
 
   useEffect(() => {
-    if (!isPlaying) return;
-    const step = 50;
-    const timer = setInterval(() => {
-      setProgress((prev) => {
-        const nextVal = prev + (step / AUTO_PLAY_TIME) * 100;
-        if (nextVal >= 100) {
-          handleNext();
-          return 0;
-        }
-        return nextVal;
-      });
-    }, step);
-    return () => clearInterval(timer);
-  }, [isPlaying, handleNext]);
+    if (!isPlaying || slides.length < 2) return;
+
+    const timer = window.setTimeout(() => {
+      handleNext();
+    }, 6500);
+
+    return () => window.clearTimeout(timer);
+  }, [currentIndex, handleNext, isPlaying, slides.length]);
+
+  if (slides.length === 0) {
+    return null;
+  }
 
   const activeSlide = slides[currentIndex];
-
   const slideVariants = {
     enter: (dir: number) => ({
-      x: dir > 0 ? "6%" : "-6%",
+      x: dir > 0 ? 56 : -56,
       opacity: 0,
-      filter: "blur(4px)",
+      filter: "blur(6px)",
     }),
     center: {
-      x: "0%",
+      x: 0,
       opacity: 1,
       filter: "blur(0px)",
       transition: {
-        x: { type: "spring" as const, stiffness: 200, damping: 28 },
-        opacity: { duration: 0.4 },
-        filter: { duration: 0.4 },
+        x: { type: "spring" as const, stiffness: 160, damping: 24 },
+        opacity: { duration: 0.35 },
+        filter: { duration: 0.35 },
       },
     },
     exit: (dir: number) => ({
-      x: dir > 0 ? "-6%" : "6%",
+      x: dir > 0 ? -56 : 56,
       opacity: 0,
-      filter: "blur(4px)",
+      filter: "blur(6px)",
       transition: {
-        x: { type: "spring" as const, stiffness: 200, damping: 28 },
-        opacity: { duration: 0.3 },
-        filter: { duration: 0.3 },
+        x: { type: "spring" as const, stiffness: 160, damping: 24 },
+        opacity: { duration: 0.25 },
+        filter: { duration: 0.25 },
       },
     }),
   };
 
   return (
     <section
-      className="relative w-full h-[520px] sm:h-[440px] md:h-[500px] lg:h-[560px] overflow-hidden select-none z-10 flex items-center border-b border-neutral-200/60"
+      className="relative isolate overflow-hidden border-b border-neutral-200/70 bg-[linear-gradient(180deg,#ffffff_0%,#fafafa_100%)]"
+      aria-label="Campaign Promotion Banner"
       onMouseEnter={() => setIsPlaying(false)}
       onMouseLeave={() => setIsPlaying(true)}
-      aria-label="Campaign Promotion Banner"
-      style={{ background: "linear-gradient(135deg, #f8f9fc 0%, #f0f3f9 40%, #e8edf6 100%)" }}
     >
-      {/* ── Animated gradient blob backgrounds ── */}
-      <div
-        className="absolute -top-32 -right-32 w-[500px] h-[500px] rounded-full blur-[100px] pointer-events-none transition-all duration-1500 z-0 opacity-70"
-        style={{ background: `radial-gradient(circle, ${activeSlide.blobColor1} 0%, transparent 70%)` }}
-      />
-      <div
-        className="absolute bottom-0 left-0 w-[350px] h-[350px] rounded-full blur-[90px] pointer-events-none transition-all duration-1500 z-0 opacity-50"
-        style={{ background: `radial-gradient(circle, ${activeSlide.blobColor2} 0%, transparent 70%)` }}
-      />
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute -top-24 right-0 h-72 w-72 rounded-full bg-neutral-950/[0.03] blur-3xl" />
+        <div className="absolute bottom-0 left-0 h-64 w-64 rounded-full bg-neutral-950/[0.02] blur-3xl" />
+      </div>
 
-      {/* ── Dot grid texture overlay ── */}
-      <div
-        className="absolute inset-0 z-0 opacity-[0.035] pointer-events-none"
-        style={{
-          backgroundImage: "radial-gradient(circle, #000 1px, transparent 1px)",
-          backgroundSize: "28px 28px",
-        }}
-      />
-
-      {/* ── Frosted glass overlay ── */}
-      <div className="absolute inset-0 bg-white/40 backdrop-blur-[2px] pointer-events-none z-[1]" />
-
-      {/* ── Slide Content ── */}
-      <div className="relative w-full h-full z-10 flex items-center">
+      <div className="relative mx-auto flex min-h-[480px] w-full max-w-7xl items-center px-6 py-14 sm:min-h-[540px] sm:py-16 lg:px-16 lg:py-20">
         <AnimatePresence initial={false} custom={direction} mode="wait">
           <motion.div
             key={currentIndex}
@@ -252,131 +232,111 @@ export default function CampaignHeroBanner() {
             initial="enter"
             animate="center"
             exit="exit"
-            className="absolute inset-0 w-full h-full flex items-center"
+            className="grid w-full items-center gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:gap-16"
           >
-            <div className="w-full max-w-7xl mx-auto px-6 sm:px-12 lg:px-20 grid grid-cols-1 sm:grid-cols-2 h-full items-center gap-6 sm:gap-10 lg:gap-16 py-10 sm:py-0">
-              {/* ── Left: Text Content ── */}
-              <div className="w-full flex flex-col justify-center items-start text-left order-2 sm:order-1 max-w-xl z-10">
-                {/* Main Headline */}
-                <motion.h1
-                  initial={{ opacity: 0, y: 14 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.15, duration: 0.4 }}
-                  className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-black tracking-tight text-neutral-900 leading-[1.05] mb-4 uppercase whitespace-pre-line"
-                >
+            <div className="max-w-2xl">
+              <h1 className="max-w-xl text-4xl font-black leading-[0.94] tracking-[-0.05em] text-neutral-950 sm:text-5xl lg:text-6xl">
+                <span className="block whitespace-pre-line">
                   {activeSlide.titlePrefix}
-                  <span
-                    className={`bg-gradient-to-r ${activeSlide.highlightGradient} bg-clip-text text-transparent`}
-                  >
-                    {activeSlide.titleHighlight}
-                  </span>
-                </motion.h1>
+                </span>
+                <span style={{ color: activeSlide.accentColor }}>
+                  {activeSlide.titleHighlight}
+                </span>
+              </h1>
 
-                {/* Description */}
-                <motion.p
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2, duration: 0.4 }}
-                  className="text-neutral-500 text-xs sm:text-sm leading-relaxed mb-6 max-w-md font-medium line-clamp-3 sm:line-clamp-none"
-                >
-                  {activeSlide.description}
-                </motion.p>
+              <p className="mt-5 max-w-xl text-base leading-7 text-neutral-500 sm:text-lg">
+                {activeSlide.description}
+              </p>
 
-                {/* CTA Buttons */}
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.25, duration: 0.4 }}
-                  className="flex items-center gap-3 flex-wrap"
+              <div className="mt-8 flex flex-wrap items-center gap-3">
+                <Link
+                  href={activeSlide.link}
+                  className="inline-flex items-center gap-2 rounded-full bg-neutral-950 px-5 py-3 text-sm font-semibold text-white transition-transform duration-200 hover:-translate-y-0.5"
                 >
-                  {/* Primary CTA */}
+                  {activeSlide.ctaText}
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+
+                {activeSlide.ctaSecondary && activeSlide.secondaryLink && (
                   <Link
-                    href={activeSlide.link}
-                    className="group relative overflow-hidden inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-white font-bold text-xs sm:text-sm transition-all duration-300 cursor-pointer shadow-lg hover:shadow-xl active:scale-[0.98]"
-                    style={{
-                      background: `linear-gradient(135deg, ${activeSlide.accentColor} 0%, ${activeSlide.accentColor}cc 100%)`,
-                      boxShadow: `0 8px 28px -6px ${activeSlide.accentColor}55`,
-                    }}
+                    href={activeSlide.secondaryLink}
+                    className="inline-flex items-center gap-2 rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-700 transition-colors duration-200 hover:border-neutral-400 hover:bg-neutral-50"
                   >
-                    <span className="absolute inset-0 bg-white/15 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                    <span className="relative z-10 flex items-center gap-2">
-                      {activeSlide.ctaText}
-                      <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
-                    </span>
+                    {activeSlide.ctaSecondary}
+                    <ArrowRight className="h-4 w-4" />
                   </Link>
-
-                  {/* Secondary CTA */}
-                  {activeSlide.ctaSecondary && (
-                    <Link
-                      href="/products"
-                      className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-neutral-500 hover:text-neutral-800 transition-colors duration-200 group"
-                    >
-                      {activeSlide.ctaSecondary}
-                      <ArrowRight className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
-                    </Link>
-                  )}
-                </motion.div>
+                )}
               </div>
+            </div>
 
-              {/* ── Right: Visual Block ── */}
-              <div className="w-full flex items-center justify-center order-1 sm:order-2 relative h-[140px] sm:h-full">
-                {activeSlide.renderVisual()}
+            <div className="relative flex justify-center lg:justify-end">
+              <div className="relative w-full max-w-[560px] aspect-[4/3] overflow-hidden rounded-[2rem]">
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    background: `radial-gradient(circle at 50% 45%, ${activeSlide.accentColor}18 0%, transparent 58%), linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(250,250,250,0.72) 100%)`,
+                  }}
+                />
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    backdropFilter: "blur(2px)",
+                  }}
+                />
+                {activeSlide.imageSrc && (
+                  <Image
+                    src={activeSlide.imageSrc}
+                    alt={activeSlide.imageAlt}
+                    fill
+                    priority={currentIndex === 0}
+                    sizes="(max-width: 1024px) 100vw, 560px"
+                    className="object-contain p-5 sm:p-8 mix-blend-multiply opacity-90 transition-opacity duration-500"
+                    unoptimized={activeSlide.imageSrc.startsWith("http")}
+                  />
+                )}
+
               </div>
             </div>
           </motion.div>
         </AnimatePresence>
       </div>
 
-      {/* ── Left / Right Edge Navigation ── */}
       <button
+        type="button"
         onClick={handlePrev}
-        className="hidden sm:flex absolute left-4 top-1/2 -translate-y-1/2 z-30 h-11 w-11 rounded-full border border-neutral-200/70 bg-white/70 hover:bg-white/90 backdrop-blur-md text-neutral-700 items-center justify-center cursor-pointer transition-all duration-300 hover:scale-105 active:scale-95 shadow-lg"
-        aria-label="Previous Slide"
+        className="absolute left-4 top-1/2 z-20 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-neutral-200 bg-white/95 text-neutral-700 shadow-sm transition-transform duration-200 hover:-translate-y-1 sm:inline-flex"
+        aria-label="Previous slide"
       >
         <ChevronLeft className="h-5 w-5" />
       </button>
+
       <button
+        type="button"
         onClick={handleNext}
-        className="hidden sm:flex absolute right-4 top-1/2 -translate-y-1/2 z-30 h-11 w-11 rounded-full border border-neutral-200/70 bg-white/70 hover:bg-white/90 backdrop-blur-md text-neutral-700 items-center justify-center cursor-pointer transition-all duration-300 hover:scale-105 active:scale-95 shadow-lg"
-        aria-label="Next Slide"
+        className="absolute right-4 top-1/2 z-20 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-neutral-200 bg-white/95 text-neutral-700 shadow-sm transition-transform duration-200 hover:-translate-y-1 sm:inline-flex"
+        aria-label="Next slide"
       >
         <ChevronRight className="h-5 w-5" />
       </button>
 
-      {/* ── Slide Pagination Dots ── */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 z-35">
-        {/* Dots */}
-        <div className="flex items-center gap-1.5">
-          {slides.map((slide, index) => {
-            const isActive = index === currentIndex;
-            return (
-              <button
-                key={slide.id}
-                onClick={() => handleDotClick(index)}
-                className={`h-1.5 rounded-full transition-all duration-500 focus:outline-none cursor-pointer ${
-                  isActive ? "w-8" : "w-1.5 bg-black/15 hover:bg-black/30"
-                }`}
-                style={{
-                  backgroundColor: isActive ? activeSlide.accentColor : undefined,
-                  boxShadow: isActive ? `0 0 10px ${activeSlide.accentColor}` : undefined,
-                }}
-                aria-label={`Go to slide ${index + 1}`}
-              />
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ── Autoplay Progress Bar ── */}
-      <div className="absolute bottom-0 left-0 w-full h-[2px] bg-black/5 z-30 overflow-hidden">
-        <div
-          className="h-full transition-all duration-75 ease-linear"
-          style={{
-            width: `${progress}%`,
-            backgroundColor: activeSlide.accentColor,
-            boxShadow: `0 0 10px 1px ${activeSlide.accentColor}`,
-          }}
-        />
+      <div className="absolute bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full bg-white/90 px-3 py-2 shadow-sm">
+        {slides.map((slide, index) => {
+          const isActive = index === currentIndex;
+          return (
+            <button
+              key={slide.titleHighlight + index}
+              type="button"
+              onClick={() => handleDotClick(index)}
+              className={`h-2 rounded-full transition-all duration-300 ${
+                isActive ? "w-8" : "w-2 bg-neutral-300 hover:bg-neutral-400"
+              }`}
+              style={{
+                backgroundColor: isActive ? activeSlide.accentColor : undefined,
+              }}
+              aria-label={`Go to slide ${index + 1}`}
+            />
+          );
+        })}
       </div>
     </section>
   );

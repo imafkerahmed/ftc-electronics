@@ -4,19 +4,19 @@ import Link from "next/link";
 import { ArrowUp, MessageCircle, Share2, Play, Send } from "lucide-react";
 
 const shopLinks = [
-  { label: "Laptops", href: "/products?category=laptops" },
-  { label: "Smartphones", href: "/products?category=phones" },
-  { label: "Audio & Sound", href: "/products?category=audio" },
-  { label: "Keyboards", href: "/products?category=keyboards" },
-  { label: "On Sale", href: "/products?filter=on-sale" },
+  { label: "Laptops", href: "/products/laptops" },
+  { label: "Smartphones", href: "/products/phones" },
+  { label: "Audio & Sound", href: "/products/audio" },
+  { label: "Keyboards", href: "/products/keyboards" },
+  { label: "On Sale", href: "/deals" },
 ];
 
 const supportLinks = [
-  { label: "Track Order", href: "/coming-soon" },
-  { label: "Shipping & Returns", href: "/coming-soon" },
-  { label: "Warranty Claims", href: "/coming-soon" },
-  { label: "Privacy Policy", href: "/coming-soon" },
-  { label: "Terms of Service", href: "/coming-soon" },
+  { label: "Track Order", href: "/support/track-order" },
+  { label: "Shipping & Returns", href: "/support/shipping-returns" },
+  { label: "Warranty Claims", href: "/support/warranty" },
+  { label: "Privacy Policy", href: "/legal/privacy" },
+  { label: "Terms of Service", href: "/legal/terms" },
 ];
 
 const socialLinks = [
@@ -64,7 +64,8 @@ export default function Footer() {
               </span>
             </Link>
             <p className="text-xs text-neutral-500 max-w-xs leading-relaxed">
-              Sri Lanka&apos;s premier destination for premium consumer electronics, mobile gear, and computer hardware.
+              Sri Lanka&apos;s premier destination for premium consumer
+              electronics, mobile gear, and computer hardware.
             </p>
           </div>
 
@@ -103,9 +104,10 @@ export default function Footer() {
               About FTC
             </h3>
             <p className="text-sm text-neutral-500 leading-relaxed">
-              High-performance consumer electronics, premium computer hardware, and state-of-the-art mobile gear. Engineered for the future. Backed by local expertise.
+              High-performance consumer electronics, premium computer hardware,
+              and state-of-the-art mobile gear. Engineered for the future.
+              Backed by local expertise.
             </p>
-
           </div>
 
           {/* Shop Column */}
@@ -184,7 +186,9 @@ export default function Footer() {
 
           {/* Payment method indicators */}
           <div className="flex items-center gap-2">
-            <span className="text-neutral-700 text-[10px] uppercase tracking-wider font-mono">We Accept</span>
+            <span className="text-neutral-700 text-[10px] uppercase tracking-wider font-mono">
+              We Accept
+            </span>
             {["VISA", "MC", "AMEX", "KOKO"].map((card) => (
               <span
                 key={card}
@@ -194,10 +198,6 @@ export default function Footer() {
               </span>
             ))}
           </div>
-
-          <Link href="/admin/dashboard" className="hover:text-neutral-400 transition-colors">
-            Admin Portal
-          </Link>
         </div>
       </div>
     </footer>

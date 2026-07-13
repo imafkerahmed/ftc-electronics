@@ -3,18 +3,29 @@
 import { MapPin, Phone, Mail, Clock, ExternalLink, MessageCircle } from "lucide-react";
 import { motion } from "motion/react";
 
-export default function LocationMap() {
+interface LocationMapProps {
+  settings?: {
+    address?: string;
+    phone?: string;
+    email?: string;
+    hours?: Array<{ days: string; time: string }>;
+    googleMapsLink?: string;
+    whatsappLink?: string;
+  };
+}
+
+export default function LocationMap({ settings }: LocationMapProps) {
   const storeInfo = {
     name: "FTC Flagship Store",
-    address: "45 Galle Road, Colombo 03, Sri Lanka",
-    phone: "+94 11 234 5678",
-    email: "support@ftcelectronics.com",
-    hours: [
+    address: settings?.address || "45 Galle Road, Colombo 03, Sri Lanka",
+    phone: settings?.phone || "+94 11 234 5678",
+    email: settings?.email || "support@ftcelectronics.com",
+    hours: settings?.hours || [
       { days: "Monday – Saturday", time: "9:00 AM – 8:00 PM" },
       { days: "Sunday & Holidays", time: "10:00 AM – 6:00 PM" },
     ],
-    googleMapsLink: "https://maps.google.com/?q=Galle+Rd,+Colombo+03,+Sri+Lanka",
-    whatsappLink: "https://wa.me/94112345678",
+    googleMapsLink: settings?.googleMapsLink || "https://maps.google.com/?q=Galle+Rd,+Colombo+03,+Sri+Lanka",
+    whatsappLink: settings?.whatsappLink || "https://wa.me/94112345678",
   };
 
   const contactItems = [
