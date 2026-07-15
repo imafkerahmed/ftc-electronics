@@ -113,30 +113,30 @@ export default function CollectionProductCard({
   return (
     <Link
       href={`/products/${slug}`}
-      className={`group flex flex-col w-full min-w-0 select-none cursor-pointer relative p-4 rounded-xl border border-neutral-200/50 dark:border-neutral-800/50 bg-white dark:bg-neutral-900/20 transition-all duration-300 z-10 ${getHoverShadowClass()}`}
+      className={`group flex flex-col w-full min-w-0 select-none cursor-pointer relative p-4 rounded-2xl border border-neutral-200/90 dark:border-neutral-800/90 bg-white dark:bg-neutral-900/90 shadow-sm hover:shadow-xl hover:border-blue-500/50 dark:hover:border-blue-500/50 transition-all duration-300 z-10 hover:-translate-y-1`}
     >
       {/* Top Details Block */}
       <div className="flex flex-col items-start mb-3">
         {/* Brand / Category Subtitle */}
         {subTitleText && (
-          <span className="text-[10px] font-medium text-neutral-450 dark:text-neutral-500 mb-0.5 leading-none">
+          <span className="text-[10px] font-semibold tracking-wide text-neutral-450 dark:text-neutral-500 mb-0.5 leading-none uppercase">
             {subTitleText}
           </span>
         )}
 
         {/* Product Title */}
-        <h4 className="text-xs sm:text-[13px] font-bold text-blue-650 dark:text-blue-400 line-clamp-2 leading-snug min-h-[36px] group-hover:text-blue-800 dark:group-hover:text-blue-300 transition-colors duration-300">
+        <h4 className="text-xs sm:text-[13px] font-extrabold text-slate-800 dark:text-neutral-100 line-clamp-2 leading-snug min-h-[36px] group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors duration-300">
           {name}
         </h4>
 
         {/* Badge tag below Title */}
-        <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md mt-1.5 w-fit ${getBadgeColorClass()}`}>
+        <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md mt-1.5 w-fit shadow-2xs ${getBadgeColorClass()}`}>
           {getBadgeText()}
         </span>
       </div>
 
       {/* Image Stage Container with seamless background */}
-      <div className="relative aspect-[4/3] w-full overflow-hidden flex items-center justify-center mb-3 bg-neutral-50/40 dark:bg-neutral-950/40 rounded-md border border-neutral-100 dark:border-neutral-900/30">
+      <div className="relative aspect-[4/3] w-full overflow-hidden flex items-center justify-center mb-3 bg-slate-100/70 dark:bg-neutral-950/60 rounded-xl border border-neutral-200/60 dark:border-neutral-800/60">
         {/* Discount Badge overlaid bottom-left */}
         {hasDiscount && (
           <div className="absolute bottom-2 left-2 bg-emerald-600 dark:bg-emerald-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-md z-10">

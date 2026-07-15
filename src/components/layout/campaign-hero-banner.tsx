@@ -213,17 +213,23 @@ export default function CampaignHeroBanner({
 
   return (
     <section
-      className="relative isolate overflow-hidden border-b border-neutral-200/70 bg-[linear-gradient(180deg,#ffffff_0%,#fafafa_100%)]"
+      className="relative isolate overflow-hidden border-b border-slate-200/80 bg-gradient-to-b from-slate-100/90 via-slate-50/70 to-slate-100/90 dark:from-neutral-950 dark:via-neutral-900 dark:to-neutral-950"
       aria-label="Campaign Promotion Banner"
       onMouseEnter={() => setIsPlaying(false)}
       onMouseLeave={() => setIsPlaying(true)}
     >
       <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute -top-24 right-0 h-72 w-72 rounded-full bg-neutral-950/[0.03] blur-3xl" />
-        <div className="absolute bottom-0 left-0 h-64 w-64 rounded-full bg-neutral-950/[0.02] blur-3xl" />
+        <div
+          className="absolute -top-24 right-10 h-96 w-96 rounded-full opacity-20 blur-3xl transition-colors duration-700"
+          style={{ backgroundColor: activeSlide.accentColor }}
+        />
+        <div
+          className="absolute bottom-0 left-10 h-80 w-80 rounded-full opacity-15 blur-3xl transition-colors duration-700"
+          style={{ backgroundColor: activeSlide.accentColor }}
+        />
       </div>
 
-      <div className="relative mx-auto flex min-h-[480px] w-full max-w-7xl items-center px-6 py-14 sm:min-h-[540px] sm:py-16 lg:px-16 lg:py-20">
+      <div className="relative mx-auto flex min-h-[460px] w-full max-w-7xl items-center px-6 py-10 sm:min-h-[500px] sm:py-14 lg:px-12 lg:py-16">
         <AnimatePresence initial={false} custom={direction} mode="wait">
           <motion.div
             key={currentIndex}
@@ -232,10 +238,10 @@ export default function CampaignHeroBanner({
             initial="enter"
             animate="center"
             exit="exit"
-            className="grid w-full items-center gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:gap-16"
+            className="grid w-full items-center gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:gap-14"
           >
             <div className="max-w-2xl">
-              <h1 className="max-w-xl text-4xl font-black leading-[0.94] tracking-[-0.05em] text-neutral-950 sm:text-5xl lg:text-6xl">
+              <h1 className="max-w-xl text-4xl font-black leading-[0.94] tracking-[-0.05em] text-neutral-950 dark:text-neutral-50 sm:text-5xl lg:text-6xl">
                 <span className="block whitespace-pre-line">
                   {activeSlide.titlePrefix}
                 </span>
@@ -244,14 +250,14 @@ export default function CampaignHeroBanner({
                 </span>
               </h1>
 
-              <p className="mt-5 max-w-xl text-base leading-7 text-neutral-500 sm:text-lg">
+              <p className="mt-5 max-w-xl text-base leading-7 text-neutral-600 dark:text-neutral-400 sm:text-lg font-medium">
                 {activeSlide.description}
               </p>
 
               <div className="mt-8 flex flex-wrap items-center gap-3">
                 <Link
                   href={activeSlide.link}
-                  className="inline-flex items-center gap-2 rounded-full bg-neutral-950 px-5 py-3 text-sm font-semibold text-white transition-transform duration-200 hover:-translate-y-0.5"
+                  className="inline-flex items-center gap-2 rounded-full bg-neutral-950 dark:bg-white px-6 py-3.5 text-sm font-bold text-white dark:text-neutral-950 shadow-md transition-transform duration-200 hover:-translate-y-0.5"
                 >
                   {activeSlide.ctaText}
                   <ArrowRight className="h-4 w-4" />
@@ -260,7 +266,7 @@ export default function CampaignHeroBanner({
                 {activeSlide.ctaSecondary && activeSlide.secondaryLink && (
                   <Link
                     href={activeSlide.secondaryLink}
-                    className="inline-flex items-center gap-2 rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-700 transition-colors duration-200 hover:border-neutral-400 hover:bg-neutral-50"
+                    className="inline-flex items-center gap-2 rounded-full border border-neutral-300 dark:border-neutral-700 bg-white/90 dark:bg-neutral-900/90 px-6 py-3.5 text-sm font-bold text-neutral-700 dark:text-neutral-200 shadow-xs transition-colors duration-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   >
                     {activeSlide.ctaSecondary}
                     <ArrowRight className="h-4 w-4" />
@@ -270,31 +276,17 @@ export default function CampaignHeroBanner({
             </div>
 
             <div className="relative flex justify-center lg:justify-end">
-              <div className="relative w-full max-w-[560px] aspect-[4/3] overflow-hidden rounded-[2rem]">
-                <div
-                  className="absolute inset-0"
-                  style={{
-                    background: `radial-gradient(circle at 50% 45%, ${activeSlide.accentColor}18 0%, transparent 58%), linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(250,250,250,0.72) 100%)`,
-                  }}
-                />
-                <div
-                  className="absolute inset-0"
-                  style={{
-                    backdropFilter: "blur(2px)",
-                  }}
-                />
+              <div className="relative w-full max-w-[540px] aspect-[4/3] flex items-center justify-center">
                 {activeSlide.imageSrc && (
                   <Image
                     src={activeSlide.imageSrc}
                     alt={activeSlide.imageAlt}
                     fill
+                    className="object-contain p-2 mix-blend-multiply dark:mix-blend-screen transition-transform duration-500 hover:scale-105"
                     priority={currentIndex === 0}
-                    sizes="(max-width: 1024px) 100vw, 560px"
-                    className="object-contain p-5 sm:p-8 mix-blend-multiply opacity-90 transition-opacity duration-500"
-                    unoptimized={activeSlide.imageSrc.startsWith("http")}
+                    sizes="(max-width: 1024px) 100vw, 540px"
                   />
                 )}
-
               </div>
             </div>
           </motion.div>

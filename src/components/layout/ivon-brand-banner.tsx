@@ -161,25 +161,12 @@ export default function IvonBrandBanner() {
 
           {/* Right Column: Floating IVON Logo Presentation */}
           <div className="lg:col-span-5 flex items-center justify-center relative min-h-[300px]">
-            
-            {/* Tech concentric grid circles behind the card */}
-            <div className="absolute w-[120%] h-[120%] flex items-center justify-center pointer-events-none -z-10 opacity-70">
-              <svg className="w-full h-full text-cyan-500/10 dark:text-cyan-400/5" viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="200" cy="200" r="140" stroke="currentColor" strokeWidth="1" strokeDasharray="4 8" />
-                <circle cx="200" cy="200" r="100" stroke="currentColor" strokeWidth="1.5" />
-                <circle cx="200" cy="200" r="60" stroke="currentColor" strokeWidth="0.75" strokeDasharray="3 3" />
-                <line x1="200" y1="20" x2="200" y2="380" stroke="currentColor" strokeWidth="0.5" strokeDasharray="6 6" />
-                <line x1="20" y1="200" x2="380" y2="200" stroke="currentColor" strokeWidth="0.5" strokeDasharray="6 6" />
-                <polygon points="200,40 338,120 338,280 200,360 62,280 62,120" stroke="currentColor" strokeWidth="0.5" strokeDasharray="2 4" />
-              </svg>
-            </div>
+            {/* Glowing highlight base behind logo */}
+            <div className="absolute w-[220px] h-[220px] rounded-full blur-[70px] opacity-30 dark:opacity-20 bg-cyan-400 pointer-events-none -z-10" />
 
-            {/* Glowing highlight base behind the card */}
-            <div className="absolute w-[200px] h-[200px] rounded-full blur-[60px] opacity-25 dark:opacity-20 bg-cyan-400 pointer-events-none -z-10" />
-
-            {/* Floating Gloss-White Logo Card Container */}
+            {/* Native Floating Logo */}
             <motion.div
-              className="w-[280px] sm:w-[320px] aspect-square relative rounded-2xl p-6 bg-white shadow-[0_20px_50px_rgba(0,188,212,0.15)] border border-neutral-100 hover:shadow-[0_25px_60px_rgba(0,188,212,0.25)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.4)] dark:border-neutral-800 transition-all duration-500 hover:scale-[1.03] group overflow-hidden"
+              className="w-[280px] sm:w-[320px] aspect-square relative flex items-center justify-center"
               animate={{
                 y: [0, -10, 0],
               }}
@@ -189,25 +176,14 @@ export default function IvonBrandBanner() {
                 ease: "easeInOut",
               }}
             >
-              {/* Subtle tech border gloss inside the card */}
-              <div className="absolute inset-0 bg-gradient-to-tr from-cyan-500/0 via-cyan-500/0 to-cyan-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-              
-              <div className="w-full h-full relative flex items-center justify-center bg-white rounded-xl p-4 overflow-hidden">
-                <Image
-                  src="/assets/banners/IVON.jpeg"
-                  alt="IVON Brand Logo"
-                  fill
-                  className="object-contain p-2 transition-transform duration-500 group-hover:scale-105"
-                  sizes="(max-width: 768px) 100vw, 320px"
-                  priority
-                />
-              </div>
-
-              {/* Decorative Corner Tech Details */}
-              <div className="absolute top-2 left-2 w-3 h-3 border-t-2 border-l-2 border-cyan-500/35 rounded-tl" />
-              <div className="absolute top-2 right-2 w-3 h-3 border-t-2 border-r-2 border-cyan-500/35 rounded-tr" />
-              <div className="absolute bottom-2 left-2 w-3 h-3 border-b-2 border-l-2 border-cyan-500/35 rounded-bl" />
-              <div className="absolute bottom-2 right-2 w-3 h-3 border-b-2 border-r-2 border-cyan-500/35 rounded-br" />
+              <Image
+                src="/assets/banners/IVON.jpeg"
+                alt="IVON Brand Logo"
+                fill
+                className="object-contain p-2 drop-shadow-lg transition-transform duration-500 hover:scale-105"
+                sizes="(max-width: 768px) 100vw, 320px"
+                priority
+              />
             </motion.div>
           </div>
 

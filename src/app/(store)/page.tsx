@@ -17,6 +17,9 @@ import HomePageLoaderWrapper from "@/components/layout/home-page-loader-wrapper"
 import ImageParallaxBanner from "@/components/layout/image-parallax-banner";
 import LazyScrollSection from "@/components/layout/lazy-scroll-section";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function StoreHomePage() {
   // Fetch active homepage blocks from the database
   const blocks = await pbHomepageBlocks.getActive();
@@ -112,7 +115,6 @@ export default async function StoreHomePage() {
     imageUrl: pbHeroBanners.getImageUrl(banner, pbUrl),
   }));
 
-
   const contactSetting = await pbSiteSettings
     .get<any>("contact")
     .catch(() => null);
@@ -143,7 +145,7 @@ export default async function StoreHomePage() {
 
   return (
     <HomePageLoaderWrapper>
-      <div className="w-full">
+      <div className="w-full bg-slate-50/40 dark:bg-neutral-950 min-h-screen space-y-0 pb-12">
         {await Promise.all(
           activeBlocks.map(async (block: any) => {
             // Resolve device visibility class
@@ -173,12 +175,24 @@ export default async function StoreHomePage() {
                     "featured",
                     limit,
                   );
+                } else if (source === "limited-stock") {
+                  const res = await pbProducts
+                    .getAll({ perPage: limit * 2 })
+                    .catch(() => ({ items: [] }));
+                  products = (res.items || [])
+                    .filter((p: any) => {
+                      const qty = p.countInStock ?? p.stock ?? 0;
+                      return qty > 0 && qty <= 10;
+                    })
+                    .slice(0, limit);
                 } else if (source === "category") {
                   const categorySlug =
                     block.config?.value || block.config?.category;
                   const categoryRecord = allCategories.find(
                     (c: any) =>
-                      c.slug === categorySlug || c.id === categorySlug,
+                      c.slug === categorySlug ||
+                      c.id === categorySlug ||
+                      c.name === categorySlug,
                   );
                   if (categoryRecord) {
                     const res = await pbProducts.getAll({
@@ -190,7 +204,10 @@ export default async function StoreHomePage() {
                 } else if (source === "brand") {
                   const brandSlug = block.config?.value || block.config?.brand;
                   const brandRecord = allBrands.find(
-                    (b: any) => b.slug === brandSlug || b.id === brandSlug,
+                    (b: any) =>
+                      b.slug === brandSlug ||
+                      b.id === brandSlug ||
+                      b.name === brandSlug,
                   );
                   if (brandRecord) {
                     const res = await pbProducts.getAll({
@@ -199,6 +216,14 @@ export default async function StoreHomePage() {
                     });
                     products = res.items;
                   }
+                }
+
+                // Global fallback if specific query returned no items
+                if (!products || products.length === 0) {
+                  const fallbackRes = await pbProducts
+                    .getAll({ perPage: limit })
+                    .catch(() => ({ items: [] }));
+                  products = fallbackRes.items || [];
                 }
               } catch (err) {
                 console.error(

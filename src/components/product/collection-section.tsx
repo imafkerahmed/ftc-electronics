@@ -16,8 +16,6 @@ interface CollectionSectionProps {
   products: Product[];
 }
 
-
-
 export default function CollectionSection({
   title,
   seeAllLink = "/products",
@@ -189,14 +187,10 @@ export default function CollectionSection({
   const isCarouselMode = layout === "carousel" || layout === "flash-sale";
 
   const getSectionBgClass = () => {
-    if (layout !== "featured-grid") return "bg-transparent py-2 sm:py-3";
-    const titleLower = title.toLowerCase();
-    if (titleLower.includes("sale")) {
-      return "relative bg-gradient-to-br from-red-50/70 via-white to-orange-50/40 dark:from-red-950/20 dark:via-neutral-950 dark:to-neutral-950 border-y border-red-100/60 dark:border-red-950/30 py-10 sm:py-16 lg:py-20";
-    } else if (titleLower.includes("new") || titleLower.includes("arrival")) {
-      return "relative bg-gradient-to-br from-violet-50/60 via-white to-blue-50/40 dark:from-violet-950/20 dark:via-neutral-950 dark:to-neutral-950 border-y border-violet-100/60 dark:border-violet-950/30 py-10 sm:py-16 lg:py-20";
+    if (layout !== "featured-grid") {
+      return "relative bg-white dark:bg-neutral-950 border-b border-neutral-200/80 dark:border-neutral-800/80 py-4 sm:py-6";
     }
-    return "relative bg-white dark:bg-neutral-950 border-y border-neutral-100 dark:border-neutral-900/60 py-10 sm:py-16 lg:py-20";
+    return "relative bg-slate-50/60 dark:bg-neutral-900/40 border-y border-neutral-200/80 dark:border-neutral-800/80 py-6 sm:py-10";
   };
 
   return (
@@ -217,7 +211,7 @@ export default function CollectionSection({
           <motion.div
             className="w-full flex items-center justify-between"
             initial={{ opacity: 0, y: -10 }}
-            animate={isInView ? { opacity: 1, y: 0 } : {}}
+            animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.1 }}
           >
             {/* Section Main Title aligned left */}
@@ -274,21 +268,6 @@ export default function CollectionSection({
             animate={isInView ? { opacity: 1, y: 0 } : {}}
             transition={{ duration: 0.5, delay: 0.1 }}
           >
-            {/* Decorative oversized background section numbering */}
-            <span
-              className="absolute -top-2 sm:-top-4 right-0 text-[80px] sm:text-[120px] lg:text-[150px] font-black leading-none select-none pointer-events-none tracking-tighter"
-              style={{
-                color:
-                  config.themeColor === "red"
-                    ? "rgba(239,68,68,0.06)"
-                    : config.themeColor === "purple"
-                    ? "rgba(139,92,246,0.06)"
-                    : "rgba(59,130,246,0.06)",
-              }}
-            >
-              {title.toLowerCase().includes("sale") ? "01" : "02"}
-            </span>
-
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-current/8 pb-7 relative z-10">
               <div className="flex flex-col gap-3">
                 {/* Title */}
@@ -296,7 +275,8 @@ export default function CollectionSection({
                   {renderTitle(title)}
                 </h2>
                 <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 font-medium leading-relaxed max-w-lg">
-                  Discover premium hardware with guaranteed performance, curated details, and exclusive checkout options.
+                  Discover premium hardware with guaranteed performance, curated
+                  details, and exclusive checkout options.
                 </p>
               </div>
               <Link href={seeAllLink} className="shrink-0">
@@ -372,7 +352,8 @@ export default function CollectionSection({
                         TODAY{"'"}S SPECIALS
                       </h3>
                       <p className="text-xs text-white/80 leading-relaxed font-medium">
-                        Exclusive discounts on premium hardware. Don{"'"}t miss out!
+                        Exclusive discounts on premium hardware. Don{"'"}t miss
+                        out!
                       </p>
                     </div>
 

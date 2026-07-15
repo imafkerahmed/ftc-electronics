@@ -17,12 +17,16 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { pbHomepageBlocks, pbHeroBanners } from "@/lib/pb-collections";
+import { pbHomepageBlocks, pbHeroBanners, pbCategories, pbBrands } from "@/lib/pb-collections";
 import {
   updateHomepageBlocksAction,
   updateHomepageBlockConfigAction,
   createHomepageBlockAction,
   deleteHomepageBlockAction,
+  createHeroBannerAction,
+  updateHeroBannerAction,
+  deleteHeroBannerAction,
+  reorderHeroBannersAction,
 } from "@/app/actions/admin";
 import { Input } from "@/components/ui/input";
 import { Plus } from "lucide-react";
@@ -174,6 +178,18 @@ export default function AdminHomepageBuilderPage() {
   const [newBlockStart, setNewBlockStart] = useState("");
   const [newBlockEnd, setNewBlockEnd] = useState("");
 
+  // Categories & Brands for Product Section builder
+  const [availableCategories, setAvailableCategories] = useState<{ id: string; name: string; slug: string }[]>([]);
+  const [availableBrands, setAvailableBrands] = useState<{ id: string; name: string; slug: string }[]>([]);
+
+  // Product Carousel visual form states
+  const [productSource, setProductSource] = useState<string>("newest");
+  const [productCategory, setProductCategory] = useState<string>("");
+  const [productBrand, setProductBrand] = useState<string>("");
+  const [productLimit, setProductLimit] = useState<number>(8);
+  const [productLayout, setProductLayout] = useState<string>("featured-grid");
+  const [productSeeAll, setProductSeeAll] = useState<string>("");
+
   // Drag state
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [draggedBannerIdx, setDraggedBannerIdx] = useState<number | null>(null);
@@ -199,12 +215,10 @@ export default function AdminHomepageBuilderPage() {
     setDraggedBannerIdx(null);
 
     startTransition(async () => {
-      await Promise.all(
-        reordered.map((item, idx) => {
-          if (!item.id) return Promise.resolve();
-          return pbHeroBanners.update(item.id, { sortOrder: idx });
-        }),
-      );
+      const items = reordered
+        .filter((item) => Boolean(item.id))
+        .map((item, idx) => ({ id: item.id!, sortOrder: idx }));
+      await reorderHeroBannersAction(items);
       loadData();
     });
   };
@@ -238,6 +252,18 @@ export default function AdminHomepageBuilderPage() {
             config: b.config || {},
           }),
         ),
+      );
+
+      // Pre-fetch categories & brands for Product Section Builder
+      const [cats, brs] = await Promise.all([
+        pbCategories.getAll().catch(() => []),
+        pbBrands.getAll().catch(() => []),
+      ]);
+      setAvailableCategories(
+        cats.map((c: any) => ({ id: c.id, name: c.name, slug: c.slug || c.id })),
+      );
+      setAvailableBrands(
+        brs.map((b: any) => ({ id: b.id, name: b.name, slug: b.slug || b.id })),
       );
 
       const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || "https://ftc-db.codix.site/";
@@ -321,8 +347,38 @@ export default function AdminHomepageBuilderPage() {
     });
   };
 
-  const handleDragStart = (e: React.DragEvent, index: number) => {
-    setDraggedIdx(index);
+  const handleMoveBlock = (indexInNonHero: number, direction: -1 | 1) => {
+    const nonHeroBlocks = blocks.filter((b) => b.type !== "hero-banner");
+    const targetIdx = indexInNonHero + direction;
+    if (targetIdx < 0 || targetIdx >= nonHeroBlocks.length) return;
+
+    const reorderedNonHero = [...nonHeroBlocks];
+    const [moved] = reorderedNonHero.splice(indexInNonHero, 1);
+    reorderedNonHero.splice(targetIdx, 0, moved);
+
+    const heroBlocks = blocks.filter((b) => b.type === "hero-banner");
+    const updatedFullList = [...heroBlocks, ...reorderedNonHero];
+
+    setBlocks(updatedFullList);
+
+    startTransition(async () => {
+      const payload = updatedFullList.map((b, idx) => ({
+        id: b.id,
+        isEnabled: b.isEnabled,
+        sortOrder: idx + 1,
+      }));
+      const res = await updateHomepageBlocksAction(payload);
+      if (res.success) {
+        setSuccess("Homepage section order updated.");
+      } else {
+        setError(res.error || "Failed to update section order.");
+        void loadData();
+      }
+    });
+  };
+
+  const handleDragStart = (e: React.DragEvent, indexInNonHero: number) => {
+    setDraggedIdx(indexInNonHero);
     e.dataTransfer.effectAllowed = "move";
   };
 
@@ -330,16 +386,35 @@ export default function AdminHomepageBuilderPage() {
     e.preventDefault();
   };
 
-  const handleDrop = (e: React.DragEvent, index: number) => {
+  const handleDrop = (e: React.DragEvent, targetIndexInNonHero: number) => {
     e.preventDefault();
-    if (draggedIdx === null || draggedIdx === index) return;
+    if (draggedIdx === null || draggedIdx === targetIndexInNonHero) return;
 
-    const reordered = [...blocks];
-    const [movedItem] = reordered.splice(draggedIdx, 1);
-    reordered.splice(index, 0, movedItem);
+    const nonHeroBlocks = blocks.filter((b) => b.type !== "hero-banner");
+    const reorderedNonHero = [...nonHeroBlocks];
+    const [moved] = reorderedNonHero.splice(draggedIdx, 1);
+    reorderedNonHero.splice(targetIndexInNonHero, 0, moved);
 
-    setBlocks(reordered);
+    const heroBlocks = blocks.filter((b) => b.type === "hero-banner");
+    const updatedFullList = [...heroBlocks, ...reorderedNonHero];
+
+    setBlocks(updatedFullList);
     setDraggedIdx(null);
+
+    startTransition(async () => {
+      const payload = updatedFullList.map((b, idx) => ({
+        id: b.id,
+        isEnabled: b.isEnabled,
+        sortOrder: idx + 1,
+      }));
+      const res = await updateHomepageBlocksAction(payload);
+      if (res.success) {
+        setSuccess("Homepage section order saved.");
+      } else {
+        setError(res.error || "Failed to update section order.");
+        void loadData();
+      }
+    });
   };
 
   const handleOpenConfig = (block: HomepageBlock) => {
@@ -349,6 +424,18 @@ export default function AdminHomepageBuilderPage() {
     }
     setEditingBlock(block);
     setConfigText(JSON.stringify(block.config || {}, null, 2));
+
+    // Populate visual product carousel form states
+    if (block.type === "product-carousel") {
+      const cfg = block.config || {};
+      setProductSource(String(cfg.source || "newest"));
+      setProductCategory(String(cfg.category || cfg.value || ""));
+      setProductBrand(String(cfg.brand || cfg.value || ""));
+      setProductLimit(Number(cfg.limit) || 8);
+      setProductLayout(String(cfg.layout || "featured-grid"));
+      setProductSeeAll(String(cfg.seeAllLink || ""));
+    }
+
     setError(null);
     setSuccess(null);
     setIsConfigModalOpen(true);
@@ -430,7 +517,7 @@ export default function AdminHomepageBuilderPage() {
     const slideToDelete = heroBannerList[index];
     startTransition(async () => {
       if (slideToDelete?.id) {
-        await pbHeroBanners.delete(slideToDelete.id).catch(() => {});
+        await deleteHeroBannerAction(slideToDelete.id);
         setSuccess(`Banner slide deleted.`);
         loadData();
       }
@@ -451,12 +538,10 @@ export default function AdminHomepageBuilderPage() {
     setHeroBannerList(list);
 
     startTransition(async () => {
-      await Promise.all(
-        list.map((item, idx) => {
-          if (!item.id) return Promise.resolve();
-          return pbHeroBanners.update(item.id, { sortOrder: idx });
-        }),
-      );
+      const items = list
+        .filter((item) => Boolean(item.id))
+        .map((item, idx) => ({ id: item.id!, sortOrder: idx }));
+      await reorderHeroBannersAction(items);
       loadData();
     });
   };
@@ -490,14 +575,22 @@ export default function AdminHomepageBuilderPage() {
       if (editingSlideIndex !== null && heroBannerList[editingSlideIndex]?.id) {
         const targetId = heroBannerList[editingSlideIndex].id;
         fd.append("sortOrder", String(editingSlideIndex));
-        await pbHeroBanners.update(targetId, fd);
-        setSuccess(
-          `Banner slide ${editingSlideIndex + 1} updated successfully.`,
-        );
+        const res = await updateHeroBannerAction(targetId, fd);
+        if (res.success) {
+          setSuccess(
+            `Banner slide ${editingSlideIndex + 1} updated successfully.`,
+          );
+        } else {
+          setError(res.error || "Failed to update hero banner slide.");
+        }
       } else {
         fd.append("sortOrder", String(heroBannerList.length));
-        await pbHeroBanners.create(fd);
-        setSuccess("New hero banner slide created successfully.");
+        const res = await createHeroBannerAction(fd);
+        if (res.success) {
+          setSuccess("New hero banner slide created successfully.");
+        } else {
+          setError(res.error || "Failed to create hero banner slide.");
+        }
       }
 
       setIsHeroModalOpen(false);
@@ -510,15 +603,21 @@ export default function AdminHomepageBuilderPage() {
     setError(null);
     setSuccess(null);
 
-    let parsedConfig = {};
-    try {
-      parsedConfig = JSON.parse(configText || "{}");
-    } catch {
-      setError("Specifications must be a valid JSON object.");
-      return;
-    }
-
     if (!editingBlock) return;
+
+    let parsedConfig = {};
+    if (editingBlock.type === "product-carousel") {
+      parsedConfig = {
+        source: productSource,
+        category: productSource === "category" ? productCategory : undefined,
+        brand: productSource === "brand" ? productBrand : undefined,
+        limit: productLimit,
+        layout: productLayout,
+        seeAllLink: productSeeAll || undefined,
+      };
+    } else {
+      parsedConfig = editingBlock.config || {};
+    }
 
     startTransition(async () => {
       const res = await updateHomepageBlockConfigAction(
@@ -933,9 +1032,30 @@ export default function AdminHomepageBuilderPage() {
                       </div>
 
                       <div
-                        className="flex items-center gap-3 shrink-0"
+                        className="flex items-center gap-1.5 shrink-0"
                         onClick={(e) => e.stopPropagation()}
                       >
+                        <button
+                          type="button"
+                          onClick={() => handleMoveBlock(idx, -1)}
+                          disabled={idx === 0}
+                          className="p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed rounded-md hover:bg-muted cursor-pointer"
+                          title="Move Up"
+                        >
+                          <ArrowUp className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleMoveBlock(idx, 1)}
+                          disabled={idx === blocks.filter((b) => b.type !== "hero-banner").length - 1}
+                          className="p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed rounded-md hover:bg-muted cursor-pointer"
+                          title="Move Down"
+                        >
+                          <ArrowDown className="h-4 w-4" />
+                        </button>
+
+                        <div className="h-4 w-[1px] bg-border mx-1" />
+
                         <button
                           onClick={() => handleOpenConfig(block)}
                           className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer p-1.5 hover:bg-muted rounded-md"
@@ -967,25 +1087,41 @@ export default function AdminHomepageBuilderPage() {
                     {/* Accordion Body */}
                     {isExpanded && (
                       <div className="p-4 border-t border-border/80 bg-background/40 space-y-3">
-                        <div className="flex items-center justify-between gap-4 text-xs">
-                          <div className="w-full">
-                            <span className="font-semibold text-foreground block mb-1">
-                              Block Specification Configuration:
-                            </span>
-                            <pre className="font-mono text-[11px] p-2.5 rounded-lg bg-background border border-border text-muted-foreground overflow-x-auto max-h-40">
-                              {JSON.stringify(block.config || {}, null, 2)}
-                            </pre>
+                        <div className="w-full space-y-2">
+                          <span className="font-semibold text-xs text-foreground block">
+                            Active Section Settings:
+                          </span>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                            <div className="p-2.5 rounded-lg bg-background border border-border">
+                              <span className="text-[10px] uppercase font-bold text-muted-foreground block">Section Source</span>
+                              <span className="font-semibold text-foreground capitalize">
+                                {String(block.config?.source || "newest")}
+                              </span>
+                            </div>
+                            <div className="p-2.5 rounded-lg bg-background border border-border">
+                              <span className="text-[10px] uppercase font-bold text-muted-foreground block">Display Layout</span>
+                              <span className="font-semibold text-foreground capitalize">
+                                {String(block.config?.layout || "featured-grid")}
+                              </span>
+                            </div>
+                            <div className="p-2.5 rounded-lg bg-background border border-border truncate">
+                              <span className="text-[10px] uppercase font-bold text-muted-foreground block">Target Link</span>
+                              <span className="font-semibold text-blue-500 truncate block">
+                                {String(block.config?.seeAllLink || "/products")}
+                              </span>
+                            </div>
                           </div>
                         </div>
-                        <div className="flex items-center justify-end gap-2 pt-1">
+
+                        <div className="flex justify-end pt-2">
                           <Button
                             type="button"
-                            size="sm"
-                            variant="outline"
                             onClick={() => handleOpenConfig(block)}
-                            className="text-xs h-8 border-border"
+                            variant="outline"
+                            size="sm"
+                            className="text-xs flex items-center gap-1.5"
                           >
-                            <Settings className="h-3.5 w-3.5 mr-1" /> Edit Specification JSON
+                            <Settings className="h-3.5 w-3.5" /> Configure Section
                           </Button>
                         </div>
                       </div>
@@ -1105,22 +1241,7 @@ export default function AdminHomepageBuilderPage() {
                 </div>
               </div>
 
-              {newBlockType !== "hero-banner" && (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground/80 block">
-                    Configuration JSON
-                  </label>
-                  <textarea
-                    value={newBlockConfig}
-                    onChange={(e) => setNewBlockConfig(e.target.value)}
-                    rows={4}
-                    className="w-full font-mono text-xs p-2.5 rounded-lg border border-input bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                    placeholder='{\n  "source": "on-sale",\n  "limit": 6\n}'
-                  />
-                </div>
-              )}
-
-              {/* Action Buttons */}
+{/* Action Buttons */}
               <div className="flex items-center justify-end gap-2 pt-4 border-t border-border mt-6">
                 <Button
                   type="button"
@@ -1176,19 +1297,152 @@ export default function AdminHomepageBuilderPage() {
 
             {/* Form Content */}
             <form onSubmit={handleSaveConfig} className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-foreground/80 block">
-                  Configuration JSON
-                </label>
-                <textarea
-                  value={configText}
-                  onChange={(e) => setConfigText(e.target.value)}
-                  rows={8}
-                  required
-                  className="w-full font-mono text-xs p-2.5 rounded-lg border border-input bg-background text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                  placeholder='{\n  "headline": "Welcome",\n  "subtitle": "Discover more"\n}'
-                />
-              </div>
+              {editingBlock?.type === "product-carousel" ? (
+                <div className="space-y-4">
+                  {/* Product Source Selector */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground/80 block">
+                      Product Section Type
+                    </label>
+                    <select
+                      value={productSource}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setProductSource(val);
+                        if (val === "on-sale") setProductSeeAll("/products?filter=on-sale");
+                        else if (val === "newest") setProductSeeAll("/products?sortBy=newest");
+                        else if (val === "limited-stock") setProductSeeAll("/products?filter=low-stock");
+                      }}
+                      className="w-full text-xs p-2.5 rounded-lg border border-input bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    >
+                      <option value="newest">✨ New Arrivals (newest)</option>
+                      <option value="on-sale">🏷️ On Sale (on-sale)</option>
+                      <option value="category">📁 Category Spotlight (category)</option>
+                      <option value="brand">⚡ Brand Showcase (brand)</option>
+                      <option value="limited-stock">⏳ Limited Stock / Low Stock (limited-stock)</option>
+                    </select>
+                  </div>
+
+                  {/* Category Dropdown */}
+                  {productSource === "category" && (
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-foreground/80 block">
+                        Select Category
+                      </label>
+                      <select
+                        value={productCategory}
+                        onChange={(e) => {
+                          const catSlug = e.target.value;
+                          setProductCategory(catSlug);
+                          setProductSeeAll(`/products?category=${catSlug}`);
+                        }}
+                        className="w-full text-xs p-2.5 rounded-lg border border-input bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      >
+                        <option value="">-- Choose Category --</option>
+                        {availableCategories.map((c) => (
+                          <option key={c.id} value={c.slug}>
+                            {c.name} ({c.slug})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Brand Dropdown */}
+                  {productSource === "brand" && (
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-foreground/80 block">
+                        Select Brand
+                      </label>
+                      <select
+                        value={productBrand}
+                        onChange={(e) => {
+                          const bSlug = e.target.value;
+                          setProductBrand(bSlug);
+                          setProductSeeAll(`/brands/${bSlug}`);
+                        }}
+                        className="w-full text-xs p-2.5 rounded-lg border border-input bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      >
+                        <option value="">-- Choose Brand --</option>
+                        {availableBrands.map((b) => (
+                          <option key={b.id} value={b.slug}>
+                            {b.name} ({b.slug})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Display Layout */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-foreground/80 block">
+                        Display Layout
+                      </label>
+                      <select
+                        value={productLayout}
+                        onChange={(e) => setProductLayout(e.target.value)}
+                        className="w-full text-xs p-2.5 rounded-lg border border-input bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      >
+                        <option value="featured-grid">Grid Layout (featured-grid)</option>
+                        <option value="carousel">Horizontal Slider (carousel)</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-foreground/80 block">
+                        Item Count Limit
+                      </label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={24}
+                        value={productLimit}
+                        onChange={(e) => setProductLimit(Number(e.target.value) || 8)}
+                      />
+                    </div>
+                  </div>
+
+                  {/* See All Button Destination Link Dropdown Select */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground/80 block">
+                      &quot;See All&quot; Destination Target
+                    </label>
+                    <select
+                      value={productSeeAll}
+                      onChange={(e) => setProductSeeAll(e.target.value)}
+                      className="w-full text-xs p-2.5 rounded-lg border border-input bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    >
+                      <option value="">⚡ Auto-generated Link (Default)</option>
+                      <option value="/products">🛍️ All Products Page (/products)</option>
+                      <option value="/products?sortBy=newest">✨ New Arrivals Page (/products?sortBy=newest)</option>
+                      <option value="/products?filter=on-sale">🏷️ On Sale Products (/products?filter=on-sale)</option>
+                      <option value="/products?filter=low-stock">⏳ Limited Stock Deals (/products?filter=low-stock)</option>
+                      <option value="/deals">🔥 Special Deals Page (/deals)</option>
+                      <optgroup label="Categories">
+                        {availableCategories.map((c) => (
+                          <option key={c.id} value={`/products?category=${c.slug}`}>
+                            📁 {c.name} (/products?category={c.slug})
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Brands">
+                        {availableBrands.map((b) => (
+                          <option key={b.id} value={`/brands/${b.slug}`}>
+                            ⚡ {b.name} (/brands/{b.slug})
+                          </option>
+                        ))}
+                      </optgroup>
+                    </select>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-xs text-muted-foreground bg-muted/40 p-3 rounded-lg border border-border">
+                    This block type ({editingBlock?.type}) works out-of-the-box with active system settings.
+                  </p>
+                </div>
+              )}
 
               {/* Action Buttons */}
               <div className="flex items-center justify-end gap-2 pt-4 border-t border-border mt-6">

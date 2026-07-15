@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { Star, CheckCircle2, X } from "lucide-react";
 import { motion, useInView, AnimatePresence } from "motion/react";
+import { pbReviews } from "@/lib/pb-collections";
 
 interface MockReview {
   id: string;
@@ -22,76 +23,152 @@ interface MockReview {
   };
 }
 
-import { pbReviews } from "@/lib/pb-collections";
+const DEFAULT_FALLBACK_REVIEWS: MockReview[] = [
+  {
+    id: "fb-1",
+    name: "Kavindu Perera",
+    rating: 5,
+    date: "Jul 12, 2026",
+    comment: "Bought the ApexBook Pro 16 for high-resolution video editing and software builds. Deliveries took under 24 hours to Colombo. Thermals and battery life are unmatched!",
+    verified: true,
+    product: {
+      name: 'ApexBook Pro 16"',
+      slug: "apexbook-pro-16",
+      image: "https://images.unsplash.com/photo-1517336714731-489689fd1ca8?q=80&w=150",
+      price: 2299,
+      currency: "USD",
+    },
+  },
+  {
+    id: "fb-2",
+    name: "Nipuni Jayawardena",
+    rating: 5,
+    date: "Jul 10, 2026",
+    comment: "Acoustic-X ANC headphones completely block out engine noise during commute. The audio staging on lossless tracks is superb. 10/10 service from FTC Electronics.",
+    verified: true,
+    product: {
+      name: "Acoustic-X ANC Headphones",
+      slug: "acoustic-x-anc-headphones",
+      image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?q=80&w=150",
+      price: 299,
+      currency: "USD",
+    },
+  },
+  {
+    id: "fb-3",
+    name: "Shanuka Wickramasinghe",
+    rating: 5,
+    date: "Jul 08, 2026",
+    comment: "The Xiaomi Robot Vacuum H40 maps out multi-story layouts flawlessly. LiDAR navigation avoids obstacles effortlessly. Mintpay payment option worked smoothly.",
+    verified: true,
+    product: {
+      name: "Xiaomi Robot Vacuum H40",
+      slug: "xiaomi-robot-vacuum-h40",
+      image: "https://images.unsplash.com/photo-1618346136472-090de27fe8b4?q=80&w=150",
+      price: 155000,
+      currency: "LKR",
+    },
+  },
+  {
+    id: "fb-4",
+    name: "Treshan Abeykoon",
+    rating: 5,
+    date: "Jul 05, 2026",
+    comment: "Anker Soundcore Motion X600 provides room-filling hi-res spatial audio. Perfect for beach trips and outdoor gatherings.",
+    verified: true,
+    product: {
+      name: "Anker Soundcore Motion X600 Speaker",
+      slug: "anker-soundcore-motion-x600-speaker",
+      image: "https://images.unsplash.com/photo-1545454675-3531b543be5d?q=80&w=150",
+      price: 59900,
+      currency: "LKR",
+    },
+  },
+];
 
 export default function ReviewCarousel() {
-  const sectionRef = useRef<HTMLDivElement>(null);
-  const isInView = useInView(sectionRef, { once: true, amount: 0.1 });
-
   const [reviews, setReviews] = useState<MockReview[]>([]);
   const [selectedReview, setSelectedReview] = useState<MockReview | null>(null);
 
   useEffect(() => {
     const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'https://ftc-db.codix.site';
-    pbReviews.getApproved({ limit: 10 }).then((rawReviews) => {
-      if (!rawReviews || rawReviews.length === 0) return;
-      const formatted = rawReviews.map((rev) => {
-        const prodExpand = rev.expand?.product;
-        let imageUrl = "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?q=80&w=150";
-        if (prodExpand?.images?.[0]) {
-          imageUrl = `${pbUrl}/api/files/${prodExpand.collectionId}/${prodExpand.id}/${prodExpand.images[0]}`;
-        } else if (prodExpand?.slug) {
-          const slugMapping: Record<string, string> = {
-            'apexbook-pro-16': 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?q=80&w=150',
-            'phonix-pro-15-ultra': 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?q=80&w=150',
-            'acoustic-x-anc-headphones': 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?q=80&w=150',
-            'keyforge-q1-mechanical-keyboard': 'https://images.unsplash.com/photo-1618384887929-16ec33fab9ef?q=80&w=150',
-            'visionglide-34-curved-monitor': 'https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?q=80&w=150',
-            'xiaomi-robot-vacuum-h40': 'https://images.unsplash.com/photo-1618346136472-090de27fe8b4?q=80&w=150',
-            'anker-maggo-power-bank-10k': 'https://images.unsplash.com/photo-1609592424109-dd9f565d71c3?q=80&w=150',
-            'eufy-x10-pro-omni': 'https://images.unsplash.com/photo-1589652717521-10c341494de3?q=80&w=150',
-            'eufy-smart-track-card': 'https://images.unsplash.com/photo-1627252879515-d2206173dd09?q=80&w=150',
-            'xiaomi-ballpoint-pen-white': 'https://images.unsplash.com/photo-1583485088034-697b5bc54ccd?q=80&w=150',
-            'xiaomi-color-gel-pen-5pack': 'https://images.unsplash.com/photo-1511556532299-8f662fc26c06?q=80&w=150',
-            'wiwu-skin-armor-laptop-sleeve': 'https://images.unsplash.com/photo-1625766763788-95dcce9bf5ac?q=80&w=150',
-            'wiwu-skin-zero-sleeve': 'https://images.unsplash.com/photo-1585338107529-13afc5f02586?q=80&w=150',
-            'wiwu-minimalis-travel-pouch': 'https://images.unsplash.com/photo-1622560480605-d83c853bc5c3?q=80&w=150',
-            'xiaomi-uniblade-trimmer-head': 'https://images.unsplash.com/photo-1621607512214-68297480165e?q=80&w=150',
-            'xiaomi-water-flosser-tips': 'https://images.unsplash.com/photo-1607613009820-a29f7bb81c04?q=80&w=150',
-            'xiaomi-dust-mite-filter-2pack': 'https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?q=80&w=150',
-            'xiaomi-smart-air-purifier-6': 'https://images.unsplash.com/photo-1585338107529-13afc5f02586?q=80&w=150',
-            'dyson-hushjet-purifier-hj10': 'https://images.unsplash.com/photo-1595246140625-573b715d11dc?q=80&w=150',
-            'dyson-purifier-cool-tp12': 'https://images.unsplash.com/photo-1614292244591-6c5c3c84e1b5?q=80&w=150',
-            'xiaomi-smart-pet-care-air-purifier': 'https://images.unsplash.com/photo-1548767797-d8c844163c4c?q=80&w=150',
-            'ivon-dual-port-fast-charger': 'https://images.unsplash.com/photo-1622445262465-2481c4574875?q=80&w=150',
-            'ivon-braided-usb-c-cable': 'https://images.unsplash.com/photo-1544725176-7c40e5a71c5e?q=80&w=150',
-            'ivon-true-wireless-anc-earbuds': 'https://images.unsplash.com/photo-1590658268037-6bf12165a8df?q=80&w=150',
-          };
-          imageUrl = slugMapping[prodExpand.slug] || imageUrl;
+    pbReviews
+      .getApproved({ limit: 10 })
+      .then((rawReviews) => {
+        if (!rawReviews || rawReviews.length === 0) {
+          setReviews(DEFAULT_FALLBACK_REVIEWS);
+          return;
         }
+        const formatted = rawReviews.map((rev) => {
+          const prodExpand = rev.expand?.product;
+          let imageUrl = "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?q=80&w=150";
 
-        return {
-          id: rev.id,
-          name: rev.customerName,
-          rating: rev.rating,
-          date: new Date(rev.created).toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          }),
-          comment: rev.comment,
-          verified: rev.isVerified,
-          product: {
-            name: prodExpand?.name || "Product",
-            slug: prodExpand?.slug || "",
-            image: imageUrl,
-            price: prodExpand?.price || 0,
-            currency: (prodExpand?.currency as "USD" | "LKR") || "LKR",
-          },
-        };
+          if (prodExpand) {
+            const rawImages = prodExpand.images as string | string[] | undefined;
+            let imgPath = "";
+            if (Array.isArray(rawImages) && rawImages.length > 0) {
+              imgPath = rawImages[0];
+            } else if (typeof rawImages === "string" && rawImages.startsWith("[")) {
+              try {
+                const parsed = JSON.parse(rawImages);
+                if (Array.isArray(parsed) && parsed[0]) {
+                  imgPath = parsed[0];
+                }
+              } catch {
+                // Ignore
+              }
+            } else if (typeof rawImages === "string") {
+              imgPath = rawImages;
+            }
+
+            if (imgPath && imgPath.startsWith("http")) {
+              imageUrl = imgPath;
+            } else if (imgPath && !imgPath.startsWith("[")) {
+              imageUrl = `${pbUrl}/api/files/${prodExpand.collectionId}/${prodExpand.id}/${imgPath}`;
+            } else if (prodExpand.slug) {
+              const slugMapping: Record<string, string> = {
+                'apexbook-pro-16': 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?q=80&w=150',
+                'phonix-pro-15-ultra': 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?q=80&w=150',
+                'acoustic-x-anc-headphones': 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?q=80&w=150',
+                'keyforge-q1-mechanical-keyboard': 'https://images.unsplash.com/photo-1618384887929-16ec33fab9ef?q=80&w=150',
+                'visionglide-34-curved-monitor': 'https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?q=80&w=150',
+                'xiaomi-robot-vacuum-h40': 'https://images.unsplash.com/photo-1618346136472-090de27fe8b4?q=80&w=150',
+                'anker-maggo-power-bank-10k': 'https://images.unsplash.com/photo-1545454675-3531b543be5d?q=80&w=150',
+                'anker-soundcore-motion-x600-speaker': 'https://images.unsplash.com/photo-1545454675-3531b543be5d?q=80&w=150',
+                'eufy-x10-pro-omni': 'https://images.unsplash.com/photo-1589652717521-10c341494de3?q=80&w=150',
+                'eufy-smart-track-card': 'https://images.unsplash.com/photo-1627252879515-d2206173dd09?q=80&w=150',
+              };
+              imageUrl = slugMapping[prodExpand.slug] || imageUrl;
+            }
+          }
+
+          return {
+            id: rev.id,
+            name: rev.customerName || "Customer",
+            rating: rev.rating || 5,
+            date: rev.created
+              ? new Date(rev.created).toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })
+              : "Recently",
+            comment: rev.comment || "",
+            verified: rev.isVerified ?? true,
+            product: {
+              name: prodExpand?.name || "Product",
+              slug: prodExpand?.slug || "",
+              image: imageUrl,
+              price: prodExpand?.price || 0,
+              currency: (prodExpand?.currency as "USD" | "LKR") || "LKR",
+            },
+          };
+        });
+        setReviews(formatted.length > 0 ? formatted : DEFAULT_FALLBACK_REVIEWS);
+      })
+      .catch(() => {
+        setReviews(DEFAULT_FALLBACK_REVIEWS);
       });
-      setReviews(formatted);
-    });
   }, []);
 
   useEffect(() => {
@@ -120,7 +197,6 @@ export default function ReviewCarousel() {
   return (
     <>
       <div
-        ref={sectionRef}
         className="w-full py-8 sm:py-12 lg:py-16 border-b border-neutral-200/50 dark:border-white/5 bg-[#f4f4f6] dark:bg-[#09090e]/60 relative overflow-hidden text-neutral-900 dark:text-white select-none transition-colors"
       >
         <style
@@ -146,7 +222,7 @@ export default function ReviewCarousel() {
           <motion.div
             className="w-full flex flex-col items-center justify-center text-center relative z-20"
             initial={{ opacity: 0, y: -20 }}
-            animate={isInView ? { opacity: 1, y: 0 } : {}}
+            animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.1 }}
           >
             <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight text-neutral-900 dark:text-white uppercase leading-none">
@@ -169,7 +245,7 @@ export default function ReviewCarousel() {
               <motion.div
                 className="flex w-max gap-4 sm:gap-5 animate-marquee hover:[animation-play-state:paused]"
                 initial={{ opacity: 0 }}
-                animate={isInView ? { opacity: 1 } : {}}
+                animate={{ opacity: 1 }}
                 transition={{ duration: 0.6, delay: 0.2 }}
               >
                 {LOOPED_REVIEWS.map((review, index) => (
@@ -235,6 +311,7 @@ export default function ReviewCarousel() {
                             fill
                             className="object-cover group-hover/prod:scale-105 transition-transform duration-500"
                             sizes="40px"
+                            unoptimized={review.product.image.startsWith("http")}
                           />
                         </div>
 

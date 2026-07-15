@@ -681,11 +681,114 @@ export async function deleteHomepageBlockAction(id: string) {
       { ip: check.ip, userAgent: check.userAgent }
     );
 
-    revalidatePath('/');
+    revalidatePath('/', 'layout');
+    revalidatePath('/', 'page');
     revalidatePath('/admin/homepage');
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to delete homepage block.' };
+  }
+}
+
+// ─── Hero Banner Actions ───────────────────────────────────────────────────────
+
+export async function createHeroBannerAction(formData: FormData) {
+  const check = await checkPermission('homepage', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
+
+  try {
+    const pb = await getAdminPb();
+    const record = await pb.collection('hero_banners').create(formData);
+
+    await writeAuditLog(
+      check.actorEmail!,
+      'create',
+      'hero_banners',
+      record.id,
+      undefined,
+      toRecord(record),
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/', 'layout');
+    revalidatePath('/', 'page');
+    revalidatePath('/admin/homepage');
+    return { success: true, data: toRecord(record) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to create hero banner.' };
+  }
+}
+
+export async function updateHeroBannerAction(id: string, formData: FormData) {
+  const check = await checkPermission('homepage', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
+
+  try {
+    const pb = await getAdminPb();
+    const record = await pb.collection('hero_banners').update(id, formData);
+
+    await writeAuditLog(
+      check.actorEmail!,
+      'update',
+      'hero_banners',
+      id,
+      undefined,
+      toRecord(record),
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/', 'layout');
+    revalidatePath('/', 'page');
+    revalidatePath('/admin/homepage');
+    return { success: true, data: toRecord(record) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to update hero banner.' };
+  }
+}
+
+export async function deleteHeroBannerAction(id: string) {
+  const check = await checkPermission('homepage', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
+
+  try {
+    const pb = await getAdminPb();
+    await pb.collection('hero_banners').delete(id);
+
+    await writeAuditLog(
+      check.actorEmail!,
+      'delete',
+      'hero_banners',
+      id,
+      undefined,
+      undefined,
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/', 'layout');
+    revalidatePath('/', 'page');
+    revalidatePath('/admin/homepage');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to delete hero banner.' };
+  }
+}
+
+export async function reorderHeroBannersAction(items: Array<{ id: string; sortOrder: number }>) {
+  const check = await checkPermission('homepage', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
+
+  try {
+    const pb = await getAdminPb();
+    for (const item of items) {
+      await pb.collection('hero_banners').update(item.id, { sortOrder: item.sortOrder });
+    }
+
+    revalidatePath('/', 'layout');
+    revalidatePath('/', 'page');
+    revalidatePath('/admin/homepage');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to reorder hero banners.' };
   }
 }
 

@@ -219,20 +219,31 @@ export const pbProducts = {
           filter += " && discountPrice > 0";
           break;
         case "new-arrivals":
-          filter += ' && badges ~ "new-arrival"';
+          // New Arrivals: newest published products sorted by creation date
           break;
         case "featured":
           filter += " && isFeatured = true";
           break;
       }
 
-      const result = await pbClient
+      let result = await pbClient
         .collection("products")
         .getList<PBProduct>(1, limit, {
           filter,
           expand: "category,brand",
           sort: "-created",
         });
+
+      // Fallback: If specific collection filter returned 0 items, fetch latest published products
+      if (result.items.length === 0 && collection !== "featured") {
+        result = await pbClient
+          .collection("products")
+          .getList<PBProduct>(1, limit, {
+            filter: 'status = "published"',
+            expand: "category,brand",
+            sort: "-created",
+          });
+      }
 
       return result.items.map((record) => pbProductToProduct(record, pbUrl));
     } catch (err) {
