@@ -197,7 +197,7 @@ export default function ReviewCarousel() {
   return (
     <>
       <div
-        className="w-full py-8 sm:py-12 lg:py-16 border-b border-neutral-200/50 dark:border-white/5 bg-[#f4f4f6] dark:bg-[#09090e]/60 relative overflow-hidden text-neutral-900 dark:text-white select-none transition-colors"
+        className="w-full py-4 sm:py-6 lg:py-8 border-b border-neutral-200/50 dark:border-white/5 bg-[#f4f4f6] dark:bg-[#09090e]/60 relative overflow-hidden text-neutral-900 dark:text-white select-none transition-colors"
       >
         <style
           dangerouslySetInnerHTML={{
@@ -207,52 +207,55 @@ export default function ReviewCarousel() {
             100% { transform: translateX(-50%); }
           }
           .animate-marquee {
-            animation: marquee 40s linear infinite;
+            animation: marquee 35s linear infinite;
           }
         `,
           }}
         />
 
-        {/* Decorative ambient blobs in the background */}
-        <div className="absolute top-1/2 left-1/4 -translate-y-1/2 w-64 h-64 rounded-full bg-blue-500/5 dark:bg-blue-500/[0.02] blur-[80px] pointer-events-none" />
-        <div className="absolute top-1/3 right-1/4 -translate-y-1/2 w-80 h-80 rounded-full bg-indigo-500/5 dark:bg-indigo-500/[0.02] blur-[100px] pointer-events-none" />
+        {/* Decorative ambient background */}
+        <div className="absolute top-1/2 left-1/4 -translate-y-1/2 w-48 h-48 rounded-full bg-blue-500/5 dark:bg-blue-500/5 pointer-events-none" />
+        <div className="absolute top-1/3 right-1/4 -translate-y-1/2 w-56 h-56 rounded-full bg-indigo-500/5 dark:bg-indigo-500/5 pointer-events-none" />
 
-        <div className="max-w-7xl mx-auto px-6 sm:px-12 lg:px-16 flex flex-col gap-5 sm:gap-8 lg:gap-12 relative z-10">
-          {/* Top Section: Testimonials Description */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 lg:px-12 flex flex-col gap-3 sm:gap-4 lg:gap-5 relative z-10">
+          {/* Compact Top Section: Testimonials Description */}
           <motion.div
-            className="w-full flex flex-col items-center justify-center text-center relative z-20"
-            initial={{ opacity: 0, y: -20 }}
+            className="w-full flex items-center justify-between relative z-20"
+            initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.1 }}
+            transition={{ duration: 0.4, delay: 0.1 }}
           >
-            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight text-neutral-900 dark:text-white uppercase leading-none">
-              Customer <span className="text-blue-600 dark:text-blue-400">Reviews</span>
-            </h2>
-
-            <p className="mt-2.5 sm:mt-4 lg:mt-5 text-sm sm:text-base text-neutral-500 dark:text-neutral-400 leading-relaxed max-w-xl mx-auto font-medium">
-              Real reviews and specs verified by verified purchasers. Sourced
-              directly from our official channels.
+            <div>
+              <span className="text-[9px] font-mono font-bold uppercase tracking-[0.25em] text-blue-600 dark:text-blue-400 block mb-0.5">
+                Verified Feedback
+              </span>
+              <h2 className="text-xl sm:text-2xl lg:text-3xl font-black tracking-tight text-neutral-900 dark:text-white uppercase leading-none">
+                Customer <span className="text-blue-600 dark:text-blue-400">Reviews</span>
+              </h2>
+            </div>
+            <p className="hidden sm:block text-xs text-neutral-500 dark:text-neutral-400 max-w-sm text-right font-medium">
+              Real specs & product reviews verified directly from official buyers.
             </p>
           </motion.div>
 
-          {/* Bottom Section: Infinite Looping Reviews */}
+          {/* Bottom Section: Compact Infinite Looping Reviews */}
           <div className="flex-grow min-w-0 relative">
             {/* Gradient Mask for fading edges */}
-            <div className="absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-[#f4f4f6] dark:from-[#09090e] to-transparent z-10 pointer-events-none" />
-            <div className="absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-[#f4f4f6] dark:from-[#09090e] to-transparent z-10 pointer-events-none" />
+            <div className="absolute inset-y-0 left-0 w-10 bg-gradient-to-r from-[#f4f4f6] dark:from-[#09090e] to-transparent z-10 pointer-events-none" />
+            <div className="absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-[#f4f4f6] dark:from-[#09090e] to-transparent z-10 pointer-events-none" />
 
-            <div className="overflow-hidden w-full pb-6 pt-2">
+            <div className="overflow-hidden w-full pb-2 pt-1">
               <motion.div
-                className="flex w-max gap-4 sm:gap-5 animate-marquee hover:[animation-play-state:paused]"
+                className="flex w-max gap-3.5 sm:gap-4 animate-marquee hover:[animation-play-state:paused] will-change-transform [transform:translateZ(0)]"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                transition={{ duration: 0.6, delay: 0.2 }}
+                transition={{ duration: 0.5, delay: 0.15 }}
               >
                 {LOOPED_REVIEWS.map((review, index) => (
                   <div
                     key={`${review.id}-${index}`}
                     onClick={() => setSelectedReview(review)}
-                    className="cursor-pointer group w-[280px] sm:w-[340px] lg:w-[380px] shrink-0 border border-neutral-200/50 dark:border-white/5 bg-white/75 dark:bg-zinc-900/35 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.04)] dark:shadow-[0_4px_20px_-4px_rgba(0,0,0,0.15)] hover:shadow-[0_12px_25px_-5px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_12px_25px_-5px_rgba(0,0,0,0.3)] hover:-translate-y-1.5 backdrop-blur-md transition-all duration-300 p-3 sm:p-6 lg:p-7 rounded-2xl flex flex-col justify-between min-h-[175px] sm:min-h-[210px] lg:min-h-[310px]"
+                    className="cursor-pointer group w-[240px] sm:w-[270px] lg:w-[290px] shrink-0 border border-neutral-200/90 dark:border-white/10 bg-white dark:bg-[#12121a] shadow-xs hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-3.5 sm:p-4 lg:p-4.5 rounded-xl flex flex-col justify-between min-h-[140px] sm:min-h-[160px] lg:min-h-[185px]"
                   >
                     {/* Top content */}
                     <div>
@@ -262,9 +265,9 @@ export default function ReviewCarousel() {
                           {Array.from({ length: 5 }).map((_, idx) => (
                             <Star
                               key={idx}
-                              className={`h-4 w-4 ${
+                              className={`h-3.5 w-3.5 ${
                                 idx < review.rating
-                                  ? "fill-current text-amber-450 dark:text-amber-400 drop-shadow-[0_0_4px_rgba(245,158,11,0.25)]"
+                                  ? "fill-current text-amber-450 dark:text-amber-400"
                                   : "text-neutral-200 dark:text-neutral-800"
                               }`}
                             />
@@ -272,27 +275,27 @@ export default function ReviewCarousel() {
                         </div>
 
                         {review.verified && (
-                          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-50 dark:bg-green-950/20 text-[9px] text-green-750 dark:text-green-400 border border-green-200/10 dark:border-green-500/10 font-bold tracking-widest uppercase select-none">
-                            <CheckCircle2 className="h-3 w-3 text-green-650 dark:text-green-400" />
+                          <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 dark:bg-green-950/30 text-[8px] text-green-700 dark:text-green-400 border border-green-200/40 dark:border-green-500/20 font-bold tracking-wider uppercase select-none">
+                            <CheckCircle2 className="h-2.5 w-2.5 text-green-600 dark:text-green-400" />
                             <span>Verified</span>
                           </div>
                         )}
                       </div>
 
                       {/* Testimonial Quote */}
-                      <p className="mt-2 sm:mt-3 lg:mt-5 text-sm sm:text-[15px] text-neutral-600 dark:text-neutral-355 italic leading-relaxed line-clamp-2 lg:line-clamp-4 relative z-10 font-medium">
+                      <p className="mt-2 text-xs sm:text-[13px] text-neutral-600 dark:text-neutral-300 italic leading-snug line-clamp-2 relative z-10 font-medium">
                         &ldquo;{review.comment}&rdquo;
                       </p>
                     </div>
 
                     {/* Bottom details */}
-                    <div className="mt-3 sm:mt-4 lg:mt-6">
+                    <div className="mt-2.5 pt-2 border-t border-neutral-100 dark:border-white/5">
                       {/* User name & Date */}
-                      <div className="flex items-center justify-between text-[10px] uppercase tracking-wider border-b border-neutral-100/80 dark:border-white/5 pb-3">
-                        <span className="font-extrabold text-neutral-900 dark:text-white">
+                      <div className="flex items-center justify-between text-[9px] uppercase tracking-wider pb-1.5">
+                        <span className="font-extrabold text-neutral-900 dark:text-white truncate max-w-[140px]">
                           {review.name}
                         </span>
-                        <span className="text-neutral-450 dark:text-neutral-500 font-bold">
+                        <span className="text-neutral-400 dark:text-neutral-500 font-semibold shrink-0">
                           {review.date}
                         </span>
                       </div>
@@ -301,26 +304,26 @@ export default function ReviewCarousel() {
                       <Link
                         href={`/products/${review.product.slug}`}
                         onClick={(e) => e.stopPropagation()}
-                        className="group/prod flex items-center gap-3.5 bg-neutral-50/50 dark:bg-white/[0.02] border border-neutral-200/50 dark:border-white/5 hover:border-blue-305 dark:hover:border-blue-500/30 hover:bg-blue-50/30 dark:hover:bg-blue-500/10 hover:shadow-xs p-1.5 lg:p-2.5 rounded-xl mt-2 sm:mt-3 transition-all duration-300"
+                        className="group/prod flex items-center gap-2.5 bg-neutral-50 dark:bg-white/[0.03] border border-neutral-200/60 dark:border-white/5 hover:border-blue-500/40 hover:bg-blue-50/40 dark:hover:bg-blue-500/10 p-1.5 rounded-lg transition-all duration-300"
                       >
-                        {/* Product Thumbnail */}
-                        <div className="relative h-10 w-10 shrink-0 bg-white dark:bg-zinc-950 rounded-lg overflow-hidden border border-neutral-100 dark:border-white/10 shadow-xs">
+                        {/* Compact Product Thumbnail */}
+                        <div className="relative h-7 w-7 shrink-0 bg-white dark:bg-zinc-950 rounded-md overflow-hidden border border-neutral-200/60 dark:border-white/10 shadow-xs">
                           <Image
                             src={review.product.image}
                             alt={review.product.name}
                             fill
                             className="object-cover group-hover/prod:scale-105 transition-transform duration-500"
-                            sizes="40px"
+                            sizes="28px"
                             unoptimized={review.product.image.startsWith("http")}
                           />
                         </div>
 
                         {/* Product Metadata */}
                         <div className="flex flex-col min-w-0 justify-center">
-                          <span className="text-[11px] font-bold text-neutral-800 dark:text-neutral-200 truncate group-hover/prod:text-blue-600 dark:group-hover/prod:text-blue-400 transition-colors">
+                          <span className="text-[10px] font-bold text-neutral-800 dark:text-neutral-200 truncate group-hover/prod:text-blue-600 dark:group-hover/prod:text-blue-400 transition-colors">
                             {review.product.name}
                           </span>
-                          <span className="text-[10px] font-bold text-neutral-500 dark:text-neutral-450 mt-0.5">
+                          <span className="text-[9px] font-bold text-neutral-400 dark:text-neutral-500">
                             {formatPriceVal(
                               review.product.price,
                               review.product.currency,

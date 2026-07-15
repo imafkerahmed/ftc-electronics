@@ -17,7 +17,12 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { pbHomepageBlocks, pbHeroBanners, pbCategories, pbBrands } from "@/lib/pb-collections";
+import {
+  pbHomepageBlocks,
+  pbHeroBanners,
+  pbCategories,
+  pbBrands,
+} from "@/lib/pb-collections";
 import {
   updateHomepageBlocksAction,
   updateHomepageBlockConfigAction,
@@ -74,7 +79,9 @@ function extractDominantColor(fileOrUrl: File | string): Promise<string> {
     img.crossOrigin = "Anonymous";
 
     const objectUrl =
-      typeof fileOrUrl === "string" ? fileOrUrl : URL.createObjectURL(fileOrUrl);
+      typeof fileOrUrl === "string"
+        ? fileOrUrl
+        : URL.createObjectURL(fileOrUrl);
 
     img.onload = () => {
       try {
@@ -179,8 +186,12 @@ export default function AdminHomepageBuilderPage() {
   const [newBlockEnd, setNewBlockEnd] = useState("");
 
   // Categories & Brands for Product Section builder
-  const [availableCategories, setAvailableCategories] = useState<{ id: string; name: string; slug: string }[]>([]);
-  const [availableBrands, setAvailableBrands] = useState<{ id: string; name: string; slug: string }[]>([]);
+  const [availableCategories, setAvailableCategories] = useState<
+    { id: string; name: string; slug: string }[]
+  >([]);
+  const [availableBrands, setAvailableBrands] = useState<
+    { id: string; name: string; slug: string }[]
+  >([]);
 
   // Product Carousel visual form states
   const [productSource, setProductSource] = useState<string>("newest");
@@ -189,6 +200,25 @@ export default function AdminHomepageBuilderPage() {
   const [productLimit, setProductLimit] = useState<number>(8);
   const [productLayout, setProductLayout] = useState<string>("featured-grid");
   const [productSeeAll, setProductSeeAll] = useState<string>("");
+
+  // Bento Grid Category Builder state (4 slots)
+  interface BentoSlotDraft {
+    slug: string;
+    title: string;
+    description: string;
+    label: string;
+    mediaType: "image" | "video";
+    mediaUrl: string;
+  }
+
+  const [bentoSlots, setBentoSlots] = useState<BentoSlotDraft[]>([
+    { slug: "laptops", title: "", description: "", label: "LAPTOPS", mediaType: "image", mediaUrl: "" },
+    { slug: "keyboards", title: "", description: "", label: "KEYBOARDS", mediaType: "image", mediaUrl: "" },
+    { slug: "audio", title: "", description: "", label: "AUDIO", mediaType: "image", mediaUrl: "" },
+    { slug: "phones", title: "", description: "", label: "SMARTPHONES", mediaType: "image", mediaUrl: "" },
+  ]);
+  const [activeSlotIdx, setActiveSlotIdx] = useState<number>(0);
+  const [categoryGridBgImage, setCategoryGridBgImage] = useState<string>("");
 
   // Drag state
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
@@ -242,16 +272,14 @@ export default function AdminHomepageBuilderPage() {
       const heroRecords = await pbHeroBanners.getAll().catch(() => []);
 
       setBlocks(
-        (res || []).map(
-          (b: any) => ({
-            id: b.id,
-            type: b.type || b.block_type || "section",
-            title: b.title || "Page Section",
-            isEnabled: b.isEnabled !== false && b.is_active !== false,
-            sortOrder: b.sortOrder || 0,
-            config: b.config || {},
-          }),
-        ),
+        (res || []).map((b: any) => ({
+          id: b.id,
+          type: b.type || b.block_type || "section",
+          title: b.title || "Page Section",
+          isEnabled: b.isEnabled !== false && b.is_active !== false,
+          sortOrder: b.sortOrder || 0,
+          config: b.config || {},
+        })),
       );
 
       // Pre-fetch categories & brands for Product Section Builder
@@ -260,13 +288,18 @@ export default function AdminHomepageBuilderPage() {
         pbBrands.getAll().catch(() => []),
       ]);
       setAvailableCategories(
-        cats.map((c: any) => ({ id: c.id, name: c.name, slug: c.slug || c.id })),
+        cats.map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          slug: c.slug || c.id,
+        })),
       );
       setAvailableBrands(
         brs.map((b: any) => ({ id: b.id, name: b.name, slug: b.slug || b.id })),
       );
 
-      const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || "https://ftc-db.codix.site/";
+      const pbUrl =
+        process.env.NEXT_PUBLIC_POCKETBASE_URL || "https://ftc-db.codix.site/";
       const bannersFromCollection = heroRecords.length
         ? heroRecords.map((banner, index) => {
             const imageUrl = banner.image
@@ -323,7 +356,6 @@ export default function AdminHomepageBuilderPage() {
     setNewBlockEnd("");
     setIsAddModalOpen(true);
   };
-
 
   const handleToggleBlock = (id: string) => {
     const updated = blocks.map((b) =>
@@ -436,10 +468,51 @@ export default function AdminHomepageBuilderPage() {
       setProductSeeAll(String(cfg.seeAllLink || ""));
     }
 
+    if (block.type === "category-grid") {
+      const cfg: Record<string, any> = (block.config as any) || {};
+      setCategoryGridBgImage(String(cfg.sectionBackgroundImage || cfg.backgroundImage || ""));
+      setBentoSlots([
+        {
+          slug: cfg.slot1?.slug || "laptops",
+          title: cfg.slot1?.title || "",
+          description: cfg.slot1?.description || "",
+          label: cfg.slot1?.label || "LAPTOPS",
+          mediaType: cfg.slot1?.mediaType || "image",
+          mediaUrl: cfg.slot1?.mediaUrl || cfg.slot1?.imageUrl || "",
+        },
+        {
+          slug: cfg.slot2?.slug || "keyboards",
+          title: cfg.slot2?.title || "",
+          description: cfg.slot2?.description || "",
+          label: cfg.slot2?.label || "KEYBOARDS",
+          mediaType: cfg.slot2?.mediaType || "image",
+          mediaUrl: cfg.slot2?.mediaUrl || cfg.slot2?.imageUrl || "",
+        },
+        {
+          slug: cfg.slot3?.slug || "audio",
+          title: cfg.slot3?.title || "",
+          description: cfg.slot3?.description || "",
+          label: cfg.slot3?.label || "AUDIO",
+          mediaType: cfg.slot3?.mediaType || "image",
+          mediaUrl: cfg.slot3?.mediaUrl || cfg.slot3?.imageUrl || "",
+        },
+        {
+          slug: cfg.slot4?.slug || "phones",
+          title: cfg.slot4?.title || "",
+          description: cfg.slot4?.description || "",
+          label: cfg.slot4?.label || "SMARTPHONES",
+          mediaType: cfg.slot4?.mediaType || "image",
+          mediaUrl: cfg.slot4?.mediaUrl || cfg.slot4?.imageUrl || "",
+        },
+      ]);
+      setActiveSlotIdx(0);
+    }
+
     setError(null);
     setSuccess(null);
     setIsConfigModalOpen(true);
-  };  const [editingSlideIndex, setEditingSlideIndex] = useState<number | null>(
+  };
+  const [editingSlideIndex, setEditingSlideIndex] = useState<number | null>(
     null,
   );
 
@@ -524,10 +597,7 @@ export default function AdminHomepageBuilderPage() {
     });
   };
 
-  const handleReorderBannerSlide = async (
-    index: number,
-    direction: -1 | 1,
-  ) => {
+  const handleReorderBannerSlide = async (index: number, direction: -1 | 1) => {
     const nextIdx = index + direction;
     if (nextIdx < 0 || nextIdx >= heroBannerList.length) return;
 
@@ -614,6 +684,14 @@ export default function AdminHomepageBuilderPage() {
         limit: productLimit,
         layout: productLayout,
         seeAllLink: productSeeAll || undefined,
+      };
+    } else if (editingBlock.type === "category-grid") {
+      parsedConfig = {
+        sectionBackgroundImage: categoryGridBgImage || undefined,
+        slot1: bentoSlots[0],
+        slot2: bentoSlots[1],
+        slot3: bentoSlots[2],
+        slot4: bentoSlots[3],
       };
     } else {
       parsedConfig = editingBlock.config || {};
@@ -795,7 +873,8 @@ export default function AdminHomepageBuilderPage() {
                 {heroBannerBlock.title || "Hero Banner Manager"}
               </h2>
               <span className="text-[10px] font-semibold text-muted-foreground px-2 py-0.5 rounded-full bg-muted border border-border/60 shrink-0">
-                {heroBannerList.length} slide{heroBannerList.length === 1 ? "" : "s"}
+                {heroBannerList.length} slide
+                {heroBannerList.length === 1 ? "" : "s"}
               </span>
             </div>
 
@@ -917,7 +996,9 @@ export default function AdminHomepageBuilderPage() {
                           variant="ghost"
                           size="sm"
                           disabled={index === 0 || isPending}
-                          onClick={() => void handleReorderBannerSlide(index, -1)}
+                          onClick={() =>
+                            void handleReorderBannerSlide(index, -1)
+                          }
                           className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
                           title="Move Up"
                         >
@@ -927,8 +1008,12 @@ export default function AdminHomepageBuilderPage() {
                           type="button"
                           variant="ghost"
                           size="sm"
-                          disabled={index === heroBannerList.length - 1 || isPending}
-                          onClick={() => void handleReorderBannerSlide(index, 1)}
+                          disabled={
+                            index === heroBannerList.length - 1 || isPending
+                          }
+                          onClick={() =>
+                            void handleReorderBannerSlide(index, 1)
+                          }
                           className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
                           title="Move Down"
                         >
@@ -961,7 +1046,8 @@ export default function AdminHomepageBuilderPage() {
               ) : (
                 <div className="rounded-lg border border-dashed border-border p-8 text-center space-y-3 bg-background/50">
                   <p className="text-xs text-muted-foreground">
-                    No hero banners added yet. Click &quot;+ Add Hero Banner&quot; to create your first banner slide.
+                    No hero banners added yet. Click &quot;+ Add Hero
+                    Banner&quot; to create your first banner slide.
                   </p>
                   <Button
                     type="button"
@@ -988,7 +1074,8 @@ export default function AdminHomepageBuilderPage() {
         <div className="space-y-3">
           {blocks.filter((b) => b.type !== "hero-banner").length === 0 ? (
             <div className="p-8 text-center text-xs text-muted-foreground bg-card border border-border rounded-xl">
-              No additional layout blocks. Click &quot;Add Block&quot; to add section blocks like product carousels or promo banners.
+              No additional layout blocks. Click &quot;Add Block&quot; to add
+              section blocks like product carousels or promo banners.
             </div>
           ) : (
             blocks
@@ -1047,7 +1134,12 @@ export default function AdminHomepageBuilderPage() {
                         <button
                           type="button"
                           onClick={() => handleMoveBlock(idx, 1)}
-                          disabled={idx === blocks.filter((b) => b.type !== "hero-banner").length - 1}
+                          disabled={
+                            idx ===
+                            blocks.filter((b) => b.type !== "hero-banner")
+                              .length -
+                              1
+                          }
                           className="p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed rounded-md hover:bg-muted cursor-pointer"
                           title="Move Down"
                         >
@@ -1066,7 +1158,9 @@ export default function AdminHomepageBuilderPage() {
                         <button
                           onClick={() => handleToggleBlock(block.id)}
                           className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                          title={block.isEnabled ? "Disable Block" : "Enable Block"}
+                          title={
+                            block.isEnabled ? "Disable Block" : "Enable Block"
+                          }
                         >
                           {block.isEnabled ? (
                             <ToggleRight className="h-6 w-6 text-blue-500" />
@@ -1093,21 +1187,31 @@ export default function AdminHomepageBuilderPage() {
                           </span>
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
                             <div className="p-2.5 rounded-lg bg-background border border-border">
-                              <span className="text-[10px] uppercase font-bold text-muted-foreground block">Section Source</span>
+                              <span className="text-[10px] uppercase font-bold text-muted-foreground block">
+                                Section Source
+                              </span>
                               <span className="font-semibold text-foreground capitalize">
                                 {String(block.config?.source || "newest")}
                               </span>
                             </div>
                             <div className="p-2.5 rounded-lg bg-background border border-border">
-                              <span className="text-[10px] uppercase font-bold text-muted-foreground block">Display Layout</span>
+                              <span className="text-[10px] uppercase font-bold text-muted-foreground block">
+                                Display Layout
+                              </span>
                               <span className="font-semibold text-foreground capitalize">
-                                {String(block.config?.layout || "featured-grid")}
+                                {String(
+                                  block.config?.layout || "featured-grid",
+                                )}
                               </span>
                             </div>
                             <div className="p-2.5 rounded-lg bg-background border border-border truncate">
-                              <span className="text-[10px] uppercase font-bold text-muted-foreground block">Target Link</span>
+                              <span className="text-[10px] uppercase font-bold text-muted-foreground block">
+                                Target Link
+                              </span>
                               <span className="font-semibold text-blue-500 truncate block">
-                                {String(block.config?.seeAllLink || "/products")}
+                                {String(
+                                  block.config?.seeAllLink || "/products",
+                                )}
                               </span>
                             </div>
                           </div>
@@ -1121,7 +1225,8 @@ export default function AdminHomepageBuilderPage() {
                             size="sm"
                             className="text-xs flex items-center gap-1.5"
                           >
-                            <Settings className="h-3.5 w-3.5" /> Configure Section
+                            <Settings className="h-3.5 w-3.5" /> Configure
+                            Section
                           </Button>
                         </div>
                       </div>
@@ -1241,7 +1346,7 @@ export default function AdminHomepageBuilderPage() {
                 </div>
               </div>
 
-{/* Action Buttons */}
+              {/* Action Buttons */}
               <div className="flex items-center justify-end gap-2 pt-4 border-t border-border mt-6">
                 <Button
                   type="button"
@@ -1296,7 +1401,10 @@ export default function AdminHomepageBuilderPage() {
             </div>
 
             {/* Form Content */}
-            <form onSubmit={handleSaveConfig} className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+            <form
+              onSubmit={handleSaveConfig}
+              className="p-5 space-y-4 max-h-[75vh] overflow-y-auto"
+            >
               {editingBlock?.type === "product-carousel" ? (
                 <div className="space-y-4">
                   {/* Product Source Selector */}
@@ -1309,17 +1417,24 @@ export default function AdminHomepageBuilderPage() {
                       onChange={(e) => {
                         const val = e.target.value;
                         setProductSource(val);
-                        if (val === "on-sale") setProductSeeAll("/products?filter=on-sale");
-                        else if (val === "newest") setProductSeeAll("/products?sortBy=newest");
-                        else if (val === "limited-stock") setProductSeeAll("/products?filter=low-stock");
+                        if (val === "on-sale")
+                          setProductSeeAll("/products?filter=on-sale");
+                        else if (val === "newest")
+                          setProductSeeAll("/products?sortBy=newest");
+                        else if (val === "limited-stock")
+                          setProductSeeAll("/products?filter=low-stock");
                       }}
                       className="w-full text-xs p-2.5 rounded-lg border border-input bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                     >
                       <option value="newest">✨ New Arrivals (newest)</option>
                       <option value="on-sale">🏷️ On Sale (on-sale)</option>
-                      <option value="category">📁 Category Spotlight (category)</option>
+                      <option value="category">
+                        📁 Category Spotlight (category)
+                      </option>
                       <option value="brand">⚡ Brand Showcase (brand)</option>
-                      <option value="limited-stock">⏳ Limited Stock / Low Stock (limited-stock)</option>
+                      <option value="limited-stock">
+                        ⏳ Limited Stock / Low Stock (limited-stock)
+                      </option>
                     </select>
                   </div>
 
@@ -1384,8 +1499,12 @@ export default function AdminHomepageBuilderPage() {
                         onChange={(e) => setProductLayout(e.target.value)}
                         className="w-full text-xs p-2.5 rounded-lg border border-input bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                       >
-                        <option value="featured-grid">Grid Layout (featured-grid)</option>
-                        <option value="carousel">Horizontal Slider (carousel)</option>
+                        <option value="featured-grid">
+                          Grid Layout (featured-grid)
+                        </option>
+                        <option value="carousel">
+                          Horizontal Slider (carousel)
+                        </option>
                       </select>
                     </div>
 
@@ -1398,7 +1517,9 @@ export default function AdminHomepageBuilderPage() {
                         min={1}
                         max={24}
                         value={productLimit}
-                        onChange={(e) => setProductLimit(Number(e.target.value) || 8)}
+                        onChange={(e) =>
+                          setProductLimit(Number(e.target.value) || 8)
+                        }
                       />
                     </div>
                   </div>
@@ -1414,14 +1535,27 @@ export default function AdminHomepageBuilderPage() {
                       className="w-full text-xs p-2.5 rounded-lg border border-input bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                     >
                       <option value="">⚡ Auto-generated Link (Default)</option>
-                      <option value="/products">🛍️ All Products Page (/products)</option>
-                      <option value="/products?sortBy=newest">✨ New Arrivals Page (/products?sortBy=newest)</option>
-                      <option value="/products?filter=on-sale">🏷️ On Sale Products (/products?filter=on-sale)</option>
-                      <option value="/products?filter=low-stock">⏳ Limited Stock Deals (/products?filter=low-stock)</option>
-                      <option value="/deals">🔥 Special Deals Page (/deals)</option>
+                      <option value="/products">
+                        🛍️ All Products Page (/products)
+                      </option>
+                      <option value="/products?sortBy=newest">
+                        ✨ New Arrivals Page (/products?sortBy=newest)
+                      </option>
+                      <option value="/products?filter=on-sale">
+                        🏷️ On Sale Products (/products?filter=on-sale)
+                      </option>
+                      <option value="/products?filter=low-stock">
+                        ⏳ Limited Stock Deals (/products?filter=low-stock)
+                      </option>
+                      <option value="/deals">
+                        🔥 Special Deals Page (/deals)
+                      </option>
                       <optgroup label="Categories">
                         {availableCategories.map((c) => (
-                          <option key={c.id} value={`/products?category=${c.slug}`}>
+                          <option
+                            key={c.id}
+                            value={`/products?category=${c.slug}`}
+                          >
                             📁 {c.name} (/products?category={c.slug})
                           </option>
                         ))}
@@ -1436,10 +1570,215 @@ export default function AdminHomepageBuilderPage() {
                     </select>
                   </div>
                 </div>
+              ) : editingBlock?.type === "category-grid" ? (
+                <div className="space-y-4">
+                  <div className="bg-blue-500/10 border border-blue-500/20 p-3 rounded-lg text-xs text-blue-400 font-medium">
+                    Customize the 4 slots and overall background image for the Browse by Collection section!
+                  </div>
+
+                  {/* Section-Wide Background Image Input */}
+                  <div className="space-y-1.5 bg-muted/40 p-3 rounded-lg border border-border">
+                    <label className="text-xs font-semibold text-foreground block">
+                      🖼️ Section Background Image URL (Whole Backdrop)
+                    </label>
+                    <Input
+                      type="text"
+                      placeholder="https://images.unsplash.com/photo-... (Paste custom background URL)"
+                      value={categoryGridBgImage}
+                      onChange={(e) => setCategoryGridBgImage(e.target.value)}
+                    />
+                    <span className="text-[10px] text-muted-foreground block">
+                      Optional: Set a custom high-resolution background image for the entire Browse by Collection section.
+                    </span>
+                  </div>
+
+                  {/* Slot Tabs */}
+                  <div className="flex border-b border-border gap-1 overflow-x-auto pb-1">
+                    {[
+                      { name: "Slot 1 (Hero)", idx: 0 },
+                      { name: "Slot 2 (Left)", idx: 1 },
+                      { name: "Slot 3 (Right)", idx: 2 },
+                      { name: "Slot 4 (Spotlight)", idx: 3 },
+                    ].map((tab) => (
+                      <button
+                        key={tab.idx}
+                        type="button"
+                        onClick={() => setActiveSlotIdx(tab.idx)}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-t-lg transition-colors whitespace-nowrap cursor-pointer ${
+                          activeSlotIdx === tab.idx
+                            ? "bg-blue-600 text-white"
+                            : "text-muted-foreground hover:text-foreground bg-muted/40"
+                        }`}
+                      >
+                        {tab.name}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Form for Active Slot */}
+                  {bentoSlots[activeSlotIdx] && (
+                    <div className="space-y-3 pt-1">
+                      {/* Category Dropdown */}
+                      <div className="space-y-1">
+                        <label className="text-xs font-semibold text-foreground/80 block">
+                          Category Destination
+                        </label>
+                        <select
+                          value={bentoSlots[activeSlotIdx].slug}
+                          onChange={(e) => {
+                            const selectedSlug = e.target.value;
+                            setBentoSlots((prev) =>
+                              prev.map((s, i) =>
+                                i === activeSlotIdx ? { ...s, slug: selectedSlug } : s,
+                              ),
+                            );
+                          }}
+                          className="w-full text-xs p-2 rounded-lg border border-input bg-background text-foreground"
+                        >
+                          {availableCategories.map((c) => (
+                            <option key={c.id} value={c.slug}>
+                              📁 {c.name} ({c.slug})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Media Format Toggle: Image vs Video */}
+                      <div className="space-y-1">
+                        <label className="text-xs font-semibold text-foreground/80 block">
+                          Media Format
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setBentoSlots((prev) =>
+                                prev.map((s, i) =>
+                                  i === activeSlotIdx ? { ...s, mediaType: "image" } : s,
+                                ),
+                              )
+                            }
+                            className={`p-2 text-xs font-bold rounded-lg border flex items-center justify-center gap-1.5 cursor-pointer ${
+                              bentoSlots[activeSlotIdx].mediaType === "image"
+                                ? "bg-blue-600 text-white border-blue-600"
+                                : "border-input text-muted-foreground bg-background hover:bg-muted"
+                            }`}
+                          >
+                            📷 Static Image
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setBentoSlots((prev) =>
+                                prev.map((s, i) =>
+                                  i === activeSlotIdx ? { ...s, mediaType: "video" } : s,
+                                ),
+                              )
+                            }
+                            className={`p-2 text-xs font-bold rounded-lg border flex items-center justify-center gap-1.5 cursor-pointer ${
+                              bentoSlots[activeSlotIdx].mediaType === "video"
+                                ? "bg-purple-600 text-white border-purple-600"
+                                : "border-input text-muted-foreground bg-background hover:bg-muted"
+                            }`}
+                          >
+                            🎥 Looping Video (.mp4)
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Media URL Input */}
+                      <div className="space-y-1">
+                        <label className="text-xs font-semibold text-foreground/80 block">
+                          {bentoSlots[activeSlotIdx].mediaType === "video"
+                            ? "Video Loop MP4 Direct URL"
+                            : "Image URL (Unsplash or PocketBase)"}
+                        </label>
+                        <Input
+                          type="text"
+                          placeholder={
+                            bentoSlots[activeSlotIdx].mediaType === "video"
+                              ? "https://example.com/ambient-loop.mp4"
+                              : "https://images.unsplash.com/photo-..."
+                          }
+                          value={bentoSlots[activeSlotIdx].mediaUrl}
+                          onChange={(e) => {
+                            const url = e.target.value;
+                            setBentoSlots((prev) =>
+                              prev.map((s, i) =>
+                                i === activeSlotIdx ? { ...s, mediaUrl: url } : s,
+                              ),
+                            );
+                          }}
+                        />
+                      </div>
+
+                      {/* Custom Title Override */}
+                      <div className="space-y-1">
+                        <label className="text-xs font-semibold text-foreground/80 block">
+                          Custom Title (Optional)
+                        </label>
+                        <Input
+                          type="text"
+                          placeholder="e.g. Next-Gen Gaming Laptops"
+                          value={bentoSlots[activeSlotIdx].title}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setBentoSlots((prev) =>
+                              prev.map((s, i) =>
+                                i === activeSlotIdx ? { ...s, title: val } : s,
+                              ),
+                            );
+                          }}
+                        />
+                      </div>
+
+                      {/* Custom Subtitle / Description */}
+                      <div className="space-y-1">
+                        <label className="text-xs font-semibold text-foreground/80 block">
+                          Tagline / Subtitle (Optional)
+                        </label>
+                        <Input
+                          type="text"
+                          placeholder="e.g. Ultra-fast performance workstations"
+                          value={bentoSlots[activeSlotIdx].description}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setBentoSlots((prev) =>
+                              prev.map((s, i) =>
+                                i === activeSlotIdx ? { ...s, description: val } : s,
+                              ),
+                            );
+                          }}
+                        />
+                      </div>
+
+                      {/* Custom Badge Label */}
+                      <div className="space-y-1">
+                        <label className="text-xs font-semibold text-foreground/80 block">
+                          Badge Label (Optional)
+                        </label>
+                        <Input
+                          type="text"
+                          placeholder="e.g. LAPTOPS, HOT DEAL"
+                          value={bentoSlots[activeSlotIdx].label}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setBentoSlots((prev) =>
+                              prev.map((s, i) =>
+                                i === activeSlotIdx ? { ...s, label: val } : s,
+                              ),
+                            );
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div className="space-y-3">
                   <p className="text-xs text-muted-foreground bg-muted/40 p-3 rounded-lg border border-border">
-                    This block type ({editingBlock?.type}) works out-of-the-box with active system settings.
+                    This block type ({editingBlock?.type}) works out-of-the-box
+                    with active system settings.
                   </p>
                 </div>
               )}
