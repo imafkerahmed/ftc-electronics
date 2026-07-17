@@ -199,20 +199,6 @@ export default function ReviewCarousel() {
       <div
         className="w-full py-4 sm:py-6 lg:py-8 border-b border-neutral-200/50 dark:border-white/5 bg-[#f4f4f6] dark:bg-[#09090e]/60 relative overflow-hidden text-neutral-900 dark:text-white select-none transition-colors"
       >
-        <style
-          dangerouslySetInnerHTML={{
-            __html: `
-          @keyframes marquee {
-            0% { transform: translateX(0); }
-            100% { transform: translateX(-50%); }
-          }
-          .animate-marquee {
-            animation: marquee 35s linear infinite;
-          }
-        `,
-          }}
-        />
-
         {/* Decorative ambient background */}
         <div className="absolute top-1/2 left-1/4 -translate-y-1/2 w-48 h-48 rounded-full bg-blue-500/5 dark:bg-blue-500/5 pointer-events-none" />
         <div className="absolute top-1/3 right-1/4 -translate-y-1/2 w-56 h-56 rounded-full bg-indigo-500/5 dark:bg-indigo-500/5 pointer-events-none" />
@@ -246,7 +232,7 @@ export default function ReviewCarousel() {
 
             <div className="overflow-hidden w-full pb-2 pt-1">
               <motion.div
-                className="flex w-max gap-3.5 sm:gap-4 animate-marquee hover:[animation-play-state:paused] will-change-transform [transform:translateZ(0)]"
+                className="flex w-max gap-3.5 sm:gap-4 animate-marquee-loop hover:[animation-play-state:paused] will-change-transform transform-gpu"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.5, delay: 0.15 }}

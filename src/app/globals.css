@@ -67,6 +67,14 @@
       transform: translateX(calc(-100% - var(--gap)));
     }
   }
+  @keyframes marquee-loop {
+    0% {
+      transform: translate3d(0, 0, 0);
+    }
+    100% {
+      transform: translate3d(-50%, 0, 0);
+    }
+  }
   @keyframes marquee-vertical {
     from {
       transform: translateY(0);
@@ -131,6 +139,10 @@
       transform: rotate(360deg);
     }
   }
+}
+
+.animate-marquee-loop {
+  animation: marquee-loop 35s linear infinite;
 }
 
 :root {

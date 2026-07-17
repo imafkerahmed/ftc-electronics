@@ -8,7 +8,6 @@ import {
   Keyboard,
   Headphones,
 } from "lucide-react";
-import { motion } from "motion/react";
 
 interface CategoryCard {
   label: string;
@@ -31,7 +30,7 @@ const defaultCategories: CategoryCard[] = [
     count: "48+ Products",
     icon: (
       <Laptop
-        className="w-16 h-16 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-blue-400 drop-shadow-[0_0_25px_rgba(59,130,246,0.35)]"
+        className="w-16 h-16 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-blue-400"
         strokeWidth={1.0}
       />
     ),
@@ -47,7 +46,7 @@ const defaultCategories: CategoryCard[] = [
     count: "24+ Products",
     icon: (
       <Keyboard
-        className="w-12 h-12 sm:w-20 lg:w-24 sm:h-20 lg:h-24 text-purple-400 drop-shadow-[0_0_15px_rgba(168,85,247,0.3)]"
+        className="w-12 h-12 sm:w-20 lg:w-24 sm:h-20 lg:h-24 text-purple-400"
         strokeWidth={1.1}
       />
     ),
@@ -63,7 +62,7 @@ const defaultCategories: CategoryCard[] = [
     count: "36+ Products",
     icon: (
       <Headphones
-        className="w-12 h-12 sm:w-20 lg:w-24 sm:h-20 lg:h-24 text-rose-400 drop-shadow-[0_0_15px_rgba(244,63,94,0.3)]"
+        className="w-12 h-12 sm:w-20 lg:w-24 sm:h-20 lg:h-24 text-rose-400"
         strokeWidth={1.1}
       />
     ),
@@ -79,7 +78,7 @@ const defaultCategories: CategoryCard[] = [
     count: "60+ Products",
     icon: (
       <Smartphone
-        className="w-20 h-20 sm:w-32 lg:w-44 sm:h-32 lg:h-44 text-emerald-400 drop-shadow-[0_0_30px_rgba(16,185,129,0.4)]"
+        className="w-20 h-20 sm:w-32 lg:w-44 sm:h-32 lg:h-44 text-emerald-400"
         strokeWidth={1.0}
       />
     ),
@@ -194,28 +193,14 @@ export default function CategoryBentoGrid({
             >
               <div className="absolute top-0 right-0 h-full w-[45%] overflow-hidden flex items-center justify-center pointer-events-none select-none">
                 <div
-                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 sm:w-36 sm:h-36 rounded-full blur-[30px] pointer-events-none group-hover:scale-125 transition-transform duration-700"
+                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-28 h-28 sm:w-40 sm:h-40 rounded-full pointer-events-none group-hover:scale-125 transition-transform duration-500 opacity-60"
                   style={{
                     background: `radial-gradient(circle, ${laptops.glowColor} 0%, transparent 70%)`,
                   }}
                 />
-                <motion.div
-                  variants={{
-                    initial: { scale: 0.85, opacity: 0.9 },
-                    hover: {
-                      scale: 1.1,
-                      y: -4,
-                      transition: {
-                        type: "spring",
-                        stiffness: 260,
-                        damping: 16,
-                      },
-                    },
-                  }}
-                  className="flex items-center justify-center pr-4 sm:pr-8"
-                >
+                <div className="flex items-center justify-center pr-4 sm:pr-8 group-hover:scale-110 group-hover:-translate-y-1 transition-transform duration-300 transform-gpu">
                   {laptops.icon}
-                </motion.div>
+                </div>
               </div>
             </IconBentoCard>
 
@@ -227,26 +212,14 @@ export default function CategoryBentoGrid({
               >
                 <div className="absolute right-4 bottom-4 select-none pointer-events-none">
                   <div
-                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 sm:w-28 sm:h-28 rounded-full blur-[25px] pointer-events-none group-hover:scale-125 transition-transform duration-700"
+                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 sm:w-32 sm:h-32 rounded-full pointer-events-none group-hover:scale-125 transition-transform duration-500 opacity-60"
                     style={{
                       background: `radial-gradient(circle, ${keyboards.glowColor} 0%, transparent 70%)`,
                     }}
                   />
-                  <motion.div
-                    variants={{
-                      initial: { scale: 0.85, opacity: 0.9 },
-                      hover: {
-                        scale: 1.12,
-                        transition: {
-                          type: "spring",
-                          stiffness: 260,
-                          damping: 16,
-                        },
-                      },
-                    }}
-                  >
+                  <div className="group-hover:scale-110 transition-transform duration-300 transform-gpu">
                     {keyboards.icon}
-                  </motion.div>
+                  </div>
                 </div>
               </IconBentoCard>
 
@@ -256,26 +229,14 @@ export default function CategoryBentoGrid({
               >
                 <div className="absolute right-4 bottom-4 select-none pointer-events-none">
                   <div
-                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 sm:w-28 sm:h-28 rounded-full blur-[25px] pointer-events-none group-hover:scale-125 transition-transform duration-700"
+                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 sm:w-32 sm:h-32 rounded-full pointer-events-none group-hover:scale-125 transition-transform duration-500 opacity-60"
                     style={{
                       background: `radial-gradient(circle, ${audio.glowColor} 0%, transparent 70%)`,
                     }}
                   />
-                  <motion.div
-                    variants={{
-                      initial: { scale: 0.85, opacity: 0.9 },
-                      hover: {
-                        scale: [1, 1.1, 1],
-                        transition: {
-                          duration: 0.85,
-                          repeat: Infinity,
-                          repeatType: "reverse",
-                        },
-                      },
-                    }}
-                  >
+                  <div className="group-hover:scale-110 transition-transform duration-300 transform-gpu">
                     {audio.icon}
-                  </motion.div>
+                  </div>
                 </div>
               </IconBentoCard>
             </div>
@@ -290,29 +251,14 @@ export default function CategoryBentoGrid({
             >
               <div className="absolute inset-0 flex items-center justify-center lg:pb-16 pointer-events-none select-none overflow-hidden">
                 <div
-                  className="absolute w-32 h-32 sm:w-48 sm:h-48 rounded-full blur-[40px] pointer-events-none group-hover:scale-130 transition-transform duration-700"
+                  className="absolute w-36 h-36 sm:w-52 sm:h-52 rounded-full pointer-events-none group-hover:scale-125 transition-transform duration-500 opacity-65"
                   style={{
                     background: `radial-gradient(circle, ${phones.glowColor} 0%, transparent 70%)`,
                   }}
                 />
-                <motion.div
-                  variants={{
-                    initial: { scale: 0.9, opacity: 0.95 },
-                    hover: {
-                      scale: 1.12,
-                      rotate: -3,
-                      y: -6,
-                      transition: {
-                        type: "spring",
-                        stiffness: 260,
-                        damping: 16,
-                      },
-                    },
-                  }}
-                  className="flex items-center justify-center relative z-10"
-                >
+                <div className="flex items-center justify-center relative z-10 group-hover:scale-110 group-hover:-rotate-3 group-hover:-translate-y-1.5 transition-transform duration-300 transform-gpu">
                   {phones.icon}
-                </motion.div>
+                </div>
               </div>
             </IconBentoCard>
           </div>
@@ -336,22 +282,17 @@ function IconBentoCard({
   tall?: boolean;
 }) {
   return (
-    <motion.div
-      initial="initial"
-      animate="animate"
-      whileHover="hover"
-      className="w-full"
-    >
+    <div className="w-full">
       <Link
         href={card.href}
-        className={`group relative w-full flex flex-col justify-between overflow-hidden rounded-2xl border border-white/10 bg-slate-900/80 p-4 sm:p-6 backdrop-blur-md shadow-md hover:border-blue-400/40 hover:shadow-xl transition-all duration-300 ${heightClass}`}
+        className={`group relative w-full flex flex-col justify-between overflow-hidden rounded-2xl border border-white/10 bg-slate-900/90 p-4 sm:p-6 shadow-md hover:border-blue-400/40 hover:shadow-xl transition-all duration-300 ${heightClass}`}
       >
         {/* Subtle inner hover glow */}
-        <div className="absolute inset-0 bg-gradient-to-br from-blue-500/[0.04] via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-500/[0.04] via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
 
         {/* Top Row: Tag Badge & Product Count */}
         <div className="relative z-10 flex items-center justify-between gap-2">
-          <span className={`px-2.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border backdrop-blur-md ${card.tagColor}`}>
+          <span className={`px-2.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border ${card.tagColor}`}>
             {card.label}
           </span>
           <span className="text-[10px] font-bold text-neutral-300 px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10">
@@ -380,6 +321,6 @@ function IconBentoCard({
           </div>
         </div>
       </Link>
-    </motion.div>
+    </div>
   );
 }

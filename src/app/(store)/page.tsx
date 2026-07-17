@@ -284,15 +284,11 @@ export default async function StoreHomePage() {
                 )}
 
                 {block.type === "category-grid" && (
-                  <LazyScrollSection heightClass="min-h-[450px]">
-                    <CategoryBentoGrid categories={allCategories} config={block.config} />
-                  </LazyScrollSection>
+                  <CategoryBentoGrid categories={allCategories} config={block.config} />
                 )}
 
                 {block.type === "reviews-carousel" && (
-                  <LazyScrollSection heightClass="min-h-[220px]">
-                    <ReviewCarousel />
-                  </LazyScrollSection>
+                  <ReviewCarousel />
                 )}
 
                 {block.type === "text-content" && (
