@@ -22,7 +22,7 @@ export default function TabbedProductShowcase({
 }: TabbedProductShowcaseProps) {
   const [activeTab, setActiveTab] = useState<TabId>("sale");
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  
+
   // Navigation button states
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(true);
@@ -36,9 +36,11 @@ export default function TabbedProductShowcase({
       seeAllLink: "/products?filter=on-sale",
       themeColor: "red" as const,
       accentClass: "text-red-500 dark:text-red-400",
-      glowBg: "bg-[radial-gradient(circle_at_30%_30%,rgba(239,68,68,0.06),transparent_50%)] dark:bg-[radial-gradient(circle_at_30%_30%,rgba(239,68,68,0.11),transparent_50%)]",
+      glowBg:
+        "bg-[radial-gradient(circle_at_30%_30%,rgba(239,68,68,0.06),transparent_50%)] dark:bg-[radial-gradient(circle_at_30%_30%,rgba(239,68,68,0.11),transparent_50%)]",
       badgeText: "Limited Stocks",
-      badgeColor: "border-red-500/20 bg-red-500/5 text-red-600 dark:border-red-500/35 dark:bg-red-500/10 dark:text-red-400",
+      badgeColor:
+        "border-red-500/20 bg-red-500/5 text-red-600 dark:border-red-500/35 dark:bg-red-500/10 dark:text-red-400",
     },
     {
       id: "new" as const,
@@ -47,9 +49,11 @@ export default function TabbedProductShowcase({
       seeAllLink: "/products?sortBy=newest",
       themeColor: "purple" as const,
       accentClass: "text-violet-500 dark:text-violet-400",
-      glowBg: "bg-[radial-gradient(circle_at_50%_30%,rgba(139,92,246,0.06),transparent_50%)] dark:bg-[radial-gradient(circle_at_50%_30%,rgba(139,92,246,0.11),transparent_50%)]",
+      glowBg:
+        "bg-[radial-gradient(circle_at_50%_30%,rgba(139,92,246,0.06),transparent_50%)] dark:bg-[radial-gradient(circle_at_50%_30%,rgba(139,92,246,0.11),transparent_50%)]",
       badgeText: "New Releases",
-      badgeColor: "border-violet-500/20 bg-violet-500/5 text-violet-600 dark:border-violet-500/35 dark:bg-violet-500/10 dark:text-violet-400",
+      badgeColor:
+        "border-violet-500/20 bg-violet-500/5 text-violet-600 dark:border-violet-500/35 dark:bg-violet-500/10 dark:text-violet-400",
     },
     {
       id: "air" as const,
@@ -58,9 +62,11 @@ export default function TabbedProductShowcase({
       seeAllLink: "/products?category=air-purifiers",
       themeColor: "teal" as const,
       accentClass: "text-teal-500 dark:text-teal-400",
-      glowBg: "bg-[radial-gradient(circle_at_70%_30%,rgba(20,184,166,0.06),transparent_50%)] dark:bg-[radial-gradient(circle_at_70%_30%,rgba(20,184,166,0.11),transparent_50%)]",
+      glowBg:
+        "bg-[radial-gradient(circle_at_70%_30%,rgba(20,184,166,0.06),transparent_50%)] dark:bg-[radial-gradient(circle_at_70%_30%,rgba(20,184,166,0.11),transparent_50%)]",
       badgeText: "Smart Climate",
-      badgeColor: "border-teal-500/20 bg-teal-500/5 text-teal-600 dark:border-teal-500/35 dark:bg-teal-500/10 dark:text-teal-400",
+      badgeColor:
+        "border-teal-500/20 bg-teal-500/5 text-teal-600 dark:border-teal-500/35 dark:bg-teal-500/10 dark:text-teal-400",
     },
   ];
 
@@ -69,7 +75,8 @@ export default function TabbedProductShowcase({
   // Check scroll positions of the active container
   const checkScroll = () => {
     if (scrollContainerRef.current) {
-      const { scrollLeft, scrollWidth, clientWidth } = scrollContainerRef.current;
+      const { scrollLeft, scrollWidth, clientWidth } =
+        scrollContainerRef.current;
       setCanScrollLeft(scrollLeft > 5);
       setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 5);
     }
@@ -114,15 +121,14 @@ export default function TabbedProductShowcase({
 
   return (
     <div className="w-full py-12 sm:py-16 border-b border-border bg-background relative overflow-hidden z-10">
-      
       {/* Aurora glow shifting background based on active tab */}
-      <div className={`absolute inset-0 pointer-events-none transition-all duration-1000 -z-10 ${currentTab.glowBg}`} />
+      <div
+        className={`absolute inset-0 pointer-events-none transition-all duration-1000 -z-10 ${currentTab.glowBg}`}
+      />
 
       <div className="max-w-7xl mx-auto px-6 sm:px-12 lg:px-16 flex flex-col gap-8">
-        
         {/* Unified Tab Bar Header */}
         <div className="w-full flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-neutral-100 dark:border-neutral-800/60 pb-4">
-          
           {/* Large Header Tabs on the Left */}
           <div className="flex flex-wrap items-end gap-x-6 sm:gap-x-10 gap-y-4">
             {tabs.map((tab) => {
@@ -154,7 +160,11 @@ export default function TabbedProductShowcase({
                             ? "bg-violet-500"
                             : "bg-teal-500"
                       }`}
-                      transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                      transition={{
+                        type: "spring",
+                        stiffness: 380,
+                        damping: 30,
+                      }}
                     />
                   )}
                 </button>
@@ -164,9 +174,10 @@ export default function TabbedProductShowcase({
 
           {/* Controls Side (See All & Scroll buttons) */}
           <div className="flex items-center justify-between md:justify-end gap-6 shrink-0">
-            
             {/* Contextual Badge */}
-            <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full border hidden sm:inline-block ${currentTab.badgeColor}`}>
+            <span
+              className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full border hidden sm:inline-block ${currentTab.badgeColor}`}
+            >
               {currentTab.badgeText}
             </span>
 
@@ -200,7 +211,7 @@ export default function TabbedProductShowcase({
                 >
                   <ChevronLeft className="h-5 w-5" />
                 </button>
-                
+
                 <button
                   onClick={() => handleScroll("right")}
                   disabled={!canScrollRight}
@@ -221,7 +232,6 @@ export default function TabbedProductShowcase({
                 </button>
               </div>
             </div>
-
           </div>
         </div>
 
@@ -251,7 +261,6 @@ export default function TabbedProductShowcase({
             </motion.div>
           </AnimatePresence>
         </div>
-
       </div>
     </div>
   );

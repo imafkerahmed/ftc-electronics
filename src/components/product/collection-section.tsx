@@ -14,6 +14,8 @@ interface CollectionSectionProps {
   seeAllLink?: string;
   layout: "carousel" | "grid" | "flash-sale" | "featured-grid";
   products: Product[];
+  rows?: number;
+  limit?: number;
 }
 
 export default function CollectionSection({
@@ -21,10 +23,14 @@ export default function CollectionSection({
   seeAllLink = "/products",
   layout,
   products,
+  rows,
+  limit,
 }: CollectionSectionProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isInView = useInView(containerRef, { once: true, amount: 0.1 });
+
+  const displayLimit = rows ? rows * 5 : (limit || 5);
 
   // Navigation button states
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -263,13 +269,13 @@ export default function CollectionSection({
         ) : (
           /* Premium Editorial Header for Featured Grid */
           <motion.div
-            className="w-full relative pb-8 mb-2"
+            className="w-full relative pb-4 mb-2"
             initial={{ opacity: 0, y: -12 }}
             animate={isInView ? { opacity: 1, y: 0 } : {}}
             transition={{ duration: 0.5, delay: 0.1 }}
           >
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-current/8 pb-7 relative z-10">
-              <div className="flex flex-col gap-3">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-current/8 pb-5 relative z-10">
+              <div className="flex flex-col gap-2">
                 {/* Title */}
                 <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight uppercase leading-none">
                   {renderTitle(title)}
@@ -319,7 +325,7 @@ export default function CollectionSection({
               transition={{ duration: 0.6, delay: 0.2 }}
             >
               {/* Grid of Product Cards */}
-              {products.slice(0, 5).map((product, idx) => (
+              {products.slice(0, displayLimit).map((product, idx) => (
                 <CollectionProductCard
                   key={product.id || idx}
                   product={product}

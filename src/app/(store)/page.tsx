@@ -257,6 +257,8 @@ export default async function StoreHomePage() {
                       layout={block.config?.layout || "featured-grid"}
                       products={products}
                       seeAllLink={seeAllLink}
+                      rows={block.config?.rows}
+                      limit={block.config?.limit}
                     />
                   </LazyScrollSection>
                 )}
