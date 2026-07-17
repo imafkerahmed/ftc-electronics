@@ -34,6 +34,8 @@ export interface PBProduct extends PBRecord {
   seoDescription?: string;
   status: "draft" | "published";
   tags?: string[];
+  bannerImage?: string;
+  bannerText?: string;
   // Expanded relations (populated by PocketBase expand)
   expand?: {
     category?: PBCategory;
@@ -526,6 +528,10 @@ export function pbProductToProduct(record: PBProduct, pbUrl: string): Product {
     createdAt: record.created,
     badges: record.badges || [],
     status: record.status || "draft",
+    bannerImage: record.bannerImage
+      ? `${pbUrl}/api/files/${record.collectionId}/${record.id}/${record.bannerImage}`
+      : undefined,
+    bannerText: record.bannerText || undefined,
   };
 }
 

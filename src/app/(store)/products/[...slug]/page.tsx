@@ -12,6 +12,7 @@ import { formatPrice } from '@/lib/utils';
 import { ProductJsonLd, BreadcrumbJsonLd } from '@/components/seo/json-ld';
 import StickyBuyBar from '@/components/product/sticky-buy-bar';
 import RecentlyViewed from '@/components/product/recently-viewed';
+import ProductFeatureBanner from '@/components/product/product-feature-banner';
 
 interface PageProps {
   params: Promise<{ slug: string[] }>;
@@ -154,18 +155,18 @@ export default async function DynamicProductOrCategoryPage({ params, searchParam
           </nav>
 
           {/* Main Product Section */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-start">
             {/* Gallery */}
-            <div className="md:col-span-1 lg:col-span-6 xl:col-span-7">
-              <div className="lg:sticky lg:top-24">
+            <div className="lg:col-span-6 xl:col-span-6 flex justify-center">
+              <div className="w-full lg:sticky lg:top-24">
                 <ProductGallery images={product.images} name={product.name} />
               </div>
             </div>
 
             {/* Product Meta */}
-            <div className="flex flex-col space-y-6 md:col-span-1 lg:col-span-6 xl:col-span-5">
+            <div className="flex flex-col space-y-5 lg:col-span-6 xl:col-span-6 max-w-lg">
               <div>
-                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight text-foreground leading-tight">
+                <h1 className="text-xl sm:text-2xl lg:text-3xl font-extrabold tracking-tight text-foreground leading-tight">
                   {product.name}
                 </h1>
 
@@ -277,6 +278,13 @@ export default async function DynamicProductOrCategoryPage({ params, searchParam
               </div>
             </div>
           </div>
+
+          <ProductFeatureBanner 
+            bannerImage={product.bannerImage} 
+            bannerText={product.bannerText} 
+            productName={product.name} 
+            brandName={product.brand} 
+          />
 
           <ProductTabs description={product.description} specs={product.specs} currency={currency} />
 

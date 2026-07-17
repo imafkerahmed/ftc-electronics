@@ -202,7 +202,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto relative z-10">
+      <main id="admin-main" className="flex-1 overflow-y-auto relative z-10">
         {/* Top bar */}
         <header className="h-14 border-b border-border bg-card/40 backdrop-blur-md flex items-center px-6 gap-4 sticky top-0 z-20">
           <div className="flex-1" />

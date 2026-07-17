@@ -32,6 +32,8 @@ export interface Product {
   createdAt: string;
   badges?: string[];
   status?: 'draft' | 'published';
+  bannerImage?: string;
+  bannerText?: string;
 }
 
 export interface Category {
