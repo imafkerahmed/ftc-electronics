@@ -221,15 +221,6 @@ export default async function DynamicProductOrCategoryPage({ params, searchParam
                       </span>
                     )}
                   </div>
-
-                  <div className="text-[11px] text-muted-foreground flex flex-wrap items-center gap-1.5 font-medium border border-border/60 bg-card/45 px-3 py-2 rounded-xl max-w-fit shadow-xs">
-                    <span>or 3 interest-free payments of</span>
-                    <span className="font-bold text-foreground">{formattedInstalment}</span>
-                    <span>with</span>
-                    <span className="font-bold text-[#F3E8FF] bg-[#2B0F54] text-[8px] uppercase tracking-wider px-1.5 py-0.5 rounded-md">Koko</span>
-                    <span>/</span>
-                    <span className="font-bold text-[#0A252E] bg-[#00D4B2] text-[8px] uppercase tracking-wider px-1.5 py-0.5 rounded-md">Mintpay</span>
-                  </div>
                 </div>
               </div>
 

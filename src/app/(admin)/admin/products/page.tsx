@@ -4,7 +4,8 @@ import React, { useState, useEffect, useTransition } from 'react';
 import Image from 'next/image';
 import { 
   Package, Plus, Search, Filter, ArrowUpDown, Edit, Trash2, Eye, 
-  X, CheckCircle, AlertCircle, Save, Loader2, DollarSign, Image as ImageIcon, FileText, Sparkles
+  X, CheckCircle, AlertCircle, Save, Loader2, DollarSign, Image as ImageIcon, FileText, Sparkles,
+  ChevronUp, ChevronDown
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -328,7 +329,7 @@ export default function AdminProductsPage() {
       if (discountPrice) formData.append('discountPrice', discountPrice);
       formData.append('category', category); // category ID
       formData.append('brand', brand);       // brand ID
-      formData.append('countInStock', countInStock);
+      formData.append('countInStock', countInStock || '0');
       formData.append('description', finalDescription);
       formData.append('status', status);
       formData.append('isFeatured', isFeatured.toString());
@@ -339,7 +340,22 @@ export default function AdminProductsPage() {
       const badgesArray = badgesText.split(',').map(b => b.trim()).filter(Boolean);
       formData.append('badges', JSON.stringify(badgesArray));
       formData.append('specs', JSON.stringify(parsedSpecs));
-      if (bannerImage) formData.append('bannerImage', bannerImage);
+      if (bannerImage) {
+        if (bannerImage.startsWith('data:')) {
+          const arr = bannerImage.split(',');
+          const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/png';
+          const bstr = atob(arr[1]);
+          let n = bstr.length;
+          const u8arr = new Uint8Array(n);
+          while (n--) {
+            u8arr[n] = bstr.charCodeAt(n);
+          }
+          const bannerFile = new File([u8arr], `banner_${Date.now()}.${mime.split('/')[1] || 'png'}`, { type: mime });
+          formData.append('bannerImage', bannerFile);
+        } else {
+          formData.append('bannerImage', bannerImage);
+        }
+      }
       if (bannerText) formData.append('bannerText', bannerText);
       
       // Append files
@@ -642,7 +658,7 @@ export default function AdminProductsPage() {
                 }`}
               >
                 <DollarSign className="h-3.5 w-3.5" />
-                Pricing & Inventory
+                Pricing
               </button>
               <button
                 type="button"
@@ -797,22 +813,16 @@ export default function AdminProductsPage() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-foreground/80 tracking-wide block">Base Currency</label>
-                        <select
-                          value={currency}
-                          onChange={(e) => setCurrency(e.target.value as any)}
-                          className="w-full h-10 px-3 py-2 rounded-lg border border-input bg-background text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                        >
-                          <option value="USD">USD ($)</option>
-                          <option value="LKR">LKR (Rs.)</option>
-                        </select>
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-foreground/80 tracking-wide block">Inventory Stock *</label>
-                        <Input type="number" value={countInStock} onChange={(e) => setCountInStock(e.target.value)} required />
-                      </div>
+                    <div className="space-y-1.5 max-w-xs">
+                      <label className="text-xs font-semibold text-foreground/80 tracking-wide block">Base Currency</label>
+                      <select
+                        value={currency}
+                        onChange={(e) => setCurrency(e.target.value as any)}
+                        className="w-full h-10 px-3 py-2 rounded-lg border border-input bg-background text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      >
+                        <option value="USD">USD ($)</option>
+                        <option value="LKR">LKR (Rs.)</option>
+                      </select>
                     </div>
 
                     {/* Live Price Summary Badge */}
@@ -935,15 +945,75 @@ export default function AdminProductsPage() {
                         <p className="text-[11px] text-muted-foreground">Display a custom hero promotional banner on the Product Detail Page</p>
                       </div>
 
-                      <div className="space-y-2 p-4 rounded-xl border border-border bg-card/40">
+                      <div className="space-y-3 p-4 rounded-xl border border-border bg-card/40">
                         <div className="space-y-1.5">
-                          <label className="text-[11px] font-semibold text-foreground/80 block">Banner Image URL</label>
-                          <Input 
-                            value={bannerImage} 
-                            onChange={(e) => setBannerImage(e.target.value)} 
-                            placeholder="https://images.unsplash.com/... or image link" 
-                            className="bg-background text-xs"
-                          />
+                          <label className="text-[11px] font-semibold text-foreground/80 block">Banner Image</label>
+                          {bannerImage ? (
+                            <div className="flex items-center gap-3 p-2 rounded-lg border border-border bg-background">
+                              <div className="relative h-16 w-28 rounded-md bg-neutral-950 overflow-hidden shrink-0 border border-border">
+                                <img src={bannerImage} alt="Banner Preview" className="w-full h-full object-cover" />
+                              </div>
+                              <div className="flex-1 space-y-1">
+                                <Input 
+                                  value={bannerImage} 
+                                  onChange={(e) => setBannerImage(e.target.value)} 
+                                  placeholder="Image URL or Data URI" 
+                                  className="bg-background text-xs h-7"
+                                />
+                                <div className="flex items-center gap-2">
+                                  <label className="text-[10px] text-blue-600 hover:underline cursor-pointer font-semibold flex items-center gap-1">
+                                    <ImageIcon className="h-3 w-3" /> Change Image
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      className="hidden"
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) {
+                                          const reader = new FileReader();
+                                          reader.onload = (ev) => {
+                                            setBannerImage(ev.target?.result as string);
+                                          };
+                                          reader.readAsDataURL(file);
+                                        }
+                                      }}
+                                    />
+                                  </label>
+                                  <span className="text-muted-foreground/40">•</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setBannerImage('')}
+                                    className="text-[10px] text-red-500 hover:underline cursor-pointer font-semibold"
+                                  >
+                                    Remove Banner Image
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="relative border-2 border-dashed border-border hover:border-blue-500/60 transition-colors rounded-xl p-4 bg-background/50 flex flex-col items-center justify-center text-center cursor-pointer group">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    const reader = new FileReader();
+                                    reader.onload = (ev) => {
+                                      setBannerImage(ev.target?.result as string);
+                                    };
+                                    reader.readAsDataURL(file);
+                                  }
+                                }}
+                              />
+                              <div className="h-8 w-8 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-1 group-hover:scale-110 transition-transform">
+                                <ImageIcon className="h-4 w-4" />
+                              </div>
+                              <p className="text-xs font-semibold text-foreground">Click to browse or drop banner image</p>
+                              <p className="text-[10px] text-muted-foreground">High resolution landscape photo recommended</p>
+                            </div>
+                          )}
                         </div>
                         <div className="space-y-1.5">
                           <label className="text-[11px] font-semibold text-foreground/80 block">Banner Headline / Tagline</label>
@@ -1055,14 +1125,49 @@ export default function AdminProductsPage() {
                                     {block.type === 'image' && 'Inline Feature Image'}
                                     {block.type === 'list' && 'Bullet Points'}
                                   </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => setDescBlocks(descBlocks.filter((_, i) => i !== idx))}
-                                    className="text-muted-foreground hover:text-red-500 p-1 rounded transition-colors cursor-pointer"
-                                    title="Delete Block"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      disabled={idx === 0}
+                                      onClick={() => {
+                                        if (idx <= 0) return;
+                                        const updated = [...descBlocks];
+                                        const temp = updated[idx];
+                                        updated[idx] = updated[idx - 1];
+                                        updated[idx - 1] = temp;
+                                        setDescBlocks(updated);
+                                      }}
+                                      className="text-muted-foreground hover:text-foreground disabled:opacity-20 p-1 rounded transition-colors cursor-pointer disabled:cursor-not-allowed"
+                                      title="Move Up"
+                                    >
+                                      <ChevronUp className="h-3.5 w-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={idx === descBlocks.length - 1}
+                                      onClick={() => {
+                                        if (idx >= descBlocks.length - 1) return;
+                                        const updated = [...descBlocks];
+                                        const temp = updated[idx];
+                                        updated[idx] = updated[idx + 1];
+                                        updated[idx + 1] = temp;
+                                        setDescBlocks(updated);
+                                      }}
+                                      className="text-muted-foreground hover:text-foreground disabled:opacity-20 p-1 rounded transition-colors cursor-pointer disabled:cursor-not-allowed"
+                                      title="Move Down"
+                                    >
+                                      <ChevronDown className="h-3.5 w-3.5" />
+                                    </button>
+                                    <div className="h-3 w-[1px] bg-border mx-0.5" />
+                                    <button
+                                      type="button"
+                                      onClick={() => setDescBlocks(descBlocks.filter((_, i) => i !== idx))}
+                                      className="text-muted-foreground hover:text-red-500 p-1 rounded transition-colors cursor-pointer"
+                                      title="Delete Block"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
                                 </div>
 
                                 {block.type === 'title' && (
@@ -1106,32 +1211,89 @@ export default function AdminProductsPage() {
                                 )}
 
                                 {block.type === 'image' && (
-                                  <div className="space-y-2">
-                                    <div className="grid grid-cols-2 gap-2">
-                                      <Input
-                                        value={block.content}
-                                        onChange={(e) => {
-                                          const updated = [...descBlocks];
-                                          updated[idx].content = e.target.value;
-                                          setDescBlocks(updated);
-                                        }}
-                                        placeholder="Image URL (e.g. https://...)"
-                                        className="text-xs bg-background"
-                                      />
-                                      <Input
-                                        value={block.caption || ''}
-                                        onChange={(e) => {
-                                          const updated = [...descBlocks];
-                                          updated[idx].caption = e.target.value;
-                                          setDescBlocks(updated);
-                                        }}
-                                        placeholder="Caption text (optional)"
-                                        className="text-xs bg-background"
-                                      />
-                                    </div>
-                                    {block.content && (
-                                      <div className="relative h-24 w-full max-w-xs rounded-lg border border-border bg-neutral-950 overflow-hidden p-1">
-                                        <img src={block.content} alt="Preview" className="w-full h-full object-contain rounded" />
+                                  <div className="space-y-3">
+                                    {block.content ? (
+                                      /* Preview of Selected/Uploaded Image */
+                                      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center p-3 rounded-xl border border-border bg-card/60">
+                                        <div className="relative h-28 w-28 sm:h-24 sm:w-24 rounded-lg border border-border bg-neutral-950 overflow-hidden shrink-0">
+                                          <img src={block.content} alt="Block Preview" className="w-full h-full object-contain p-1" />
+                                        </div>
+                                        <div className="flex-1 space-y-2 w-full">
+                                          <Input
+                                            value={block.caption || ''}
+                                            onChange={(e) => {
+                                              const updated = [...descBlocks];
+                                              updated[idx].caption = e.target.value;
+                                              setDescBlocks(updated);
+                                            }}
+                                            placeholder="Photo caption / label (optional)"
+                                            className="text-xs bg-background"
+                                          />
+                                          <div className="flex items-center gap-2">
+                                            <label className="text-[11px] text-blue-600 hover:underline cursor-pointer font-semibold flex items-center gap-1">
+                                              <ImageIcon className="h-3 w-3" /> Change Photo
+                                              <input
+                                                type="file"
+                                                accept="image/*"
+                                                className="hidden"
+                                                onChange={(e) => {
+                                                  const file = e.target.files?.[0];
+                                                  if (file) {
+                                                    const reader = new FileReader();
+                                                    reader.onload = (ev) => {
+                                                      const updated = [...descBlocks];
+                                                      updated[idx].content = ev.target?.result as string;
+                                                      setDescBlocks(updated);
+                                                    };
+                                                    reader.readAsDataURL(file);
+                                                  }
+                                                }}
+                                              />
+                                            </label>
+                                            <span className="text-muted-foreground/40">•</span>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                const updated = [...descBlocks];
+                                                updated[idx].content = '';
+                                                setDescBlocks(updated);
+                                              }}
+                                              className="text-[11px] text-red-500 hover:underline cursor-pointer font-semibold"
+                                            >
+                                              Remove Photo
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      /* Styled File Dropzone / Picker */
+                                      <div className="relative border-2 border-dashed border-border hover:border-purple-500/60 transition-colors rounded-xl p-5 bg-card/30 flex flex-col items-center justify-center text-center group cursor-pointer">
+                                        <input
+                                          type="file"
+                                          accept="image/*"
+                                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                          onChange={(e) => {
+                                            const file = e.target.files?.[0];
+                                            if (file) {
+                                              const reader = new FileReader();
+                                              reader.onload = (ev) => {
+                                                const updated = [...descBlocks];
+                                                updated[idx].content = ev.target?.result as string;
+                                                setDescBlocks(updated);
+                                              };
+                                              reader.readAsDataURL(file);
+                                            }
+                                          }}
+                                        />
+                                        <div className="h-9 w-9 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center mb-1.5 group-hover:scale-110 transition-transform">
+                                          <ImageIcon className="h-4 w-4" />
+                                        </div>
+                                        <p className="text-xs font-semibold text-foreground">
+                                          Click to browse or drop an image file
+                                        </p>
+                                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                                          PNG, JPG, WEBP or GIF format
+                                        </p>
                                       </div>
                                     )}
                                   </div>

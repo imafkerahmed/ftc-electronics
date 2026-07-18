@@ -78,8 +78,10 @@ async function syncCollection(name, targetFields, rules) {
         (f) => f.name === tf.name,
       );
       if (existingFieldIdx >= 0) {
+        const isTypeChanged = customFields[existingFieldIdx].type !== tf.type;
+        const baseField = isTypeChanged ? { name: tf.name } : customFields[existingFieldIdx];
         customFields[existingFieldIdx] = {
-          ...customFields[existingFieldIdx],
+          ...baseField,
           ...tf,
           required: tf.required === true,
         };
@@ -231,7 +233,7 @@ async function run() {
     [
       { name: "name", type: "text", required: true },
       { name: "slug", type: "text", required: true },
-      { name: "description", type: "text" },
+      { name: "description", type: "text", max: 500000 },
       {
         name: "images",
         type: "file",
@@ -244,7 +246,7 @@ async function run() {
       { name: "specs", type: "json" },
       { name: "rating", type: "number" },
       { name: "numReviews", type: "number" },
-      { name: "countInStock", type: "number", required: true },
+      { name: "countInStock", type: "number", required: false, min: 0 },
       { name: "isFeatured", type: "bool" },
       { name: "isPreOrder", type: "bool" },
       {
@@ -263,6 +265,14 @@ async function run() {
         maxSelect: 1,
       },
       { name: "tags", type: "json" },
+      {
+        name: "bannerImage",
+        type: "file",
+        required: false,
+        maxSelect: 1,
+        maxSize: 10485760,
+      },
+      { name: "bannerText", type: "text" },
     ],
     {
       ...catRules,
@@ -418,6 +428,50 @@ async function run() {
     },
   );
 
+  const stockPurchasesRecord = await syncCollection(
+    "stock_purchases",
+    [
+      { name: "batchNumber", type: "text", required: true },
+      { name: "quantity", type: "number", required: true },
+      { name: "unitCost", type: "number" },
+      { name: "supplier", type: "text" },
+      { name: "purchaseDate", type: "text" },
+      { name: "notes", type: "text" },
+    ],
+    {
+      listRule: "",
+      viewRule: "",
+      createRule: '@request.auth.id != "" && @request.auth.role = "admin"',
+      updateRule: '@request.auth.id != "" && @request.auth.role = "admin"',
+      deleteRule: '@request.auth.id != "" && @request.auth.role = "admin"',
+    },
+  );
+
+  const stockManagementRecord = await syncCollection(
+    "stock_management",
+    [
+      { name: "barcode", type: "text", required: true },
+      { name: "serialNumber", type: "text" },
+      {
+        name: "status",
+        type: "select",
+        values: ["available", "reserved", "sold", "defective", "returned"],
+        maxSelect: 1,
+      },
+      { name: "batchNumber", type: "text" },
+      { name: "orderId", type: "text" },
+      { name: "notes", type: "text" },
+    ],
+    {
+      indexes: ["CREATE UNIQUE INDEX idx_barcode_stock ON stock_management (barcode)"],
+      listRule: "",
+      viewRule: "",
+      createRule: '@request.auth.id != "" && @request.auth.role = "admin"',
+      updateRule: '@request.auth.id != "" && @request.auth.role = "admin"',
+      deleteRule: '@request.auth.id != "" && @request.auth.role = "admin"',
+    },
+  );
+
   const auditLogRecord = await syncCollection(
     "audit_log",
     [
@@ -556,6 +610,36 @@ async function run() {
     });
     await pb.collections.update(reviewsId, revObj);
     console.log("🔗 Injected reviews.product relation.");
+  }
+
+  // Update stock_purchases (inject product relation)
+  const stockPurchasesId = getColId("stock_purchases");
+  const stockPurchasesObj = allCollections.find((c) => c.name === "stock_purchases");
+  if (stockPurchasesObj && !stockPurchasesObj.fields.some((f) => f.name === "product")) {
+    stockPurchasesObj.fields.push({
+      name: "product",
+      type: "relation",
+      required: true,
+      collectionId: productsId,
+      maxSelect: 1,
+    });
+    await pb.collections.update(stockPurchasesId, stockPurchasesObj);
+    console.log("🔗 Injected stock_purchases.product relation.");
+  }
+
+  // Update stock_management (inject product relation)
+  const stockManagementId = getColId("stock_management");
+  const stockManagementObj = allCollections.find((c) => c.name === "stock_management");
+  if (stockManagementObj && !stockManagementObj.fields.some((f) => f.name === "product")) {
+    stockManagementObj.fields.push({
+      name: "product",
+      type: "relation",
+      required: true,
+      collectionId: productsId,
+      maxSelect: 1,
+    });
+    await pb.collections.update(stockManagementId, stockManagementObj);
+    console.log("🔗 Injected stock_management.product relation.");
   }
 
   console.log("🎉 PocketBase Schema Setup Complete!");

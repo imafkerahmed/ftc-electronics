@@ -529,7 +529,9 @@ export function pbProductToProduct(record: PBProduct, pbUrl: string): Product {
     badges: record.badges || [],
     status: record.status || "draft",
     bannerImage: record.bannerImage
-      ? `${pbUrl}/api/files/${record.collectionId}/${record.id}/${record.bannerImage}`
+      ? (record.bannerImage.startsWith('http://') || record.bannerImage.startsWith('https://') || record.bannerImage.startsWith('data:')
+          ? record.bannerImage
+          : `${pbUrl}/api/files/${record.collectionId}/${record.id}/${record.bannerImage}`)
       : undefined,
     bannerText: record.bannerText || undefined,
   };

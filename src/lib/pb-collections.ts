@@ -14,6 +14,7 @@ import PocketBase, { type RecordListOptions } from "pocketbase";
 import { pb } from "./pocketbase";
 import { getAdminPb, getPbUrl } from "./pb-admin";
 import type {
+  PBRecord,
   PBProduct,
   PBCategory,
   PBBrand,
@@ -895,6 +896,104 @@ export const pbAuditLog = {
       };
     } catch (err) {
       handleError(err, "pbAuditLog.getAll");
+    }
+  },
+};
+
+// ─── Stock Purchases ─────────────────────────────────────────────────────────
+
+export interface PBStockPurchase extends PBRecord {
+  product: string;
+  batchNumber: string;
+  quantity: number;
+  unitCost?: number;
+  supplier?: string;
+  purchaseDate?: string;
+  notes?: string;
+}
+
+export const pbStockPurchases = {
+  async getByProduct(productId: string): Promise<PBStockPurchase[]> {
+    try {
+      const adminPb = await getAdminPb();
+      const result = await adminPb.collection("stock_purchases").getFullList<PBStockPurchase>({
+        filter: `product = "${productId}"`,
+        sort: "-created",
+      });
+      return result;
+    } catch (err) {
+      handleError(err, "pbStockPurchases.getByProduct");
+    }
+  },
+
+  async create(data: Record<string, unknown>): Promise<PBStockPurchase> {
+    try {
+      const adminPb = await getAdminPb();
+      const record = await adminPb.collection("stock_purchases").create<PBStockPurchase>(data);
+      return record;
+    } catch (err) {
+      handleError(err, "pbStockPurchases.create");
+    }
+  },
+};
+
+// ─── Stock Management Units ────────────────────────────────────────────────────
+
+export interface PBStockManagementUnit extends PBRecord {
+  product: string;
+  barcode: string;
+  serialNumber?: string;
+  status: "available" | "reserved" | "sold" | "defective" | "returned";
+  batchNumber?: string;
+  orderId?: string;
+  notes?: string;
+}
+
+export const pbStockManagement = {
+  async getByProduct(productId: string): Promise<PBStockManagementUnit[]> {
+    try {
+      const adminPb = await getAdminPb();
+      const result = await adminPb.collection("stock_management").getFullList<PBStockManagementUnit>({
+        filter: `product = "${productId}"`,
+        sort: "-created",
+      });
+      return result;
+    } catch (err) {
+      handleError(err, "pbStockManagement.getByProduct");
+    }
+  },
+
+  async getByBarcode(barcode: string): Promise<PBStockManagementUnit | null> {
+    try {
+      const adminPb = await getAdminPb();
+      const result = await adminPb.collection("stock_management").getFirstListItem<PBStockManagementUnit>(
+        `barcode = "${barcode}"`
+      );
+      return result;
+    } catch (err) {
+      const pbErr = err as { status?: number };
+      if (pbErr?.status === 404) return null;
+      handleError(err, "pbStockManagement.getByBarcode");
+    }
+  },
+
+  async createUnit(data: Record<string, unknown>): Promise<PBStockManagementUnit> {
+    try {
+      const adminPb = await getAdminPb();
+      const record = await adminPb.collection("stock_management").create<PBStockManagementUnit>(data);
+      return record;
+    } catch (err) {
+      handleError(err, "pbStockManagement.createUnit");
+    }
+  },
+
+  async updateUnit(id: string, data: Record<string, unknown>): Promise<PBStockManagementUnit> {
+    try {
+      const adminPb = await getAdminPb();
+      const record = await adminPb.collection("stock_management").update<PBStockManagementUnit>(id, data);
+      return record;
+    } catch (err) {
+      handleError(err, "pbStockManagement.updateUnit");
     }
   },
 };

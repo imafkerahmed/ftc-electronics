@@ -7,9 +7,11 @@ import { useCart } from '@/hooks/use-cart';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
+import { processCheckoutOrderAction } from '@/app/actions/checkout';
+
 export default function PaymentForm() {
   const router = useRouter();
-  const { total, clearCart } = useCart();
+  const { items, total, clearCart } = useCart();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     cardName: '',
@@ -27,16 +29,22 @@ export default function PaymentForm() {
     e.preventDefault();
     setLoading(true);
 
-    // Simulate payment transaction delay
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const cartInput = items.map((i) => ({
+      productId: i.product.id,
+      name: i.product.name,
+      price: i.product.discountPrice || i.product.price,
+      quantity: i.quantity,
+    }));
 
-    console.log('[Checkout] Processing payment for amount:', total);
+    await processCheckoutOrderAction({
+      customerName: formData.cardName || 'Customer',
+      customerEmail: 'customer@ftc.lk',
+      shippingAddress: 'Colombo, Sri Lanka',
+      items: cartInput,
+    });
+
     setLoading(false);
-    
-    // Clear shopping cart state after successful purchase
     clearCart();
-    
-    // Redirect to confirmation success page
     router.push('/checkout/confirmation?success=true');
   };
 

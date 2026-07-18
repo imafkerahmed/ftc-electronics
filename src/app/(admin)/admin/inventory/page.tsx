@@ -12,6 +12,8 @@ import { Button } from '@/components/ui/button';
 export default function AdminInventoryPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'in_stock' | 'low_stock' | 'out_of_stock'>('all');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -20,7 +22,7 @@ export default function AdminInventoryPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const res = await pbProducts.getAll({ perPage: 100 });
+      const res = await pbProducts.getAll({ perPage: 200 });
       setProducts(res.items || []);
     } catch (err: any) {
       console.error('Failed to load inventory products:', err);
@@ -35,12 +37,12 @@ export default function AdminInventoryPage() {
 
   const getStockStatus = (count: number) => {
     if (count === 0) {
-      return { label: 'Out of Stock', color: 'bg-red-500/10 text-red-500 border-red-500/20' };
+      return { key: 'out_of_stock', label: 'Out of Stock', color: 'bg-red-500/10 text-red-500 border-red-500/20' };
     }
     if (count <= 10) {
-      return { label: 'Low Stock', color: 'bg-amber-500/10 text-amber-500 border-amber-500/20' };
+      return { key: 'low_stock', label: 'Low Stock', color: 'bg-amber-500/10 text-amber-500 border-amber-500/20' };
     }
-    return { label: 'In Stock', color: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' };
+    return { key: 'in_stock', label: 'In Stock', color: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' };
   };
 
   const handleRestock = (id: string, currentStock: number) => {
@@ -59,6 +61,18 @@ export default function AdminInventoryPage() {
     });
   };
 
+  const filteredProducts = products.filter((product) => {
+    const matchesSearch =
+      product.name.toLowerCase().includes(search.toLowerCase()) ||
+      product.category.toLowerCase().includes(search.toLowerCase()) ||
+      product.brand.toLowerCase().includes(search.toLowerCase());
+
+    const status = getStockStatus(product.countInStock);
+    const matchesStatus = statusFilter === 'all' || status.key === statusFilter;
+
+    return matchesSearch && matchesStatus;
+  });
+
   return (
     <div className="space-y-6 text-foreground">
       {/* Feedback Alerts */}
@@ -75,11 +89,11 @@ export default function AdminInventoryPage() {
         </div>
       )}
 
-      {/* Title / Action headers */}
+      {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap border-b border-border pb-5">
         <div>
-          <h1 className="text-2xl font-bold tracking-wide">Product Inventory</h1>
-          <p className="text-xs text-muted-foreground mt-1">Add, update, or restock item collections.</p>
+          <h1 className="text-2xl font-bold tracking-wide">Stock Management</h1>
+          <p className="text-xs text-muted-foreground mt-1">Monitor product stock counts and manage inventory levels.</p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -94,85 +108,110 @@ export default function AdminInventoryPage() {
         </div>
       </div>
 
-      {/* Products Inventory Table */}
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
+      {/* Search & Filter Bar */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="relative flex-1 max-w-sm">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by product name, category, or brand..."
+            className="w-full h-9 pl-9 pr-3 rounded-lg border border-input bg-background text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          />
+          <span className="absolute left-3 top-2.5 text-muted-foreground text-xs">🔍</span>
+        </div>
+
+        <div className="flex items-center gap-1 bg-card/60 p-1 rounded-lg border border-border">
+          {(['all', 'in_stock', 'low_stock', 'out_of_stock'] as const).map((filter) => (
+            <button
+              key={filter}
+              onClick={() => setStatusFilter(filter)}
+              className={`px-3 py-1 text-[11px] font-semibold rounded-md transition-colors cursor-pointer capitalize ${
+                statusFilter === filter
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {filter.replace(/_/g, ' ')}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Products Stock Table */}
+      <div className="bg-card border border-border rounded-xl overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
           {loading ? (
             <div className="p-8 text-center text-xs text-muted-foreground">
               <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-blue-500" />
-              Loading inventory levels...
+              Loading stock data...
             </div>
           ) : (
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-secondary/40 border-b border-border text-muted-foreground uppercase tracking-wider font-semibold">
-                  <th className="p-4">SKU / ID</th>
-                  <th className="p-4">Product Name</th>
+                  <th className="p-4">Product</th>
                   <th className="p-4">Category</th>
+                  <th className="p-4">Brand</th>
                   <th className="p-4">Price</th>
-                  <th className="p-4">Stock Level</th>
+                  <th className="p-4 font-bold text-blue-600 dark:text-blue-400">Stock Count</th>
                   <th className="p-4">Status</th>
                   <th className="p-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border text-foreground">
-                {products.length === 0 ? (
+                {filteredProducts.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="p-8 text-center text-xs text-muted-foreground">
-                      No inventory items found.
+                      No matching products found.
                     </td>
                   </tr>
                 ) : (
-                  products.map((product) => {
+                  filteredProducts.map((product) => {
                     const status = getStockStatus(product.countInStock);
                     return (
-                      <tr key={product.id} className="hover:bg-muted/10 transition-colors">
-                        <td className="p-4 font-mono text-[10px] text-muted-foreground">{product.id}</td>
+                      <tr 
+                        key={product.id} 
+                        onClick={() => router.push(`/admin/inventory/${product.id}`)}
+                        className="hover:bg-muted/20 transition-colors cursor-pointer group"
+                      >
                         <td className="p-4 font-bold text-foreground">
                           <div className="flex items-center gap-3">
-                            <div className="h-8 w-8 rounded bg-muted border border-border relative overflow-hidden shrink-0">
+                            <div className="h-10 w-10 rounded-lg bg-muted border border-border relative overflow-hidden shrink-0">
                               <Image
                                 src={product.images[0]}
                                 alt={product.name}
                                 fill
                                 className="object-cover"
-                                sizes="32px"
+                                sizes="40px"
                               />
                             </div>
-                            <span>{product.name}</span>
+                            <div>
+                              <p className="font-semibold text-foreground leading-tight group-hover:text-blue-500 transition-colors">{product.name}</p>
+                              <p className="text-muted-foreground font-mono text-[10px] mt-0.5">{product.id}</p>
+                            </div>
                           </div>
                         </td>
                         <td className="p-4 text-muted-foreground capitalize">{product.category}</td>
+                        <td className="p-4 text-muted-foreground capitalize">{product.brand}</td>
                         <td className="p-4 font-bold text-foreground">
-                          {product.price.toLocaleString('en-US', { style: 'currency', currency: 'LKR' })}
+                          {product.price.toLocaleString('en-US', { style: 'currency', currency: product.currency || 'LKR' })}
                         </td>
-                        <td className="p-4 font-semibold">{product.countInStock} units</td>
+                        <td className="p-4 font-extrabold text-sm text-foreground">
+                          {product.countInStock} <span className="text-[10px] text-muted-foreground font-normal">units</span>
+                        </td>
                         <td className="p-4">
                           <span className={`px-2.5 py-1 rounded border text-[10px] uppercase font-bold tracking-wider ${status.color}`}>
                             {status.label}
                           </span>
                         </td>
-                        <td className="p-4 text-right space-x-2">
+                        <td className="p-4 text-right space-x-2" onClick={(e) => e.stopPropagation()}>
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => handleRestock(product.id, product.countInStock)}
+                            onClick={() => router.push(`/admin/inventory/${product.id}`)}
                             className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted border border-border"
-                            title="Restock 20 units"
-                            disabled={isPending}
-                          >
-                            {isPending ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              <RotateCw className="h-3.5 w-3.5" />
-                            )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => router.push('/admin/products')}
-                            className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted border border-border"
-                            title="Edit Item"
+                            title="Manage Stock & QR Code"
                           >
                             <Edit3 className="h-3.5 w-3.5" />
                           </Button>

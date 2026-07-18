@@ -14,6 +14,8 @@ const RECENTLY_VIEWED_KEY = 'ftc_recently_viewed';
 export default function RecentlyViewed({ currentProduct }: RecentlyViewedProps) {
   const [recentProducts, setRecentProducts] = useState<Product[]>([]);
 
+  const productId = currentProduct?.id;
+
   useEffect(() => {
     try {
       // 1. Load existing items from localStorage
@@ -30,8 +32,8 @@ export default function RecentlyViewed({ currentProduct }: RecentlyViewedProps) 
       }
 
       // Filter out current product from display list
-      const filtered = currentProduct
-        ? items.filter((p) => p.id !== currentProduct.id).slice(0, 4)
+      const filtered = productId
+        ? items.filter((p) => p.id !== productId).slice(0, 4)
         : items.slice(0, 4);
 
       React.startTransition(() => {
@@ -40,7 +42,7 @@ export default function RecentlyViewed({ currentProduct }: RecentlyViewedProps) 
     } catch (e) {
       console.error('Failed to update recently viewed items', e);
     }
-  }, [currentProduct]);
+  }, [currentProduct, productId]);
 
   if (recentProducts.length === 0) return null;
 

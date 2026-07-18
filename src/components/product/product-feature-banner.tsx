@@ -27,6 +27,7 @@ export default function ProductFeatureBanner({
             src={bannerImage}
             alt={`${productName} Feature Banner`}
             fill
+            sizes="(max-width: 1280px) 100vw, 1280px"
             className="object-cover object-center group-hover:scale-105 transition-transform duration-700 opacity-80"
             priority={false}
           />

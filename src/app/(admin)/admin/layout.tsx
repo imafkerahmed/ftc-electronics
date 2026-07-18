@@ -44,6 +44,7 @@ const NAV_ITEMS: NavItem[] = [
       { name: 'Brands', href: '/admin/brands' },
     ],
   },
+  { name: 'Stock Management', href: '/admin/inventory', icon: Boxes },
   { name: 'Orders', href: '/admin/orders', icon: ShoppingCart },
   { name: 'Customers', href: '/admin/customers', icon: Users },
   { name: 'Reviews', href: '/admin/reviews', icon: Star },
