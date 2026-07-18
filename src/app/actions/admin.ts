@@ -5,6 +5,9 @@ import { revalidatePath } from 'next/cache';
 import { getAdminPb, writeAuditLog } from '@/lib/pb-admin';
 import { ROLE_PERMISSIONS } from '@/types/admin';
 import type { AdminRole, AuditAction } from '@/types/admin';
+import type { BarcodePrintConfig } from '@/types/barcode-config';
+import type { ReceiptPrintConfig } from '@/types/receipt-config';
+import type { InvoicePrintConfig } from '@/types/invoice-config';
 import {
   pbProducts,
   pbCategories,
@@ -1110,3 +1113,288 @@ export async function updateOrderStatusAction(id: string, status: 'pending' | 'p
     return { success: false, error: err.message || 'Failed to update order status.' };
   }
 }
+
+// ─── System Configurations (Barcode Print Presets) ────────────────────────────
+// BarcodePrintConfig is imported at the top of the file from @/types/barcode-config.
+// Do NOT re-export anything non-async from a 'use server' file.
+
+export async function getBarcodePrintPresetsAction() {
+  const check = await checkPermission('systemConfig', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
+
+  try {
+    const adminPb = await getAdminPb();
+    const records = await adminPb.collection('system_configurations').getFullList({
+      filter: 'category = "barcode_print"',
+      sort: '-isDefault',
+    });
+    return { success: true, data: JSON.parse(JSON.stringify(records)) };
+  } catch {
+    return { success: true, data: [] };
+  }
+}
+
+export async function saveBarcodePrintPresetAction(
+  config: BarcodePrintConfig,
+  existingId?: string
+) {
+  const check = await checkPermission('systemConfig', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const adminPb = await getAdminPb();
+    const payload = {
+      category: 'barcode_print',
+      label: config.label,
+      config: JSON.stringify(config),
+      isDefault: config.isDefault,
+    };
+
+    if (config.isDefault) {
+      const existing = await adminPb.collection('system_configurations').getFullList({
+        filter: 'category = "barcode_print" && isDefault = true',
+      });
+      for (const rec of existing) {
+        if (rec.id !== existingId) {
+          await adminPb.collection('system_configurations').update(rec.id, { isDefault: false });
+        }
+      }
+    }
+
+    let record;
+    if (existingId) {
+      record = await adminPb.collection('system_configurations').update(existingId, payload);
+    } else {
+      record = await adminPb.collection('system_configurations').create(payload);
+    }
+
+    revalidatePath('/admin/system-config');
+    return { success: true, data: JSON.parse(JSON.stringify(record)) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to save preset.' };
+  }
+}
+
+export async function deleteBarcodePrintPresetAction(id: string) {
+  const check = await checkPermission('systemConfig', 'delete');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const adminPb = await getAdminPb();
+    await adminPb.collection('system_configurations').delete(id);
+    revalidatePath('/admin/system-config');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to delete preset.' };
+  }
+}
+
+export async function setDefaultBarcodePrintPresetAction(id: string) {
+  const check = await checkPermission('systemConfig', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const adminPb = await getAdminPb();
+    const all = await adminPb.collection('system_configurations').getFullList({
+      filter: 'category = "barcode_print"',
+    });
+    for (const rec of all) {
+      await adminPb.collection('system_configurations').update(rec.id, {
+        isDefault: rec.id === id,
+      });
+    }
+    revalidatePath('/admin/system-config');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to set default.' };
+  }
+}
+
+// ─── System Configurations (Receipt Print Presets) ───────────────────────────
+
+export async function getReceiptPrintPresetsAction() {
+  const check = await checkPermission('systemConfig', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
+
+  try {
+    const adminPb = await getAdminPb();
+    const records = await adminPb.collection('system_configurations').getFullList({
+      filter: 'category = "receipt_print"',
+      sort: '-isDefault',
+    });
+    return { success: true, data: JSON.parse(JSON.stringify(records)) };
+  } catch {
+    return { success: true, data: [] };
+  }
+}
+
+export async function saveReceiptPrintPresetAction(
+  config: ReceiptPrintConfig,
+  existingId?: string
+) {
+  const check = await checkPermission('systemConfig', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const adminPb = await getAdminPb();
+    const payload = {
+      category: 'receipt_print',
+      label: config.label,
+      config: JSON.stringify(config),
+      isDefault: config.isDefault,
+    };
+
+    if (config.isDefault) {
+      const existing = await adminPb.collection('system_configurations').getFullList({
+        filter: 'category = "receipt_print" && isDefault = true',
+      });
+      for (const rec of existing) {
+        if (rec.id !== existingId) {
+          await adminPb.collection('system_configurations').update(rec.id, { isDefault: false });
+        }
+      }
+    }
+
+    let record;
+    if (existingId) {
+      record = await adminPb.collection('system_configurations').update(existingId, payload);
+    } else {
+      record = await adminPb.collection('system_configurations').create(payload);
+    }
+
+    revalidatePath('/admin/system-config');
+    return { success: true, data: JSON.parse(JSON.stringify(record)) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to save receipt preset.' };
+  }
+}
+
+export async function deleteReceiptPrintPresetAction(id: string) {
+  const check = await checkPermission('systemConfig', 'delete');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const adminPb = await getAdminPb();
+    await adminPb.collection('system_configurations').delete(id);
+    revalidatePath('/admin/system-config');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to delete receipt preset.' };
+  }
+}
+
+export async function setDefaultReceiptPrintPresetAction(id: string) {
+  const check = await checkPermission('systemConfig', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const adminPb = await getAdminPb();
+    const all = await adminPb.collection('system_configurations').getFullList({
+      filter: 'category = "receipt_print"',
+    });
+    for (const rec of all) {
+      await adminPb.collection('system_configurations').update(rec.id, {
+        isDefault: rec.id === id,
+      });
+    }
+    revalidatePath('/admin/system-config');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to set default receipt preset.' };
+  }
+}
+
+// ─── System Configurations (Sales Invoice & Quotation Presets) ─────────────────
+
+export async function getInvoicePrintPresetsAction() {
+  const check = await checkPermission('systemConfig', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
+
+  try {
+    const adminPb = await getAdminPb();
+    const records = await adminPb.collection('system_configurations').getFullList({
+      filter: 'category = "invoice_print"',
+      sort: '-isDefault',
+    });
+    return { success: true, data: JSON.parse(JSON.stringify(records)) };
+  } catch {
+    return { success: true, data: [] };
+  }
+}
+
+export async function saveInvoicePrintPresetAction(
+  config: InvoicePrintConfig,
+  existingId?: string
+) {
+  const check = await checkPermission('systemConfig', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const adminPb = await getAdminPb();
+    const payload = {
+      category: 'invoice_print',
+      label: config.label,
+      config: JSON.stringify(config),
+      isDefault: config.isDefault,
+    };
+
+    if (config.isDefault) {
+      const existing = await adminPb.collection('system_configurations').getFullList({
+        filter: 'category = "invoice_print" && isDefault = true',
+      });
+      for (const rec of existing) {
+        if (rec.id !== existingId) {
+          await adminPb.collection('system_configurations').update(rec.id, { isDefault: false });
+        }
+      }
+    }
+
+    let record;
+    if (existingId) {
+      record = await adminPb.collection('system_configurations').update(existingId, payload);
+    } else {
+      record = await adminPb.collection('system_configurations').create(payload);
+    }
+
+    revalidatePath('/admin/system-config');
+    return { success: true, data: JSON.parse(JSON.stringify(record)) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to save invoice preset.' };
+  }
+}
+
+export async function deleteInvoicePrintPresetAction(id: string) {
+  const check = await checkPermission('systemConfig', 'delete');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const adminPb = await getAdminPb();
+    await adminPb.collection('system_configurations').delete(id);
+    revalidatePath('/admin/system-config');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to delete invoice preset.' };
+  }
+}
+
+export async function setDefaultInvoicePrintPresetAction(id: string) {
+  const check = await checkPermission('systemConfig', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const adminPb = await getAdminPb();
+    const all = await adminPb.collection('system_configurations').getFullList({
+      filter: 'category = "invoice_print"',
+    });
+    for (const rec of all) {
+      await adminPb.collection('system_configurations').update(rec.id, {
+        isDefault: rec.id === id,
+      });
+    }
+    revalidatePath('/admin/system-config');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to set default invoice preset.' };
+  }
+}
+

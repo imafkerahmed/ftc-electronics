@@ -406,6 +406,7 @@ export interface AdminPermissions {
   promotions: { read: boolean; write: boolean; delete: boolean };
   media: { read: boolean; write: boolean; delete: boolean };
   auditLog: { read: boolean };
+  systemConfig: { read: boolean; write: boolean; delete: boolean };
 }
 
 export const ROLE_PERMISSIONS: Record<AdminRole, AdminPermissions> = {
@@ -421,6 +422,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, AdminPermissions> = {
     promotions: { read: true, write: true, delete: true },
     media: { read: true, write: true, delete: true },
     auditLog: { read: true },
+    systemConfig: { read: true, write: true, delete: true },
   },
   super_admin: {
     products: { read: true, write: true, delete: true },
@@ -434,6 +436,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, AdminPermissions> = {
     promotions: { read: true, write: true, delete: true },
     media: { read: true, write: true, delete: true },
     auditLog: { read: true },
+    systemConfig: { read: true, write: true, delete: true },
   },
   store_manager: {
     products: { read: true, write: true, delete: true },
@@ -447,6 +450,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, AdminPermissions> = {
     promotions: { read: true, write: true, delete: true },
     media: { read: true, write: true, delete: true },
     auditLog: { read: true },
+    systemConfig: { read: true, write: true, delete: false },
   },
   content_editor: {
     products: { read: true, write: true, delete: false },
@@ -460,6 +464,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, AdminPermissions> = {
     promotions: { read: true, write: false, delete: false },
     media: { read: true, write: true, delete: false },
     auditLog: { read: false },
+    systemConfig: { read: true, write: false, delete: false },
   },
   support_staff: {
     products: { read: true, write: false, delete: false },
@@ -473,6 +478,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, AdminPermissions> = {
     promotions: { read: true, write: false, delete: false },
     media: { read: true, write: false, delete: false },
     auditLog: { read: false },
+    systemConfig: { read: true, write: false, delete: false },
   },
   read_only: {
     products: { read: true, write: false, delete: false },
@@ -486,6 +492,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, AdminPermissions> = {
     promotions: { read: true, write: false, delete: false },
     media: { read: true, write: false, delete: false },
     auditLog: { read: true },
+    systemConfig: { read: true, write: false, delete: false },
   },
 };
 

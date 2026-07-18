@@ -3,8 +3,10 @@
 import React, { useState, useEffect, useTransition } from 'react';
 import { Button } from '@/components/ui/button';
 import { pbOrders } from '@/lib/pb-collections';
-import { updateOrderStatusAction } from '@/app/actions/admin';
-import { Loader2, CheckCircle, AlertCircle, ShoppingBag } from 'lucide-react';
+import { updateOrderStatusAction, getReceiptPrintPresetsAction } from '@/app/actions/admin';
+import { DEFAULT_RECEIPT_CONFIG, type ReceiptPrintConfig } from '@/types/receipt-config';
+import { printReceipt } from '@/lib/receipt-print';
+import { Loader2, CheckCircle, AlertCircle, ShoppingBag, Printer } from 'lucide-react';
 
 interface Order {
   id: string;
@@ -22,6 +24,20 @@ export default function AdminOrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [defaultReceiptConfig, setDefaultReceiptConfig] = useState<ReceiptPrintConfig>(DEFAULT_RECEIPT_CONFIG);
+
+  useEffect(() => {
+    async function loadReceiptPreset() {
+      const res = await getReceiptPrintPresetsAction();
+      if (res.success && res.data && res.data.length > 0) {
+        const def = (res.data as any[]).find((p) => p.isDefault) || res.data[0];
+        try {
+          setDefaultReceiptConfig({ ...DEFAULT_RECEIPT_CONFIG, ...JSON.parse(def.config) });
+        } catch {}
+      }
+    }
+    void loadReceiptPreset();
+  }, []);
 
   const loadData = async () => {
     try {
@@ -149,7 +165,32 @@ export default function AdminOrdersPage() {
                         </span>
                       </td>
                       <td className="p-4">{getShippingBadge(order.shippingStatus)}</td>
-                      <td className="p-4 text-right">
+                      <td className="p-4 text-right flex items-center justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            printReceipt(
+                              defaultReceiptConfig,
+                              {
+                                orderNumber: order.orderId,
+                                date: order.date,
+                                customerName: order.email,
+                                items: [
+                                  { name: `Order ${order.orderId}`, qty: 1, unitPrice: order.total }
+                                ],
+                                subtotal: order.total,
+                                total: order.total,
+                                paymentMethod: order.paymentStatus === 'paid' ? 'Paid' : 'Pending',
+                              },
+                              `Receipt \u2014 ${order.orderId}`
+                            )
+                          }
+                          className="h-8 text-[11px] font-semibold flex items-center gap-1 cursor-pointer border-border hover:bg-muted"
+                          title="Print thermal receipt"
+                        >
+                          <Printer className="h-3 w-3" /> Receipt
+                        </Button>
                         {order.shippingStatus === 'processing' && (
                           <Button
                             size="sm"

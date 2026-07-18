@@ -26,6 +26,8 @@ import {
 import { pbProducts, type PBStockPurchase, type PBStockManagementUnit } from '@/lib/pb-collections';
 import { pbProductToProduct } from '@/types/admin';
 import type { Product } from '@/types/product';
+import type { BarcodePrintConfig } from '@/types/barcode-config';
+import { printBarcodeLabels } from '@/lib/barcode-print';
 import {
   createStockPurchaseAction,
   generateBatchBarcodesAction,
@@ -35,6 +37,7 @@ import {
 } from '@/app/actions/admin';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import PrintSettingsModal from '@/components/admin/print-settings-modal';
 
 export default function ProductStockDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -62,7 +65,10 @@ export default function ProductStockDetailPage({ params }: { params: Promise<{ i
   const [unitCost, setUnitCost] = useState('');
   const [notes, setNotes] = useState('');
 
-  // Individual Stock Unit Form state
+  // Print settings
+  const [showPrintSettings, setShowPrintSettings] = useState(false);
+
+  // Individual Stock Unit Form state (kept for legacy; modal removed)
   const [showAddUnitModal, setShowAddUnitModal] = useState(false);
   const [unitBarcode, setUnitBarcode] = useState('');
   const [unitSerial, setUnitSerial] = useState('');
@@ -153,139 +159,7 @@ export default function ProductStockDetailPage({ params }: { params: Promise<{ i
   };
 
   const [unitCount, setUnitCount] = useState<string>('');
-
-  const handlePrintBarcodes = () => {
-    const availableUnits = stockUnits.filter((u) => u.status === 'available');
-    if (availableUnits.length === 0) {
-      setError('No available stock units to print. Add stocks first.');
-      return;
-    }
-
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
-    const currency = product?.currency === 'LKR' ? 'Rs.' : '$';
-    const productName = product?.name || 'Stock Item';
-
-    // Each label gets an <svg> with a unique id — JsBarcode will render into it
-    const labelsHtml = availableUnits.map((unit, i) => {
-      const svgId = `bc-${i}`;
-      return `
-        <div class="label">
-          <div class="product-name">${productName}</div>
-          <svg id="${svgId}" data-barcode="${unit.barcode}"></svg>
-          <div class="serial">SN: ${unit.serialNumber || '\u2014'}</div>
-          <div class="batch">Batch: ${unit.batchNumber || '\u2014'}</div>
-          <div class="price">${currency} ${(product?.price || 0).toLocaleString()}</div>
-        </div>
-      `;
-    }).join('');
-
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Print Barcodes \u2014 ${productName}</title>
-          <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>
-          <style>
-            @page { size: A4; margin: 10mm; }
-            * { box-sizing: border-box; margin: 0; padding: 0; }
-            body { font-family: system-ui, -apple-system, sans-serif; background: #fff; }
-            h1 { font-size: 12px; margin-bottom: 10px; color: #444; font-weight: 600; }
-            .grid { display: flex; flex-wrap: wrap; gap: 8px; }
-            .label {
-              width: 220px;
-              border: 1.5px solid #ddd;
-              border-radius: 6px;
-              padding: 8px 10px;
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              gap: 3px;
-              page-break-inside: avoid;
-              background: #fff;
-            }
-            .product-name {
-              font-size: 9px;
-              font-weight: 700;
-              color: #111;
-              text-align: center;
-              line-height: 1.3;
-              white-space: nowrap;
-              overflow: hidden;
-              text-overflow: ellipsis;
-              max-width: 200px;
-              width: 100%;
-            }
-            svg { width: 200px; height: 60px; }
-            .serial { font-size: 7px; color: #666; font-family: monospace; }
-            .batch { font-size: 7px; color: #888; }
-            .price { font-size: 11px; font-weight: 800; color: #000; margin-top: 2px; }
-          </style>
-        </head>
-        <body>
-          <h1>&#128230; ${productName} &mdash; ${availableUnits.length} Label${availableUnits.length !== 1 ? 's' : ''}</h1>
-          <div class="grid">${labelsHtml}</div>
-          <script>
-            window.onload = function() {
-              document.querySelectorAll('svg[data-barcode]').forEach(function(el) {
-                try {
-                  JsBarcode(el, el.getAttribute('data-barcode'), {
-                    format: 'CODE128',
-                    lineColor: '#000',
-                    background: '#fff',
-                    width: 1.5,
-                    height: 50,
-                    displayValue: true,
-                    fontSize: 9,
-                    margin: 2,
-                    font: 'monospace',
-                  });
-                } catch(e) {
-                  el.parentNode.insertAdjacentHTML('beforeend', '<div style="font-size:8px;color:red">Error</div>');
-                }
-              });
-              setTimeout(function() { window.print(); }, 600);
-            };
-          <\/script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-  };
-
-  const handleAddStockUnit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setSuccess(null);
-
-    const countToGenerate = Math.max(1, Number(unitCount) || (product?.countInStock || 1));
-
-    startTransition(async () => {
-      const batchNo = `PO-${Date.now().toString().slice(-6)}`;
-      const res = await generateBatchBarcodesAction(id, countToGenerate, batchNo);
-
-      if (res.success) {
-        setSuccess(`Successfully generated ${res.count || countToGenerate} stock unit barcodes for available stock.`);
-        setShowAddUnitModal(false);
-        refetchData();
-      } else {
-        setError(res.error || 'Failed to generate stock unit barcodes.');
-      }
-    });
-  };
-
-  const handleStatusChange = (unitId: string, newStatus: 'available' | 'reserved' | 'sold' | 'defective' | 'returned') => {
-    startTransition(async () => {
-      const res = await updateStockUnitStatusAction(unitId, id, newStatus);
-      if (res.success) {
-        setSuccess(`Stock unit status updated to ${newStatus}.`);
-        refetchData();
-      } else {
-        setError(res.error || 'Failed to update unit status.');
-      }
-    });
-  };
+  const [printTarget, setPrintTarget] = useState<'barcodes' | 'qr'>('barcodes');
 
   const getQrValue = () => {
     if (selectedUnitBarcode) return selectedUnitBarcode;
@@ -340,39 +214,89 @@ export default function ProductStockDetailPage({ params }: { params: Promise<{ i
     img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
   };
 
+  const handleAddStockUnit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSuccess(null);
+
+    const countToGenerate = Math.max(1, Number(unitCount) || (product?.countInStock || 1));
+
+    startTransition(async () => {
+      const batchNo = `PO-${Date.now().toString().slice(-6)}`;
+      const res = await generateBatchBarcodesAction(id, countToGenerate, batchNo);
+
+      if (res.success) {
+        setSuccess(`Successfully generated ${res.count || countToGenerate} stock unit barcodes for available stock.`);
+        setShowAddUnitModal(false);
+        refetchData();
+      } else {
+        setError(res.error || 'Failed to generate stock unit barcodes.');
+      }
+    });
+  };
+
+  const handleStatusChange = (unitId: string, newStatus: 'available' | 'reserved' | 'sold' | 'defective' | 'returned') => {
+    startTransition(async () => {
+      const res = await updateStockUnitStatusAction(unitId, id, newStatus);
+      if (res.success) {
+        setSuccess(`Stock unit status updated to ${newStatus}.`);
+        refetchData();
+      } else {
+        setError(res.error || 'Failed to update unit status.');
+      }
+    });
+  };
+
+  const handlePrintBarcodes = (cfg: BarcodePrintConfig) => {
+    if (printTarget === 'qr') {
+      const qrValue = getQrValue();
+      const availableUnits = stockUnits.filter((u) => u.status === 'available');
+      const items = availableUnits.length > 0
+        ? availableUnits.map((u) => ({
+            barcode: u.barcode,
+            qrPayload: qrValue,
+            isQr: true,
+            productName: product?.name,
+            serialNumber: u.serialNumber,
+            batchNumber: u.batchNumber,
+            price: product?.price,
+            currency: product?.currency,
+          }))
+        : [{
+            barcode: qrValue,
+            qrPayload: qrValue,
+            isQr: true,
+            productName: product?.name,
+            price: product?.price,
+            currency: product?.currency,
+          }];
+      printBarcodeLabels(cfg, items, `Print QR Labels \u2014 ${product?.name || 'Stock Item'}`);
+      setShowPrintSettings(false);
+      return;
+    }
+
+    const availableUnits = stockUnits.filter((u) => u.status === 'available');
+    if (availableUnits.length === 0) {
+      setError('No available stock units to print. Add stocks first.');
+      return;
+    }
+
+    const items = availableUnits.map((u) => ({
+      barcode: u.barcode,
+      productName: product?.name,
+      serialNumber: u.serialNumber,
+      batchNumber: u.batchNumber,
+      price: product?.price,
+      currency: product?.currency,
+    }));
+
+    printBarcodeLabels(cfg, items, `Print Barcodes \u2014 ${product?.name || 'Stock Item'}`);
+    setShowPrintSettings(false);
+  };
+
   const handlePrintQr = () => {
-    if (!qrRef.current) return;
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
-    const svgElement = qrRef.current.querySelector('svg');
-    const svgHtml = svgElement ? svgElement.outerHTML : '';
-
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Print QR Code - ${product?.name}</title>
-          <style>
-            body { font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-            .card { border: 2px solid #000; padding: 24px; border-radius: 12px; text-align: center; max-width: 300px; }
-            h2 { margin: 12px 0 4px 0; font-size: 16px; }
-            p { margin: 0; font-size: 12px; color: #555; font-family: monospace; }
-          </style>
-        </head>
-        <body>
-          <div class="card">
-            ${svgHtml}
-            <h2>${product?.name || 'Stock Item'}</h2>
-            <p>ID: ${id}</p>
-            <p style="margin-top: 4px;">Qty: ${product?.countInStock} units</p>
-          </div>
-          <script>
-            window.onload = function() { window.print(); window.close(); }
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+    setPrintTarget('qr');
+    setShowPrintSettings(true);
   };
 
   if (loading) {
@@ -713,7 +637,7 @@ export default function ProductStockDetailPage({ params }: { params: Promise<{ i
               <div className="flex items-center gap-2">
                 <Button
                   size="sm"
-                  onClick={handlePrintBarcodes}
+                  onClick={() => setShowPrintSettings(true)}
                   disabled={stockUnits.filter(u => u.status === 'available').length === 0}
                   className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold cursor-pointer h-8 px-3 text-xs flex items-center gap-1.5"
                 >
@@ -930,6 +854,15 @@ export default function ProductStockDetailPage({ params }: { params: Promise<{ i
             </form>
           </div>
         </div>
+      )}
+
+      {/* Print Settings Modal */}
+      {showPrintSettings && (
+        <PrintSettingsModal
+          onClose={() => setShowPrintSettings(false)}
+          onPrint={handlePrintBarcodes}
+          unitCount={stockUnits.filter(u => u.status === 'available').length}
+        />
       )}
     </div>
   );

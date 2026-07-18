@@ -12,6 +12,7 @@ import {
   Megaphone,
   LayoutTemplate,
   Settings,
+  Settings2,
   Users,
   Image as ImageIcon,
   ChevronLeft,
@@ -52,7 +53,7 @@ const NAV_ITEMS: NavItem[] = [
   { name: 'Homepage Builder', href: '/admin/homepage', icon: LayoutTemplate },
   { name: 'Media Library', href: '/admin/media', icon: ImageIcon },
   { name: 'Audit Log', href: '/admin/audit-log', icon: ScrollText },
-  { name: 'Site Settings', href: '/admin/settings', icon: Settings },
+  { name: 'System Configurations', href: '/admin/system-config', icon: Settings2 },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
