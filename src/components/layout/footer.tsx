@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ArrowUp, MessageCircle, Share2, Play, Send } from "lucide-react";
+import { useSiteBranding } from "@/components/providers/site-branding-provider";
 
 const shopLinks = [
   { label: "Laptops", href: "/products/laptops" },
@@ -31,7 +32,9 @@ function scrollToTop() {
 }
 
 export default function Footer() {
+  const { logoUrl, darkLogoUrl, siteName, tagline } = useSiteBranding();
   const currentYear = new Date().getFullYear();
+  const footerLogo = darkLogoUrl || logoUrl;
 
   return (
     <footer className="bg-neutral-950 text-neutral-400 relative overflow-hidden">
@@ -64,8 +67,7 @@ export default function Footer() {
               </span>
             </Link>
             <p className="text-xs text-neutral-500 max-w-xs leading-relaxed">
-              Sri Lanka&apos;s premier destination for premium consumer
-              electronics, mobile gear, and computer hardware.
+              {tagline || "Sri Lanka's premier destination for premium consumer electronics, mobile gear, and computer hardware."}
             </p>
           </div>
 

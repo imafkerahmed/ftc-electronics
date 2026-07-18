@@ -3,12 +3,14 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ShieldCheck, ChevronRight } from 'lucide-react';
+import { useSiteBranding } from '@/components/providers/site-branding-provider';
 
 export default function CheckoutLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const { logoUrl, siteName } = useSiteBranding();
   const pathname = usePathname();
 
   const steps = [

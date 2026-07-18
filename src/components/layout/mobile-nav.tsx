@@ -5,8 +5,10 @@ import { usePathname } from 'next/navigation';
 import { X } from 'lucide-react';
 import { useUiStore } from '@/store/use-ui-store';
 import { Button } from '@/components/ui/button';
+import { useSiteBranding } from '@/components/providers/site-branding-provider';
 
 export default function MobileNav() {
+  const { logoUrl, siteName } = useSiteBranding();
   const pathname = usePathname();
   const isOpen = useUiStore((state) => state.isMobileNavOpen);
   const setMobileNavOpen = useUiStore((state) => state.setMobileNavOpen);

@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { logoutAction } from '@/app/actions/auth';
+import { useSiteBranding } from '@/components/providers/site-branding-provider';
 
 interface NavItem {
   name: string;
@@ -57,10 +58,13 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const { logoUrl, darkLogoUrl, siteName } = useSiteBranding();
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ Catalog: true });
+
+  const activeLogo = darkLogoUrl || logoUrl;
 
   const handleLogout = async () => {
     await logoutAction();

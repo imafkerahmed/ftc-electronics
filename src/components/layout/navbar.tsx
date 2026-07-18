@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import StaggeredMenuComponent from "@/components/ui/StaggeredMenu/StaggeredMenu";
 import SearchOverlay from "@/components/layout/search-overlay";
 import { cn } from "@/lib/utils";
+import { useSiteBranding } from "@/components/providers/site-branding-provider";
 
 interface StaggeredMenuProps {
   position?: "left" | "right";
@@ -37,7 +38,7 @@ interface StaggeredMenuProps {
 
 const StaggeredMenu = StaggeredMenuComponent as React.FC<StaggeredMenuProps>;
 
-const announcements = [
+const defaultAnnouncements = [
   "🚀 Free Delivery on Orders Over LKR 10,000",
   "✨ 0% Interest Installments via Koko Pay — Shop Now",
   "🛡️ Official Manufacturer Warranty on All Products",
@@ -45,6 +46,7 @@ const announcements = [
 ];
 
 export default function Navbar() {
+  const { logoUrl, siteName, announcement } = useSiteBranding();
   const { cartCount } = useCart();
   const toggleCartDrawer = useUiStore((state) => state.toggleCartDrawer);
   const hasIntroPlayed = useUiStore((state) => state.hasIntroPlayed);
@@ -59,6 +61,10 @@ export default function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [showBanner, setShowBanner] = useState(true);
   const [announcementIdx, setAnnouncementIdx] = useState(0);
+
+  const activeAnnouncements = announcement?.text
+    ? [announcement.text, ...defaultAnnouncements]
+    : defaultAnnouncements;
 
   useEffect(() => {
     if (shouldPlayIntro) {
@@ -97,10 +103,10 @@ export default function Navbar() {
   // Cycle announcements
   useEffect(() => {
     const interval = setInterval(() => {
-      setAnnouncementIdx((prev) => (prev + 1) % announcements.length);
+      setAnnouncementIdx((prev) => (prev + 1) % activeAnnouncements.length);
     }, 4000);
     return () => clearInterval(interval);
-  }, []);
+  }, [activeAnnouncements.length]);
 
   const handleSearchClick = () => {
     setIsSearchOpen(true);
@@ -138,12 +144,13 @@ export default function Navbar() {
     <>
       {/* ── Announcement Banner ── */}
       <AnimatePresence>
-        {showBanner && !isIntroActive && (
+        {showBanner && announcement?.show !== false && !isIntroActive && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.3 }}
+            style={{ backgroundColor: announcement?.bgColor || undefined }}
             className="w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 text-white text-xs font-semibold z-50 relative overflow-hidden"
           >
             <div className="relative flex items-center justify-center h-9 px-10">
@@ -160,7 +167,7 @@ export default function Navbar() {
                   transition={{ duration: 0.35 }}
                   className="flex items-center gap-2 tracking-wide text-center"
                 >
-                  {announcements[announcementIdx]}
+                  {activeAnnouncements[announcementIdx]}
                 </motion.span>
               </AnimatePresence>
 
@@ -327,40 +334,55 @@ export default function Navbar() {
             className="fixed inset-0 z-[100] flex items-center justify-center bg-background pointer-events-none"
           >
             {isIntroActive && (
-              <div className="flex items-center gap-4 text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-widest uppercase">
-                <motion.span
-                  layoutId="brand-logo-ftc"
-                  initial={{ opacity: 0, scale: 0.8 }}
+              logoUrl ? (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.85 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ type: "spring", stiffness: 80, damping: 20 }}
-                  className="text-blue-600"
+                  className="flex flex-col items-center justify-center p-4"
                 >
-                  FTC
-                </motion.span>
-                <motion.span
-                  layoutId="brand-logo-divider"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.15, duration: 0.4 }}
-                  className="text-muted-foreground font-light"
-                >
-                  |
-                </motion.span>
-                <motion.span
-                  layoutId="brand-logo-electronics"
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{
-                    type: "spring",
-                    stiffness: 80,
-                    damping: 20,
-                    delay: 0.2,
-                  }}
-                  className="text-2xl uppercase tracking-widest text-foreground/80 font-bold"
-                >
-                  Electronics
-                </motion.span>
-              </div>
+                  <img
+                    src={logoUrl}
+                    alt={siteName || "FTC Electronics"}
+                    className="h-32 sm:h-44 lg:h-52 max-h-64 w-auto max-w-[85vw] object-contain drop-shadow-2xl"
+                  />
+                </motion.div>
+              ) : (
+                <div className="flex items-center gap-4 text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-widest uppercase">
+                  <motion.span
+                    layoutId="brand-logo-ftc"
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ type: "spring", stiffness: 80, damping: 20 }}
+                    className="text-blue-600"
+                  >
+                    FTC
+                  </motion.span>
+                  <motion.span
+                    layoutId="brand-logo-divider"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.15, duration: 0.4 }}
+                    className="text-muted-foreground font-light"
+                  >
+                    |
+                  </motion.span>
+                  <motion.span
+                    layoutId="brand-logo-electronics"
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{
+                      type: "spring",
+                      stiffness: 80,
+                      damping: 20,
+                      delay: 0.2,
+                    }}
+                    className="text-2xl uppercase tracking-widest text-foreground/80 font-bold"
+                  >
+                    Electronics
+                  </motion.span>
+                </div>
+              )
             )}
           </motion.div>
         )}
