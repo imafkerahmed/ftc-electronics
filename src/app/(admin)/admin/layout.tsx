@@ -23,6 +23,7 @@ import {
   ScrollText,
   Boxes,
   Palette,
+  ShoppingBag,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { logoutAction } from '@/app/actions/auth';
@@ -47,6 +48,7 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
   { name: 'Stock Management', href: '/admin/inventory', icon: Boxes },
+  { name: 'Store POS', href: '/pos', icon: ShoppingBag },
   { name: 'Orders', href: '/admin/orders', icon: ShoppingCart },
   { name: 'Customers', href: '/admin/customers', icon: Users },
   { name: 'Reviews', href: '/admin/reviews', icon: Star },

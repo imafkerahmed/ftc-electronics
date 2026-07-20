@@ -146,6 +146,17 @@ export interface PBOrder extends PBRecord {
   notes?: string;
 }
 
+// ─── Customers Collection ─────────────────────────────────────────────────────
+export interface PBCustomer extends PBRecord {
+  name: string;
+  email: string;
+  phone?: string;
+  ordersCount: number;
+  totalSpent: number;
+  status: "active" | "banned";
+  notes?: string;
+}
+
 // ─── Site Settings Collection ─────────────────────────────────────────────────
 export interface SiteSettings {
   siteName: string;

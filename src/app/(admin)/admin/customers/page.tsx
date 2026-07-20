@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useTransition } from 'react';
+import React, { useState, useEffect, useTransition, useCallback } from 'react';
 import { Users, Search, Mail, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,7 +27,7 @@ export default function AdminCustomersPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'https://ftc-db.codix.site';
@@ -35,11 +35,18 @@ export default function AdminCustomersPage() {
 
       let records: any[] = [];
       try {
-        records = await pb.collection('users').getFullList({
+        records = await pb.collection('customers').getFullList({
           sort: '-created',
         });
-      } catch (err) {
-        console.warn('Users collection empty or unavailable:', err);
+      } catch {
+        try {
+          // Fallback if customers collection is empty or not yet seeded
+          records = await pb.collection('users').getFullList({
+            sort: '-created',
+          });
+        } catch (err) {
+          console.warn('Customers/Users collection unavailable:', err);
+        }
       }
 
       setCustomers(records.map((r: any) => ({
@@ -60,11 +67,11 @@ export default function AdminCustomersPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
   const handleToggleStatus = (id: string, currentStatus: 'active' | 'banned') => {
     setError(null);

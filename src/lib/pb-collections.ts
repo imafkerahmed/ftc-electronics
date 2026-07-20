@@ -25,9 +25,11 @@ import type {
   PBPromotion,
   PBAuditLog,
   PBSiteSetting,
+  PBCustomer,
 } from "@/types/admin";
 import { pbProductToProduct, pbCategoryToCategory } from "@/types/admin";
 import type { Product, Category } from "@/types/product";
+import type { PBEmployee, PBSale, PBSaleItem, SalePayload } from "@/types/pos";
 
 // ─── Error Handling ───────────────────────────────────────────────────────────
 
@@ -994,6 +996,325 @@ export const pbStockManagement = {
       return record;
     } catch (err) {
       handleError(err, "pbStockManagement.updateUnit");
+    }
+  },
+};
+
+// ─── Employees (POS) ──────────────────────────────────────────────────────────
+
+export const pbEmployees = {
+  async getAll(): Promise<PBEmployee[]> {
+    try {
+      const adminPb = await getAdminPb();
+      const list = await adminPb.collection("users").getFullList({ sort: "name" });
+      return list
+        .filter((r: any) => r.role === "employee" || r.role === "manager" || r.role === "admin" || !r.role)
+        .map((r: any) => ({
+          id: r.id,
+          name: r.name || r.email || "Employee",
+          pin: r.pin || "1234",
+          role: (r.role === "employee" ? "cashier" : r.role === "admin" ? "manager" : (r.role || "cashier")) as any,
+          isActive: true,
+          created: r.created,
+          updated: r.updated,
+          collectionId: r.collectionId,
+          collectionName: r.collectionName,
+        }));
+    } catch (err) {
+      handleError(err, "pbEmployees.getAll");
+    }
+  },
+
+  async getAllAdmin(): Promise<PBEmployee[]> {
+    try {
+      const adminPb = await getAdminPb();
+      const list = await adminPb.collection("users").getFullList({ sort: "name" });
+      return list.map((r: any) => ({
+        id: r.id,
+        name: r.name || r.email || "Employee",
+        pin: r.pin || "1234",
+        role: (r.role === "employee" ? "cashier" : r.role === "admin" ? "manager" : (r.role || "cashier")) as any,
+        isActive: true,
+        created: r.created,
+        updated: r.updated,
+        collectionId: r.collectionId,
+        collectionName: r.collectionName,
+      }));
+    } catch (err) {
+      handleError(err, "pbEmployees.getAllAdmin");
+    }
+  },
+
+  async getById(id: string): Promise<PBEmployee | null> {
+    try {
+      const adminPb = await getAdminPb();
+      const r: any = await adminPb.collection("users").getOne(id);
+      return {
+        id: r.id,
+        name: r.name || r.email || "Employee",
+        pin: r.pin || "1234",
+        role: (r.role === "employee" ? "cashier" : r.role === "admin" ? "manager" : (r.role || "cashier")) as any,
+        isActive: true,
+        created: r.created,
+        updated: r.updated,
+        collectionId: r.collectionId,
+        collectionName: r.collectionName,
+      };
+    } catch (err) {
+      const pbErr = err as { status?: number };
+      if (pbErr?.status === 404) return null;
+      handleError(err, "pbEmployees.getById");
+    }
+  },
+
+  async create(data: { name: string; pin: string; role: string; isActive: boolean }): Promise<PBEmployee> {
+    try {
+      const adminPb = await getAdminPb();
+      const cleanName = data.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const pass = (data.pin || '12345678').padEnd(8, '0');
+      const userPayload: Record<string, any> = {
+        name: data.name,
+        email: `${cleanName || 'emp'}_${Date.now().toString(36)}@ftc.internal`,
+        password: pass,
+        passwordConfirm: pass,
+        role: data.role === 'cashier' ? 'employee' : data.role,
+        pin: data.pin,
+      };
+      const r: any = await adminPb.collection("users").create(userPayload);
+      return {
+        id: r.id,
+        name: r.name || data.name,
+        pin: data.pin,
+        role: data.role as any,
+        isActive: data.isActive,
+        created: r.created,
+        updated: r.updated,
+        collectionId: r.collectionId,
+        collectionName: r.collectionName,
+      };
+    } catch (err) {
+      handleError(err, "pbEmployees.create");
+    }
+  },
+
+  async update(id: string, data: Partial<{ name: string; pin: string; role: string; isActive: boolean }>): Promise<PBEmployee> {
+    try {
+      const adminPb = await getAdminPb();
+      const payload: Record<string, any> = {};
+      if (data.name) payload.name = data.name;
+      if (data.role) payload.role = data.role === 'cashier' ? 'employee' : data.role;
+      if (data.pin) {
+        payload.pin = data.pin;
+        const pass = data.pin.padEnd(8, '0');
+        payload.password = pass;
+        payload.passwordConfirm = pass;
+      }
+      const r: any = await adminPb.collection("users").update(id, payload);
+      return {
+        id: r.id,
+        name: r.name,
+        pin: data.pin || r.pin || '1234',
+        role: (r.role === 'employee' ? 'cashier' : r.role) as any,
+        isActive: true,
+        created: r.created,
+        updated: r.updated,
+        collectionId: r.collectionId,
+        collectionName: r.collectionName,
+      };
+    } catch (err) {
+      handleError(err, "pbEmployees.update");
+    }
+  },
+
+  async delete(id: string): Promise<void> {
+    try {
+      const adminPb = await getAdminPb();
+      await adminPb.collection("users").delete(id);
+    } catch (err) {
+      handleError(err, "pbEmployees.delete");
+    }
+  },
+};
+
+// ─── Sales (POS) ──────────────────────────────────────────────────────────────
+
+export const pbSales = {
+  async createSale(payload: SalePayload): Promise<{ sale: PBSale; items: PBSaleItem[] }> {
+    try {
+      const adminPb = await getAdminPb();
+      const { items, ...saleData } = payload;
+      const sale = await adminPb.collection("sales").create<PBSale>(saleData);
+      const createdItems = await Promise.all(
+        items.map((item) =>
+          adminPb.collection("sale_items").create<PBSaleItem>({ ...item, sale: sale.id })
+        )
+      );
+
+      // Deduct stock & mark stock_management unit(s) as sold
+      for (const item of items) {
+        if (item.unit_id) {
+          try {
+            await adminPb.collection("stock_management").update(item.unit_id, { status: "sold", orderId: sale.id });
+          } catch {
+            // ignore
+          }
+        } else if (item.unit_barcode) {
+          try {
+            const u: any = await adminPb.collection("stock_management").getFirstListItem(`barcode = "${item.unit_barcode}"`);
+            if (u) {
+              await adminPb.collection("stock_management").update(u.id, { status: "sold", orderId: sale.id });
+            }
+          } catch {
+            // ignore
+          }
+        } else if (item.product_id) {
+          try {
+            const avail = await adminPb.collection("stock_management").getFullList({
+              filter: `product = "${item.product_id}" && status = "available"`,
+            });
+            for (const u of avail.slice(0, item.quantity)) {
+              await adminPb.collection("stock_management").update(u.id, { status: "sold", orderId: sale.id });
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        if (item.product_id) {
+          try {
+            const p: any = await adminPb.collection("products").getOne(item.product_id);
+            const currentStock = typeof p.countInStock === 'number' ? p.countInStock : 0;
+            const newStock = Math.max(0, currentStock - item.quantity);
+            await adminPb.collection("products").update(item.product_id, { countInStock: newStock });
+          } catch {
+            // ignore if product missing
+          }
+        }
+      }
+
+      return { sale, items: createdItems };
+    } catch (err) {
+      handleError(err, "pbSales.createSale");
+    }
+  },
+
+  async getRecent(limit = 50): Promise<PBSale[]> {
+    try {
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("sales").getFullList<PBSale>({
+        sort: "-created",
+        perPage: limit,
+      });
+    } catch (err) {
+      handleError(err, "pbSales.getRecent");
+    }
+  },
+
+  async getById(id: string): Promise<PBSale | null> {
+    try {
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("sales").getOne<PBSale>(id);
+    } catch (err) {
+      const pbErr = err as { status?: number };
+      if (pbErr?.status === 404) return null;
+      handleError(err, "pbSales.getById");
+    }
+  },
+
+  async getItemsBySale(saleId: string): Promise<PBSaleItem[]> {
+    try {
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("sale_items").getFullList<PBSaleItem>({
+        filter: `sale = "${saleId}"`,
+        sort: "created",
+      });
+    } catch (err) {
+      handleError(err, "pbSales.getItemsBySale");
+    }
+  },
+
+  async voidSale(id: string): Promise<PBSale> {
+    try {
+      const adminPb = await getAdminPb();
+      const sale = await adminPb.collection("sales").update<PBSale>(id, { status: "voided" });
+
+      // Restore stock for voided sale items
+      try {
+        const items = await adminPb.collection("sale_items").getFullList<PBSaleItem>({
+          filter: `sale = "${id}"`,
+        });
+        for (const item of items) {
+          if (item.unit_id) {
+            try {
+              await adminPb.collection("stock_management").update(item.unit_id, { status: "available", orderId: "" });
+            } catch {
+              // ignore
+            }
+          } else if (item.unit_barcode) {
+            try {
+              const u: any = await adminPb.collection("stock_management").getFirstListItem(`barcode = "${item.unit_barcode}"`);
+              if (u) {
+                await adminPb.collection("stock_management").update(u.id, { status: "available", orderId: "" });
+              }
+            } catch {
+              // ignore
+            }
+          }
+
+          if (item.product_id) {
+            try {
+              const p: any = await adminPb.collection("products").getOne(item.product_id);
+              const currentStock = typeof p.countInStock === 'number' ? p.countInStock : 0;
+              const restoredStock = currentStock + item.quantity;
+              await adminPb.collection("products").update(item.product_id, { countInStock: restoredStock });
+            } catch {
+              // ignore if product missing
+            }
+          }
+        }
+      } catch {
+        // ignore if items read error
+      }
+
+      return sale;
+    } catch (err) {
+      handleError(err, "pbSales.voidSale");
+    }
+  },
+};
+
+// ─── Customers ────────────────────────────────────────────────────────────────
+
+export const pbCustomers = {
+  async getAll(): Promise<PBCustomer[]> {
+    try {
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("customers").getFullList<PBCustomer>({
+        sort: "-created",
+      });
+    } catch (err) {
+      handleError(err, "pbCustomers.getAll");
+    }
+  },
+
+  async getById(id: string): Promise<PBCustomer | null> {
+    try {
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("customers").getOne<PBCustomer>(id);
+    } catch (err) {
+      const pbErr = err as { status?: number };
+      if (pbErr?.status === 404) return null;
+      handleError(err, "pbCustomers.getById");
+    }
+  },
+
+  async toggleStatus(id: string, currentStatus: "active" | "banned"): Promise<PBCustomer> {
+    try {
+      const adminPb = await getAdminPb();
+      const newStatus = currentStatus === "active" ? "banned" : "active";
+      return await adminPb.collection("customers").update<PBCustomer>(id, { status: newStatus });
+    } catch (err) {
+      handleError(err, "pbCustomers.toggleStatus");
     }
   },
 };

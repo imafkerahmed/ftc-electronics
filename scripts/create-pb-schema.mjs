@@ -536,6 +536,52 @@ async function run() {
     },
   );
 
+  const customerRecord = await syncCollection(
+    "customers",
+    [
+      { name: "name", type: "text", required: true },
+      { name: "email", type: "text" },
+      { name: "phone", type: "text" },
+      { name: "ordersCount", type: "number" },
+      { name: "totalSpent", type: "number" },
+      {
+        name: "status",
+        type: "select",
+        values: ["active", "banned"],
+        maxSelect: 1,
+      },
+      { name: "notes", type: "text" },
+    ],
+    {
+      listRule: '@request.auth.id != ""',
+      viewRule: '@request.auth.id != ""',
+      createRule: '@request.auth.id != ""',
+      updateRule: '@request.auth.id != "" && @request.auth.role = "admin"',
+      deleteRule: '@request.auth.id != "" && @request.auth.role = "admin"',
+    },
+  );
+
+  await syncCollection(
+    "users",
+    [
+      { name: "name", type: "text" },
+      { name: "pin", type: "text" },
+      {
+        name: "role",
+        type: "select",
+        values: ["admin", "employee", "manager"],
+        maxSelect: 1,
+      },
+    ],
+    {
+      listRule: 'id = @request.auth.id',
+      viewRule: 'id = @request.auth.id',
+      createRule: '',
+      updateRule: 'id = @request.auth.id',
+      deleteRule: 'id = @request.auth.id',
+    },
+  );
+
   // 2. Fetch all collection IDs to satisfy relation constraints
   const allCollections = await pb.collections.getFullList();
   const getColId = (name) => allCollections.find((c) => c.name === name)?.id;

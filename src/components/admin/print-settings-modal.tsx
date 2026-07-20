@@ -50,21 +50,7 @@ export default function PrintSettingsModal({ onClose, onPrint, unitCount }: Prin
 
   const scrollBodyRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    void loadPresets();
-  }, []);
-
-  // Intercept wheel events on the backdrop and redirect them to the modal body.
-  // This prevents the background page from scrolling when using a trackpad.
-  const handleBackdropWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (scrollBodyRef.current) {
-      scrollBodyRef.current.scrollTop += e.deltaY;
-    }
-  }, []);
-
-  const loadPresets = async () => {
+  const loadPresets = useCallback(async () => {
     setLoadingPresets(true);
     const res = await getBarcodePrintPresetsAction();
     if (res.success && res.data) {
@@ -77,7 +63,21 @@ export default function PrintSettingsModal({ onClose, onPrint, unitCount }: Prin
       }
     }
     setLoadingPresets(false);
-  };
+  }, []);
+
+  useEffect(() => {
+    void loadPresets();
+  }, [loadPresets]);
+
+  // Intercept wheel events on the backdrop and redirect them to the modal body.
+  // This prevents the background page from scrolling when using a trackpad.
+  const handleBackdropWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (scrollBodyRef.current) {
+      scrollBodyRef.current.scrollTop += e.deltaY;
+    }
+  }, []);
 
   const handleSelectPreset = (id: string) => {
     setSelectedPresetId(id);

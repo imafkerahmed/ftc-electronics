@@ -17,7 +17,11 @@ import {
   pbSiteSettings,
   pbPromotions,
   pbOrders,
+  pbEmployees,
+  pbSales,
+  pbCustomers,
 } from '@/lib/pb-collections';
+import type { SalePayload } from '@/types/pos';
 
 // Helper to cast fields safely for audit logging
 function toRecord(obj: any): Record<string, unknown> | undefined {
@@ -1055,15 +1059,15 @@ export async function toggleCustomerStatusAction(id: string, currentStatus: 'act
   try {
     const pb = await getAdminPb();
     const newStatus = currentStatus === 'active' ? 'banned' : 'active';
-    const oldRecord = await pb.collection('users').getOne(id);
-    const record = await pb.collection('users').update(id, {
+    const oldRecord = await pb.collection('customers').getOne(id);
+    const record = await pb.collection('customers').update(id, {
       status: newStatus,
     });
 
     await writeAuditLog(
       check.actorEmail!,
       'update',
-      'users',
+      'customers',
       id,
       toRecord(oldRecord),
       toRecord(record),
@@ -1397,4 +1401,139 @@ export async function setDefaultInvoicePrintPresetAction(id: string) {
     return { success: false, error: err.message || 'Failed to set default invoice preset.' };
   }
 }
+// ─── POS — Employees ──────────────────────────────────────────────────────────
 
+export async function getPosEmployeesAction() {
+  try {
+    const employees = await pbEmployees.getAll();
+    return { success: true, data: employees };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to load employees.' };
+  }
+}
+
+export async function getPosEmployeesAdminAction() {
+  try {
+    const employees = await pbEmployees.getAllAdmin();
+    return { success: true, data: employees };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to load employees.' };
+  }
+}
+
+export async function createPosEmployeeAction(data: {
+  name: string;
+  pin: string;
+  role: string;
+  isActive: boolean;
+}) {
+  try {
+    const emp = await pbEmployees.create(data);
+    revalidatePath('/admin/system-config/employees');
+    return { success: true, data: emp };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to create employee.' };
+  }
+}
+
+export async function updatePosEmployeeAction(
+  id: string,
+  data: Partial<{ name: string; pin: string; role: string; isActive: boolean }>
+) {
+  try {
+    const emp = await pbEmployees.update(id, data);
+    revalidatePath('/admin/system-config/employees');
+    return { success: true, data: emp };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to update employee.' };
+  }
+}
+
+export async function deletePosEmployeeAction(id: string) {
+  try {
+    await pbEmployees.delete(id);
+    revalidatePath('/admin/system-config/employees');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to delete employee.' };
+  }
+}
+
+// ─── POS — Sales ──────────────────────────────────────────────────────────────
+
+export async function createSaleAction(payload: SalePayload) {
+  try {
+    const result = await pbSales.createSale(payload);
+    revalidatePath('/pos/history');
+    return { success: true, data: result };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to record sale.' };
+  }
+}
+
+export async function getRecentSalesAction(limit = 50) {
+  try {
+    const sales = await pbSales.getRecent(limit);
+    return { success: true, data: sales };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to load sales.' };
+  }
+}
+
+export async function getSaleByIdAction(id: string) {
+  try {
+    const sale = await pbSales.getById(id);
+    if (!sale) return { success: false, error: 'Sale not found.' };
+    const items = await pbSales.getItemsBySale(id);
+    return { success: true, data: { sale, items } };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to load sale.' };
+  }
+}
+
+export async function voidSaleAction(id: string) {
+  try {
+    const sale = await pbSales.voidSale(id);
+    revalidatePath('/pos/history');
+    return { success: true, data: sale };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to void sale.' };
+  }
+}
+
+// ─── POS — Customers ──────────────────────────────────────────────────────────
+
+export async function searchPosCustomersAction(query: string) {
+  try {
+    const adminPb = await getAdminPb();
+    const q = query.trim();
+    const filter = q ? `name ~ "${q}" || phone ~ "${q}" || email ~ "${q}"` : '';
+    const customers = await adminPb.collection('customers').getFullList({
+      filter,
+      sort: '-created',
+      perPage: 25,
+    });
+    return { success: true, data: customers };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to search customers.' };
+  }
+}
+
+export async function createPosCustomerAction(data: { name: string; phone?: string; email?: string; notes?: string }) {
+  try {
+    const adminPb = await getAdminPb();
+    const customer = await adminPb.collection('customers').create({
+      name: data.name,
+      email: data.email || `${Date.now()}@customer.local`,
+      phone: data.phone || '',
+      ordersCount: 0,
+      totalSpent: 0,
+      status: 'active',
+      notes: data.notes || 'Created via POS',
+    });
+    revalidatePath('/admin/customers');
+    return { success: true, data: customer };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to create customer.' };
+  }
+}
