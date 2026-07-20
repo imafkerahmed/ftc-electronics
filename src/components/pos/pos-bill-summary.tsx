@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import { Receipt, Percent, Minus, Plus } from 'lucide-react';
+import React, { useState } from 'react';
+import { Receipt, Percent, Minus, Plus, Tag } from 'lucide-react';
 import type { PosCartItem } from '@/types/pos';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +16,12 @@ interface PosBillSummaryProps {
   onToggleDiscountType: () => void;
   onCharge: () => void;
   isProcessing: boolean;
+  couponCode: string;
+  couponDiscountAmount: number;
+  couponSuccessMessage: string;
+  couponErrorMessage: string;
+  onApplyCoupon: (code: string) => void;
+  onRemoveCoupon: () => void;
 }
 
 function fmt(amount: number, currency = 'LKR') {
@@ -36,7 +42,15 @@ export default function PosBillSummary({
   onToggleDiscountType,
   onCharge,
   isProcessing,
+  couponCode,
+  couponDiscountAmount,
+  couponSuccessMessage,
+  couponErrorMessage,
+  onApplyCoupon,
+  onRemoveCoupon,
 }: PosBillSummaryProps) {
+  const [localCouponInput, setLocalCouponInput] = useState('');
+
   const itemsSubtotal = items.reduce((sum, i) => sum + i.lineTotal, 0);
   const itemDiscountsTotal = items.reduce((sum, i) => sum + i.itemDiscount * i.quantity, 0);
   const afterItemDiscounts = itemsSubtotal - itemDiscountsTotal;
@@ -46,14 +60,63 @@ export default function PosBillSummary({
       ? (afterItemDiscounts * Math.min(globalDiscount, 100)) / 100
       : Math.min(globalDiscount, afterItemDiscounts);
 
-  const afterAllDiscounts = afterItemDiscounts - globalDiscountAmt;
+  const afterAllDiscounts = afterItemDiscounts - globalDiscountAmt - couponDiscountAmount;
   const taxAmount = (afterAllDiscounts * taxRate) / 100;
   const total = afterAllDiscounts + taxAmount;
 
   const hasItems = items.length > 0;
 
+  const handleApply = () => {
+    onApplyCoupon(localCouponInput);
+  };
+
+  const handleRemove = () => {
+    onRemoveCoupon();
+    setLocalCouponInput('');
+  };
+
   return (
     <div className="shrink-0 space-y-3 pt-3 border-t border-border">
+      {/* Coupon / Promo code row */}
+      <div className="space-y-1.5">
+        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">Promo / Coupon Code</span>
+        {couponSuccessMessage ? (
+          <div className="flex items-center justify-between p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs">
+            <div className="flex items-start gap-2">
+              <Tag className="h-4 w-4 text-emerald-600 mt-0.5" />
+              <div>
+                <p className="font-bold text-emerald-600">Applied: {couponCode}</p>
+                <p className="text-[10px] text-muted-foreground">{couponSuccessMessage}</p>
+              </div>
+            </div>
+            <Button variant="ghost" size="xs" onClick={handleRemove} className="text-red-500 hover:bg-red-500/10 text-[10px]">
+              Remove
+            </Button>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <Input
+              type="text"
+              placeholder="Enter coupon code…"
+              value={localCouponInput}
+              onChange={(e) => setLocalCouponInput(e.target.value)}
+              className="h-8 text-xs rounded-xl flex-1 font-mono uppercase"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleApply}
+              className="h-8 text-xs px-3 font-semibold"
+            >
+              Apply
+            </Button>
+          </div>
+        )}
+        {couponErrorMessage && (
+          <p className="text-[10px] text-red-500 font-medium">{couponErrorMessage}</p>
+        )}
+      </div>
+
       {/* Global discount row */}
       <div className="flex items-center gap-2">
         <span className="text-[10px] font-semibold text-muted-foreground shrink-0">Global Discount</span>
@@ -113,6 +176,12 @@ export default function PosBillSummary({
           <div className="flex justify-between text-emerald-500">
             <span>Global Discount{globalDiscountType === 'percent' ? ` (${globalDiscount}%)` : ''}</span>
             <span className="font-semibold">– {fmt(globalDiscountAmt, currency)}</span>
+          </div>
+        )}
+        {couponDiscountAmount > 0 && (
+          <div className="flex justify-between text-emerald-500">
+            <span>Coupon Discount ({couponCode})</span>
+            <span className="font-semibold">– {fmt(couponDiscountAmount, currency)}</span>
           </div>
         )}
         {taxRate > 0 && (

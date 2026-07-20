@@ -1491,8 +1491,40 @@ export async function getSaleByIdAction(id: string) {
   }
 }
 
-export async function voidSaleAction(id: string) {
+export async function verifyManagerPinAction(pin: string) {
   try {
+    const adminPb = await getAdminPb();
+    const cleanPin = pin.trim();
+    if (!cleanPin) return { success: false, error: 'PIN is required.' };
+
+    const users = await adminPb.collection('users').getFullList({
+      filter: `pin = "${cleanPin.replace(/"/g, '\\"')}"`,
+    });
+
+    const manager = users.find(
+      (u: any) =>
+        u.role === 'manager' ||
+        u.role === 'admin' ||
+        u.role === 'superuser' ||
+        u.role === 'owner'
+    );
+
+    if (manager) {
+      return { success: true, managerName: manager.name || manager.email };
+    }
+
+    return { success: false, error: 'Invalid Manager or Admin PIN.' };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Verification failed.' };
+  }
+}
+
+export async function voidSaleAction(id: string, managerPin: string) {
+  try {
+    const verify = await verifyManagerPinAction(managerPin);
+    if (!verify.success) {
+      return { success: false, error: verify.error || 'Manager PIN required to void sales.' };
+    }
     const sale = await pbSales.voidSale(id);
     revalidatePath('/pos/history');
     return { success: true, data: sale };
@@ -1506,12 +1538,11 @@ export async function voidSaleAction(id: string) {
 export async function searchPosCustomersAction(query: string) {
   try {
     const adminPb = await getAdminPb();
-    const q = query.trim();
+    const q = query.trim().replace(/"/g, '\\"');
     const filter = q ? `name ~ "${q}" || phone ~ "${q}" || email ~ "${q}"` : '';
     const customers = await adminPb.collection('customers').getFullList({
       filter,
-      sort: '-created',
-      perPage: 25,
+      sort: 'name',
     });
     return { success: true, data: customers };
   } catch (err: any) {
@@ -1535,5 +1566,115 @@ export async function createPosCustomerAction(data: { name: string; phone?: stri
     return { success: true, data: customer };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to create customer.' };
+  }
+}
+
+export async function validatePosCouponAction(code: string, cartTotal: number) {
+  try {
+    const adminPb = await getAdminPb();
+    const cleanCode = code.trim();
+    if (!cleanCode) return { success: false, error: 'Coupon code is required.' };
+
+    const now = new Date().toISOString();
+    const promotions = await adminPb.collection('promotions').getFullList({
+      filter: `couponCode = "${cleanCode}" && isActive = true && startDate <= "${now}" && endDate >= "${now}"`,
+    });
+
+    if (promotions.length === 0) {
+      return { success: false, error: 'Invalid or expired coupon code.' };
+    }
+
+    const promo = promotions[0];
+    if (promo.minOrderValue && cartTotal < promo.minOrderValue) {
+      return {
+        success: false,
+        error: `Minimum order value of Rs. ${promo.minOrderValue.toLocaleString()} required for this coupon.`,
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        id: promo.id,
+        name: promo.name,
+        type: promo.type,
+        discountValue: promo.discountValue,
+      },
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to validate coupon.' };
+  }
+}
+
+export async function getUnifiedSalesTrackerAction() {
+  try {
+    const adminPb = await getAdminPb();
+
+    // Fetch POS Sales (sort by -id to bypass created field sorting bug)
+    const sales = await adminPb.collection('sales').getFullList({
+      sort: '-id',
+    });
+
+    // Fetch Online Orders
+    const ordersRes = await adminPb.collection('orders').getFullList({
+      sort: '-id',
+      expand: 'user',
+    });
+
+    // Format both lists uniformly
+    const posSalesFormatted = sales.map((s: any) => ({
+      id: s.id,
+      receiptNumber: s.receipt_number || `FTC-POS-${s.id.slice(-6).toUpperCase()}`,
+      date: s.date || s.created || s.updated,
+      customerName: s.customer_name || 'Walk-in Customer',
+      customerEmail: s.customer_email || '—',
+      itemsCount: s.items_count || 1,
+      total: s.total || 0,
+      discount: s.discount || 0,
+      paymentMethod: s.payment_method || 'cash',
+      status: s.status || 'completed',
+      source: 'POS Terminal',
+    }));
+
+    const onlineOrdersFormatted = ordersRes.map((o: any) => {
+      let itemsCount = 1;
+      if (Array.isArray(o.items)) {
+        itemsCount = o.items.reduce((acc: number, item: any) => acc + (item.quantity || 1), 0);
+      } else if (o.items && typeof o.items === 'object') {
+        itemsCount = Object.keys(o.items).length;
+      }
+      
+      let customerName = 'Online Customer';
+      if (o.expand?.user?.name) {
+        customerName = o.expand.user.name;
+      } else if (o.shippingAddress?.firstName) {
+        customerName = `${o.shippingAddress.firstName} ${o.shippingAddress.lastName || ''}`.trim();
+      }
+
+      return {
+        id: o.id,
+        receiptNumber: o.orderId || `FTC-ONL-${o.id.slice(-6).toUpperCase()}`,
+        date: o.created || o.updated,
+        customerName,
+        customerEmail: o.email || o.expand?.user?.email || '—',
+        itemsCount,
+        total: o.total || 0,
+        discount: 0,
+        paymentMethod: o.paymentDetails?.method || 'card',
+        status: o.status === 'cancelled' ? 'voided' : 'completed',
+        source: 'Online Store',
+      };
+    });
+
+    // Merge and sort by date descending
+    const unified = [...posSalesFormatted, ...onlineOrdersFormatted].sort((a, b) => {
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      return dateB - dateA;
+    });
+
+    return { success: true, data: unified };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch unified sales.' };
   }
 }

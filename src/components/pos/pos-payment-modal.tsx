@@ -61,6 +61,11 @@ export default function PosPaymentModal({
   const [cName, setCName] = useState(customerName);
   const [cPhone, setCPhone] = useState(customerPhone);
 
+  useEffect(() => {
+    setCName(customerName);
+    setCPhone(customerPhone);
+  }, [customerName, customerPhone]);
+
   const [custQuery, setCustQuery] = useState('');
   const [custResults, setCustResults] = useState<any[]>([]);
   const [searchingCust, setSearchingCust] = useState(false);
@@ -76,17 +81,22 @@ export default function PosPaymentModal({
     if (!custQuery.trim()) {
       setCustResults([]);
       setShowCustDropdown(false);
+      setSearchingCust(false);
       return;
     }
+    setShowCustDropdown(true);
+    setSearchingCust(true);
+
     const timer = setTimeout(async () => {
-      setSearchingCust(true);
       const res = await searchPosCustomersAction(custQuery);
       if (res.success && res.data) {
         setCustResults(res.data);
-        setShowCustDropdown(true);
+      } else {
+        setCustResults([]);
       }
       setSearchingCust(false);
     }, 200);
+
     return () => clearTimeout(timer);
   }, [custQuery]);
 
@@ -134,7 +144,10 @@ export default function PosPaymentModal({
   const handleCharge = () => {
     setError('');
     startTransition(async () => {
+      const receiptNum = `FTC-POS-${Date.now().toString(36).toUpperCase()}`;
       const payload: SalePayload = {
+        receipt_number: receiptNum,
+        status: 'completed',
         cashier_name: session.name,
         cashier_id: session.id,
         customer_name: cName,
@@ -146,17 +159,20 @@ export default function PosPaymentModal({
         payment_method: method,
         cash_tendered: parseFloat(cashTendered || '0'),
         change_due: changeDue,
+        items_count: cart.reduce((acc, item) => acc + item.quantity, 0),
         notes,
         items: cart.map((i) => ({
           product_id: i.productId,
           product_name: i.productName,
           sku: i.sku,
           unit_price: i.unitPrice,
+          item_discount: i.itemDiscount || 0,
           quantity: i.quantity,
           line_total: i.lineTotal,
           unit_id: i.unitId,
           unit_barcode: i.unitBarcode,
           unit_serial: i.unitSerial,
+          image_url: i.imageUrl || '',
         })),
       };
 
@@ -182,7 +198,7 @@ export default function PosPaymentModal({
       printReceipt(
         cfg,
         {
-          orderNumber: completedSaleId ? `POS-${completedSaleId.slice(-6).toUpperCase()}` : `POS-${Date.now().toString(36).toUpperCase()}`,
+          orderNumber: completedSaleId ? `FTC-POS-${completedSaleId.slice(-6).toUpperCase()}` : `FTC-POS-${Date.now().toString(36).toUpperCase()}`,
           date: new Date().toLocaleString('en-LK'),
           customerName: cName || 'Walk-in Customer',
           customerPhone: cPhone,
@@ -203,7 +219,7 @@ export default function PosPaymentModal({
       printReceipt(
         DEFAULT_RECEIPT_CONFIG,
         {
-          orderNumber: `POS-${Date.now().toString(36).toUpperCase()}`,
+          orderNumber: `FTC-POS-${Date.now().toString(36).toUpperCase()}`,
           date: new Date().toLocaleString('en-LK'),
           customerName: cName || 'Walk-in Customer',
           customerPhone: cPhone,
@@ -238,19 +254,59 @@ export default function PosPaymentModal({
               Change: {fmt(changeDue, currency)}
             </p>
           )}
-          <div className="flex gap-3 mt-6">
+          <div className="space-y-2 mt-6">
             <Button
-              variant="outline"
               onClick={handlePrint}
-              className="flex-1 h-10 rounded-xl"
+              className="w-full h-10 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center gap-2"
             >
-              <Printer className="h-3.5 w-3.5" /> Print Receipt
+              <Printer className="h-4 w-4" /> Print Receipt
             </Button>
+
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const phone = cPhone || prompt("Enter WhatsApp number (with country code, e.g. 94771234567):");
+                  if (phone) {
+                    const cleanPhone = phone.replace(/\D/g, '');
+                    const orderNo = completedSaleId ? `FTC-POS-${completedSaleId.slice(-6).toUpperCase()}` : '';
+                    const itemsStr = cart.map(i => `• ${i.productName} x${i.quantity} - ${fmt(i.lineTotal, currency)}`).join('%0A');
+                    const text = `*FTC | Electronics*%0AReceipt for Order *${orderNo}*%0A*Date:* ${new Date().toLocaleDateString()}%0A*Total:* ${fmt(billData.total, currency)}%0A%0A*Items:*%0A${itemsStr}%0A%0AThank you for shopping with us!`;
+                    window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
+                  }
+                }}
+                className="h-10 rounded-xl text-xs flex items-center justify-center gap-1.5"
+              >
+                <svg className="h-4 w-4 text-emerald-500 fill-current" viewBox="0 0 24 24">
+                  <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.517 2.266 2.27 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.502-5.724-1.458L0 24zm6.702-4.103c1.633.969 3.259 1.487 4.908 1.488 5.489 0 9.954-4.41 9.957-9.829.001-2.624-1.024-5.092-2.884-6.958-1.86-1.866-4.333-2.893-6.962-2.894-5.492 0-9.96 4.41-9.963 9.83-.001 1.93.505 3.813 1.467 5.474L2.247 21.91l4.512-1.183z" />
+                </svg>
+                WhatsApp
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const email = prompt("Enter customer email address:");
+                  if (email) {
+                    const orderNo = completedSaleId ? `FTC-POS-${completedSaleId.slice(-6).toUpperCase()}` : '';
+                    const itemsStr = cart.map(i => `• ${i.productName} x${i.quantity} (${fmt(i.lineTotal, currency)})`).join('%0A');
+                    const subject = `Receipt for Order ${orderNo} - FTC Electronics`;
+                    const body = `Thank you for shopping with FTC Electronics!%0A%0AOrder Number: ${orderNo}%0ADate: ${new Date().toLocaleDateString()}%0ATotal Amount: ${fmt(billData.total, currency)}%0A%0AItems Purchased:%0A${itemsStr}%0A%0AWe hope to see you again soon!`;
+                    window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${body}`;
+                  }
+                }}
+                className="h-10 rounded-xl text-xs flex items-center justify-center gap-1.5"
+              >
+                <Mail className="h-4 w-4 text-blue-500" />
+                Email
+              </Button>
+            </div>
+
             <Button
               onClick={onSuccess}
-              className="flex-1 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white"
+              className="w-full h-11 mt-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white font-bold"
             >
-              New Sale
+              Start New Sale
             </Button>
           </div>
         </div>
@@ -364,6 +420,9 @@ export default function PosPaymentModal({
                   type="text"
                   value={custQuery}
                   onChange={(e) => setCustQuery(e.target.value)}
+                  onFocus={() => {
+                    if (custQuery.trim()) setShowCustDropdown(true);
+                  }}
                   placeholder="Search customer by name or phone… (Optional)"
                   className="pl-8 h-9 text-xs rounded-xl"
                 />

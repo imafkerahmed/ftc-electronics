@@ -38,6 +38,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { name: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard },
+  { name: 'Sales Tracker', href: '/admin/sales', icon: ScrollText },
   {
     name: 'Catalog',
     icon: Package,

@@ -1143,7 +1143,18 @@ export const pbSales = {
     try {
       const adminPb = await getAdminPb();
       const { items, ...saleData } = payload;
-      const sale = await adminPb.collection("sales").create<PBSale>(saleData);
+      const totalItemsCount = items.reduce((sum, item) => sum + (item.quantity || 1), 0);
+      const receiptNo = saleData.receipt_number || `FTC-POS-${Date.now().toString(36).toUpperCase()}`;
+
+      const fullSaleData = {
+        status: "completed",
+        receipt_number: receiptNo,
+        date: saleData.date || new Date().toISOString(),
+        items_count: totalItemsCount,
+        ...saleData,
+      };
+
+      const sale = await adminPb.collection("sales").create<PBSale>(fullSaleData);
       const createdItems = await Promise.all(
         items.map((item) =>
           adminPb.collection("sale_items").create<PBSaleItem>({ ...item, sale: sale.id })
@@ -1182,12 +1193,19 @@ export const pbSales = {
 
         if (item.product_id) {
           try {
-            const p: any = await adminPb.collection("products").getOne(item.product_id);
-            const currentStock = typeof p.countInStock === 'number' ? p.countInStock : 0;
-            const newStock = Math.max(0, currentStock - item.quantity);
-            await adminPb.collection("products").update(item.product_id, { countInStock: newStock });
+            const avail = await adminPb.collection("stock_management").getFullList({
+              filter: `product = "${item.product_id}" && status = "available"`,
+            });
+            await adminPb.collection("products").update(item.product_id, { countInStock: avail.length });
           } catch {
-            // ignore if product missing
+            try {
+              const p: any = await adminPb.collection("products").getOne(item.product_id);
+              const currentStock = typeof p.countInStock === 'number' ? p.countInStock : 0;
+              const newStock = Math.max(0, currentStock - item.quantity);
+              await adminPb.collection("products").update(item.product_id, { countInStock: newStock });
+            } catch {
+              // ignore
+            }
           }
         }
       }
@@ -1202,7 +1220,7 @@ export const pbSales = {
     try {
       const adminPb = await getAdminPb();
       return await adminPb.collection("sales").getFullList<PBSale>({
-        sort: "-created",
+        sort: "-id",
         perPage: limit,
       });
     } catch (err) {
@@ -1226,7 +1244,7 @@ export const pbSales = {
       const adminPb = await getAdminPb();
       return await adminPb.collection("sale_items").getFullList<PBSaleItem>({
         filter: `sale = "${saleId}"`,
-        sort: "created",
+        sort: "id",
       });
     } catch (err) {
       handleError(err, "pbSales.getItemsBySale");
@@ -1263,12 +1281,19 @@ export const pbSales = {
 
           if (item.product_id) {
             try {
-              const p: any = await adminPb.collection("products").getOne(item.product_id);
-              const currentStock = typeof p.countInStock === 'number' ? p.countInStock : 0;
-              const restoredStock = currentStock + item.quantity;
-              await adminPb.collection("products").update(item.product_id, { countInStock: restoredStock });
+              const avail = await adminPb.collection("stock_management").getFullList({
+                filter: `product = "${item.product_id}" && status = "available"`,
+              });
+              await adminPb.collection("products").update(item.product_id, { countInStock: avail.length });
             } catch {
-              // ignore if product missing
+              try {
+                const p: any = await adminPb.collection("products").getOne(item.product_id);
+                const currentStock = typeof p.countInStock === 'number' ? p.countInStock : 0;
+                const restoredStock = currentStock + item.quantity;
+                await adminPb.collection("products").update(item.product_id, { countInStock: restoredStock });
+              } catch {
+                // ignore if product missing
+              }
             }
           }
         }
@@ -1290,7 +1315,7 @@ export const pbCustomers = {
     try {
       const adminPb = await getAdminPb();
       return await adminPb.collection("customers").getFullList<PBCustomer>({
-        sort: "-created",
+        sort: "name",
       });
     } catch (err) {
       handleError(err, "pbCustomers.getAll");

@@ -6,6 +6,7 @@ import { ArrowLeft, Receipt, Printer, Ban, Clock, CreditCard, Banknote, QrCode, 
 import { getRecentSalesAction, voidSaleAction } from '@/app/actions/admin';
 import type { PBSale } from '@/types/pos';
 import { Button, buttonVariants } from '@/components/ui/button';
+import ManagerPinModal from '@/components/pos/manager-pin-modal';
 
 function fmt(amount: number) {
   return amount.toLocaleString('en-LK', { style: 'currency', currency: 'LKR', maximumFractionDigits: 0 });
@@ -23,7 +24,8 @@ export default function PosHistoryPage() {
   const [sales, setSales] = useState<PBSale[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
-  const [voidConfirm, setVoidConfirm] = useState<string | null>(null);
+  const [voidTargetId, setVoidTargetId] = useState<string | null>(null);
+  const [voidError, setVoidError] = useState<string | null>(null);
 
   const loadSales = useCallback(async () => {
     setLoading(true);
@@ -34,11 +36,18 @@ export default function PosHistoryPage() {
 
   useEffect(() => { void loadSales(); }, [loadSales]);
 
-  const handleVoid = (id: string) => {
+  const handleConfirmVoid = (pin: string) => {
+    if (!voidTargetId) return;
+    const saleId = voidTargetId;
     startTransition(async () => {
-      await voidSaleAction(id);
-      setVoidConfirm(null);
-      await loadSales();
+      const res = await voidSaleAction(saleId, pin);
+      if (res.success) {
+        setVoidTargetId(null);
+        setVoidError(null);
+        await loadSales();
+      } else {
+        setVoidError(res.error || 'Failed to void sale.');
+      }
     });
   };
 
@@ -89,9 +98,10 @@ export default function PosHistoryPage() {
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border bg-muted/30">
-                <th className="text-left px-4 py-3 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Time</th>
+                <th className="text-left px-4 py-3 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Receipt / Time</th>
                 <th className="text-left px-4 py-3 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Cashier</th>
                 <th className="text-left px-4 py-3 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Customer</th>
+                <th className="text-center px-4 py-3 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Items</th>
                 <th className="text-left px-4 py-3 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Method</th>
                 <th className="text-right px-4 py-3 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total</th>
                 <th className="text-center px-4 py-3 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Status</th>
@@ -101,12 +111,16 @@ export default function PosHistoryPage() {
             <tbody>
               {sales.map((sale) => {
                 const MIcon = methodIcon[sale.payment_method] || CreditCard;
-                const created = new Date(sale.created);
+                const rawDateStr = sale.date || sale.created || sale.updated;
+                const d = rawDateStr ? new Date(rawDateStr) : new Date();
+                const created = isNaN(d.getTime()) ? new Date() : d;
                 const isToday = created.toDateString() === new Date().toDateString();
+                const receiptNum = sale.receipt_number || `FTC-POS-${sale.id.slice(-6).toUpperCase()}`;
                 return (
                   <tr key={sale.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                    <td className="px-4 py-3 text-muted-foreground">
-                      <div className="flex items-center gap-1.5">
+                    <td className="px-4 py-3">
+                      <p className="font-mono font-bold text-foreground text-xs">{receiptNum}</p>
+                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
                         <Clock className="h-3 w-3 opacity-50" />
                         {isToday
                           ? created.toLocaleTimeString('en-LK', { hour: '2-digit', minute: '2-digit' })
@@ -115,16 +129,37 @@ export default function PosHistoryPage() {
                     </td>
                     <td className="px-4 py-3 font-semibold text-foreground">{sale.cashier_name || '—'}</td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {sale.customer_name || <span className="italic opacity-50">Walk-in</span>}
-                      {sale.customer_phone && <span className="ml-1 text-[10px] opacity-60">{sale.customer_phone}</span>}
+                      {sale.customer_name ? (
+                        <div>
+                          <p className="font-semibold text-foreground">{sale.customer_name}</p>
+                          {sale.customer_phone && <p className="text-[10px] text-muted-foreground">{sale.customer_phone}</p>}
+                        </div>
+                      ) : (
+                        <span className="italic opacity-50">Walk-in Customer</span>
+                      )}
                     </td>
-                    <td className="px-4 py-3">
-                      <span className={`flex items-center gap-1 font-semibold ${methodColor[sale.payment_method] || ''}`}>
-                        <MIcon className="h-3 w-3" />
-                        {sale.payment_method}
+                    <td className="px-4 py-3 text-center">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-muted text-foreground font-semibold text-[10px]">
+                        {sale.items_count || 1} {sale.items_count === 1 ? 'item' : 'items'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right font-black text-foreground">{fmt(sale.total)}</td>
+                    <td className="px-4 py-3">
+                      <div className="space-y-0.5">
+                        <span className={`inline-flex items-center gap-1 font-semibold capitalize ${methodColor[sale.payment_method] || ''}`}>
+                          <MIcon className="h-3 w-3" />
+                          {sale.payment_method}
+                        </span>
+                        {sale.payment_method === 'cash' && sale.change_due > 0 && (
+                          <p className="text-[10px] text-amber-500 font-medium">Change: {fmt(sale.change_due)}</p>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <p className="font-black text-foreground">{fmt(sale.total)}</p>
+                      {sale.discount > 0 && (
+                        <p className="text-[10px] text-emerald-500 font-semibold">–{fmt(sale.discount)} off</p>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-center">
                       {sale.status === 'completed' ? (
                         <span className="inline-flex items-center gap-1 text-emerald-500 font-semibold">
@@ -142,34 +177,17 @@ export default function PosHistoryPage() {
                           <Printer className="h-3 w-3" /> View
                         </Link>
                         {sale.status === 'completed' && (
-                          voidConfirm === sale.id ? (
-                            <div className="flex gap-1">
-                              <Button
-                                variant="destructive"
-                                size="xs"
-                                onClick={() => handleVoid(sale.id)}
-                                disabled={isPending}
-                              >
-                                Confirm
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="xs"
-                                onClick={() => setVoidConfirm(null)}
-                              >
-                                Cancel
-                              </Button>
-                            </div>
-                          ) : (
-                            <Button
-                              variant="outline"
-                              size="xs"
-                              onClick={() => setVoidConfirm(sale.id)}
-                              className="hover:text-red-500 hover:border-red-500/30"
-                            >
-                              <Ban className="h-3 w-3" /> Void
-                            </Button>
-                          )
+                          <Button
+                            variant="outline"
+                            size="xs"
+                            onClick={() => {
+                              setVoidError(null);
+                              setVoidTargetId(sale.id);
+                            }}
+                            className="hover:text-red-500 hover:border-red-500/30 text-xs"
+                          >
+                            <Ban className="h-3 w-3" /> Void
+                          </Button>
                         )}
                       </div>
                     </td>
@@ -180,6 +198,14 @@ export default function PosHistoryPage() {
           </table>
         )}
       </div>
+
+      <ManagerPinModal
+        title="Manager Approval Needed"
+        description="Please enter a Manager or Admin PIN to void this completed sale."
+        isOpen={Boolean(voidTargetId)}
+        onClose={() => setVoidTargetId(null)}
+        onSuccess={(pin) => handleConfirmVoid(pin)}
+      />
     </div>
   );
 }

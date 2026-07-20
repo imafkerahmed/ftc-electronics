@@ -92,17 +92,21 @@ export default function PosNewSaleTerminal({
     if (!custQuery.trim()) {
       setCustResults([]);
       setShowCustDropdown(false);
+      setSearchingCust(false);
       return;
     }
+    setShowCustDropdown(true);
+    setSearchingCust(true);
+
     const timer = setTimeout(async () => {
-      setSearchingCust(true);
       const res = await searchPosCustomersAction(custQuery);
       if (res.success && res.data) {
         setCustResults(res.data);
-        setShowCustDropdown(true);
+      } else {
+        setCustResults([]);
       }
       setSearchingCust(false);
-    }, 250);
+    }, 200);
 
     return () => clearTimeout(timer);
   }, [custQuery]);
@@ -325,6 +329,9 @@ export default function PosNewSaleTerminal({
                     type="text"
                     value={custQuery}
                     onChange={(e) => setCustQuery(e.target.value)}
+                    onFocus={() => {
+                      if (custQuery.trim()) setShowCustDropdown(true);
+                    }}
                     placeholder="Search existing customer by Name, Phone, or Email…"
                     className="pl-10 h-10 text-xs rounded-xl"
                   />

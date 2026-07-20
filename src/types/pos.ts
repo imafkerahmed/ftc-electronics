@@ -47,10 +47,14 @@ export type PaymentMethod = 'cash' | 'card' | 'qr' | 'split';
 export type SaleStatus = 'completed' | 'voided';
 
 export interface PBSale extends PBRecord {
+  receipt_number?: string;
+  date?: string;
   cashier_name: string;
   cashier_id: string;
   customer_name: string;
   customer_phone: string;
+  customer_email?: string;
+  customer_id?: string;
   subtotal: number;
   discount: number;
   tax_amount: number;
@@ -58,6 +62,7 @@ export interface PBSale extends PBRecord {
   payment_method: PaymentMethod;
   cash_tendered: number;
   change_due: number;
+  items_count?: number;
   status: SaleStatus;
   notes: string;
 }
@@ -68,20 +73,28 @@ export interface PBSaleItem extends PBRecord {
   product_name: string;
   sku: string;
   unit_price: number;
+  item_discount?: number;
+  unit_cost?: number;
   quantity: number;
   line_total: number;
   unit_id?: string;
   unit_barcode?: string;
   unit_serial?: string;
+  image_url?: string;
+  category?: string;
 }
 
 // ─── Checkout Payload ─────────────────────────────────────────────────────────
 
 export interface SalePayload {
+  receipt_number?: string;
+  date?: string;
   cashier_name: string;
   cashier_id: string;
   customer_name: string;
   customer_phone: string;
+  customer_email?: string;
+  customer_id?: string;
   subtotal: number;
   discount: number;
   tax_amount: number;
@@ -89,16 +102,22 @@ export interface SalePayload {
   payment_method: PaymentMethod;
   cash_tendered: number;
   change_due: number;
+  items_count?: number;
+  status?: SaleStatus;
   notes: string;
   items: Array<{
     product_id: string;
     product_name: string;
     sku: string;
     unit_price: number;
+    item_discount?: number;
+    unit_cost?: number;
     quantity: number;
     line_total: number;
     unit_id?: string;
     unit_barcode?: string;
     unit_serial?: string;
+    image_url?: string;
+    category?: string;
   }>;
 }
