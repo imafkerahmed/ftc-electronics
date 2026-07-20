@@ -6,6 +6,7 @@ import { motion } from "motion/react";
 interface LocationMapProps {
   settings?: {
     address?: string;
+    city?: string;
     phone?: string;
     email?: string;
     hours?: Array<{ days: string; time: string }>;
@@ -15,9 +16,14 @@ interface LocationMapProps {
 }
 
 export default function LocationMap({ settings }: LocationMapProps) {
+  const defaultAddress = "45 Galle Road, Colombo 03, Sri Lanka";
+  const rawAddress = settings?.address || defaultAddress;
+  const city = settings?.city || "";
+  const fullAddress = city && !rawAddress.includes(city) ? `${rawAddress}, ${city}` : rawAddress;
+
   const storeInfo = {
     name: "FTC Flagship Store",
-    address: settings?.address || "45 Galle Road, Colombo 03, Sri Lanka",
+    address: fullAddress,
     phone: settings?.phone || "+94 11 234 5678",
     email: settings?.email || "support@ftcelectronics.com",
     hours: settings?.hours || [
@@ -27,6 +33,11 @@ export default function LocationMap({ settings }: LocationMapProps) {
     googleMapsLink: settings?.googleMapsLink || "https://maps.google.com/?q=Galle+Rd,+Colombo+03,+Sri+Lanka",
     whatsappLink: settings?.whatsappLink || "https://wa.me/94112345678",
   };
+
+  // For the iframe: use the configured URL if it looks like an embed src;
+  // otherwise fall back to the default embed. Plain directions links work too.
+  const iframeSrc = settings?.googleMapsLink ||
+    "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3960.7984670691077!2d79.8482!3d6.9147!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3ae259410f545199%3A0xa6ec07c3905cfb6e!2sGalle%20Rd%2C%20Colombo!5e0!3m2!1sen!2slk!4v1700000000000!5m2!1sen!2slk";
 
   const contactItems = [
     {
@@ -114,7 +125,7 @@ export default function LocationMap({ settings }: LocationMapProps) {
               <div className="absolute -inset-[2px] rounded-[18px] bg-gradient-to-r from-blue-500/30 via-indigo-500/20 to-cyan-500/20 group-hover:from-blue-500/50 group-hover:to-cyan-500/40 transition-all duration-700 pointer-events-none z-20" />
               <div className="absolute inset-0 rounded-2xl border border-white/5 z-20 pointer-events-none" />
               <iframe
-                src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3960.7984670691077!2d79.8482!3d6.9147!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3ae259410f545199%3A0xa6ec07c3905cfb6e!2sGalle%20Rd%2C%20Colombo!5e0!3m2!1sen!2slk!4v1700000000000!5m2!1sen!2slk"
+                src={iframeSrc}
                 width="100%"
                 height="100%"
                 style={{ border: 0 }}

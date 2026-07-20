@@ -13,6 +13,7 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  MapPin,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,6 +29,9 @@ export default function GeneralSettingsPage() {
   const [hours, setHours] = useState('9:00 AM - 7:00 PM Daily');
   const [currency, setCurrency] = useState('LKR');
   const [taxRate, setTaxRate] = useState('15');
+  const [address, setAddress] = useState('');
+  const [city, setCity] = useState('');
+  const [googleMapsUrl, setGoogleMapsUrl] = useState('');
 
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
@@ -52,6 +56,9 @@ export default function GeneralSettingsPage() {
           setHours(settings.storeHoursCopy || '');
           setCurrency(settings.currency || 'LKR');
           setTaxRate(settings.taxRate?.toString() || '15');
+          setAddress(settings.location?.address || '');
+          setCity(settings.location?.city || '');
+          setGoogleMapsUrl(settings.location?.googleMapsUrl || '');
         }
       } catch (err: any) {
         // use defaults
@@ -72,6 +79,7 @@ export default function GeneralSettingsPage() {
         taxRate: parseFloat(taxRate) || 0,
         storeHoursCopy: hours,
         contactInfo: { phone, email, whatsapp },
+        location: { address, city, googleMapsUrl },
       };
       const res = await updateSiteSettingsAction('general', payload);
       if (res.success) {
@@ -183,6 +191,48 @@ export default function GeneralSettingsPage() {
                   <Clock className="h-3.5 w-3.5 text-muted-foreground" /> Store Operating Hours
                 </label>
                 <Input value={hours} onChange={(e) => setHours(e.target.value)} className="h-8.5 text-xs" />
+              </div>
+            </div>
+
+            {/* Store Physical Location */}
+            <div className="bg-card border border-border rounded-2xl p-5 space-y-4 md:col-span-2 shadow-sm">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground border-b border-border pb-1.5 flex items-center gap-1.5">
+                <MapPin className="h-3.5 w-3.5 text-rose-500" /> Store Physical Location
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5 sm:col-span-2">
+                  <label className="text-xs font-semibold text-foreground/80">Street Address</label>
+                  <Input
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="e.g. No. 45, Galle Road, Colombo 03"
+                    className="h-8.5 text-xs"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground/80">City / Region</label>
+                  <Input
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder="e.g. Colombo, Sri Lanka"
+                    className="h-8.5 text-xs"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground/80 flex items-center gap-1">
+                    Google Maps Embed / Link URL
+                    <span className="text-muted-foreground font-normal">(shown on storefront map)</span>
+                  </label>
+                  <Input
+                    value={googleMapsUrl}
+                    onChange={(e) => setGoogleMapsUrl(e.target.value)}
+                    placeholder="https://maps.google.com/maps?q=... or embed src URL"
+                    className="h-8.5 text-xs"
+                  />
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">
+                    Paste the Google Maps <strong>embed URL</strong> (from Share → Embed a map → copy the <code>src</code>) or a plain directions link.
+                  </p>
+                </div>
               </div>
             </div>
           </div>

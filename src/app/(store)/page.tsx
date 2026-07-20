@@ -119,13 +119,15 @@ export default async function StoreHomePage() {
     .get<any>("contact")
     .catch(() => null);
   const hoursSetting = await pbSiteSettings.get<any>("hours").catch(() => null);
+  const generalSetting = await pbSiteSettings.get<any>("general").catch(() => null);
 
   const locatorSettings = {
-    address: contactSetting?.address,
-    phone: contactSetting?.phone,
-    email: contactSetting?.email,
+    address: generalSetting?.location?.address || contactSetting?.address,
+    city: generalSetting?.location?.city,
+    phone: generalSetting?.contactInfo?.phone || contactSetting?.phone,
+    email: generalSetting?.contactInfo?.email || contactSetting?.email,
     hours: hoursSetting?.hours,
-    googleMapsLink: contactSetting?.googleMapsLink,
+    googleMapsLink: generalSetting?.location?.googleMapsUrl || contactSetting?.googleMapsLink,
     whatsappLink: contactSetting?.whatsappLink,
   };
 
