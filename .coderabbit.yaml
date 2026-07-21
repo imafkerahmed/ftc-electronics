@@ -1,0 +1,13 @@
+language: "en-US"
+reviews:
+  profile: "assertive"
+  tools:
+    eslint:
+      enabled: true
+  path_instructions:
+    - path: "**/*.{ts,tsx}"
+      instructions: "Check for Next.js App Router best practices, proper TypeScript strict typing, and efficient React component rendering."
+  path_filters:
+    - "!public/assets/**"
+    - "!package-lock.json"
+    - "!.next/**"
