@@ -32,9 +32,9 @@ if (fs.existsSync(envPath)) {
   dotenv.config();
 }
 
-const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'https://ftc-db.codix.site/';
-const superuserEmail = process.env.POCKETBASE_SUPERUSER_EMAIL || 'admin@example.com';
-const superuserPassword = process.env.POCKETBASE_SUPERUSER_PASSWORD || 'password123';
+const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || '';
+const superuserEmail = process.env.POCKETBASE_SUPERUSER_EMAIL || '';
+const superuserPassword = process.env.POCKETBASE_SUPERUSER_PASSWORD || '';
 
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 

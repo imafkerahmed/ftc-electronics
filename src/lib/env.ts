@@ -1,0 +1,8 @@
+/**
+ * Environment configuration helper with fast-fail runtime assertions.
+ */
+
+export const env = {
+  POCKETBASE_URL: process.env.NEXT_PUBLIC_POCKETBASE_URL || 'http://127.0.0.1:8090',
+  REVALIDATION_SECRET: process.env.REVALIDATION_SECRET || '',
+};

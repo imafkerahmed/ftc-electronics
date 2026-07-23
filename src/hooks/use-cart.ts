@@ -19,10 +19,7 @@ export function useCart() {
 
   // Sync state hydration
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsHydrated(true);
-    }, 0);
-    return () => clearTimeout(timer);
+    setIsHydrated(true);
   }, []);
 
   return {

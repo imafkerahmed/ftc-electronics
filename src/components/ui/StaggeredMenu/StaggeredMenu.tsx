@@ -4,7 +4,38 @@ import { gsap } from "gsap";
 import { ArrowLeft, ChevronRight } from "lucide-react";
 import "./StaggeredMenu.css";
 
-export const StaggeredMenu = ({
+export interface MenuItem {
+  label: string;
+  link: string;
+  ariaLabel?: string;
+  isBack?: boolean;
+  subItems?: { label: string; link: string }[];
+}
+
+export interface SocialItem {
+  label: string;
+  link: string;
+}
+
+export interface StaggeredMenuProps {
+  position?: 'left' | 'right';
+  colors?: string[];
+  items?: MenuItem[];
+  socialItems?: SocialItem[];
+  displaySocials?: boolean;
+  displayItemNumbering?: boolean;
+  className?: string;
+  menuButtonColor?: string;
+  openMenuButtonColor?: string;
+  accentColor?: string;
+  changeMenuColorOnOpen?: boolean;
+  isFixed?: boolean;
+  closeOnClickAway?: boolean;
+  onMenuOpen?: () => void;
+  onMenuClose?: () => void;
+}
+
+export const StaggeredMenu: React.FC<StaggeredMenuProps> = ({
   position = "right",
   colors = ["#B497CF", "#5227FF"],
   items = [],
@@ -23,21 +54,24 @@ export const StaggeredMenu = ({
 }) => {
   const [open, setOpen] = useState(false);
   const openRef = useRef(false);
-  const [expandedItem, setExpandedItem] = useState(null);
-  const [currentView, setCurrentView] = useState({
+  const [expandedItem, setExpandedItem] = useState<string | null>(null);
+  const [currentView, setCurrentView] = useState<{
+    type: "main" | "submenu";
+    activeItem: MenuItem | null;
+  }>({
     type: "main",
     activeItem: null,
   });
-  const panelRef = useRef(null);
-  const preLayersRef = useRef(null);
-  const preLayerElsRef = useRef([]);
-  const openTlRef = useRef(null);
-  const closeTweenRef = useRef(null);
-  const colorTweenRef = useRef(null);
-  const toggleBtnRef = useRef(null);
+  const panelRef = useRef<HTMLElement | null>(null);
+  const preLayersRef = useRef<HTMLDivElement | null>(null);
+  const preLayerElsRef = useRef<Element[]>([]);
+  const openTlRef = useRef<gsap.core.Timeline | null>(null);
+  const closeTweenRef = useRef<gsap.core.Tween | null>(null);
+  const colorTweenRef = useRef<gsap.core.Tween | null>(null);
+  const toggleBtnRef = useRef<HTMLButtonElement | null>(null);
   const menuBusyRef = useRef(false);
   const transitionBusyRef = useRef(false);
-  const itemEntranceTweenRef = useRef(null);
+  const itemEntranceTweenRef = useRef<gsap.core.Tween | null>(null);
 
   useLayoutEffect(() => {
     const ctx = gsap.context(() => {
@@ -45,7 +79,7 @@ export const StaggeredMenu = ({
       const preContainer = preLayersRef.current;
       if (!panel) return;
 
-      let preLayers = [];
+      let preLayers: Element[] = [];
       if (preContainer) {
         preLayers = Array.from(preContainer.querySelectorAll(".sm-prelayer"));
       }
@@ -240,7 +274,7 @@ export const StaggeredMenu = ({
   }, [position]);
 
   const animateColor = useCallback(
-    (opening) => {
+    (opening: boolean) => {
       const btn = toggleBtnRef.current;
       if (!btn) return;
       colorTweenRef.current?.kill();
@@ -272,7 +306,7 @@ export const StaggeredMenu = ({
     }
   }, [changeMenuColorOnOpen, menuButtonColor, openMenuButtonColor]);
 
-  const transitionToView = useCallback((targetView) => {
+  const transitionToView = useCallback((targetView: { type: "main" | "submenu"; activeItem: MenuItem | null }) => {
     if (transitionBusyRef.current) return;
     transitionBusyRef.current = true;
 
@@ -348,12 +382,12 @@ export const StaggeredMenu = ({
   React.useEffect(() => {
     if (!closeOnClickAway || !open) return;
 
-    const handleClickOutside = (event) => {
+    const handleClickOutside = (event: MouseEvent) => {
       if (
         panelRef.current &&
-        !panelRef.current.contains(event.target) &&
+        !panelRef.current.contains(event.target as Node) &&
         toggleBtnRef.current &&
-        !toggleBtnRef.current.contains(event.target)
+        !toggleBtnRef.current.contains(event.target as Node)
       ) {
         closeMenu();
       }
@@ -366,7 +400,7 @@ export const StaggeredMenu = ({
   }, [closeOnClickAway, open, closeMenu]);
 
   const handleItemClick = useCallback(
-    (e, it) => {
+    (e: React.MouseEvent, it: MenuItem) => {
       if (it.isBack) {
         e.preventDefault();
         transitionToView({ type: "main", activeItem: null });
@@ -389,7 +423,7 @@ export const StaggeredMenu = ({
       ? items
       : currentView.activeItem?.subItems || [];
 
-  const renderList = [];
+  const renderList: MenuItem[] = [];
   if (currentView.type === "submenu") {
     renderList.push({
       label: "← Back",
@@ -406,7 +440,7 @@ export const StaggeredMenu = ({
         "staggered-menu-wrapper" +
         (isFixed ? " fixed-wrapper" : "")
       }
-      style={accentColor ? { ["--sm-accent"]: accentColor } : undefined}
+      style={accentColor ? ({ "--sm-accent": accentColor } as React.CSSProperties) : undefined}
       data-position={position}
       data-open={open || undefined}
     >

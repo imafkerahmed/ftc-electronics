@@ -37,27 +37,37 @@ async function checkPermission(
 ): Promise<{ allowed: boolean; role?: AdminRole; actorEmail?: string; ip?: string; userAgent?: string }> {
   const cookieStore = await cookies();
   const token = cookieStore.get('pb_auth_token')?.value;
-  const role = cookieStore.get('pb_auth_role')?.value as AdminRole | undefined;
-  const effectiveRole: AdminRole = role || 'super_admin';
 
   const headersList = await headers();
   const ip = headersList.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
   const userAgent = headersList.get('user-agent') || 'unknown';
 
-  // Parse email from token
+  if (!token) {
+    return { allowed: false, ip, userAgent };
+  }
+
+  const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'http://127.0.0.1:8090';
   let actorEmail = 'admin@ftc.lk';
-  if (token) {
-    try {
-      const parts = token.split('.');
-      if (parts.length === 3) {
-        const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-        const decoded = atob(base64);
-        const payload = JSON.parse(decoded);
-        actorEmail = payload.email || payload.sub || 'admin@ftc.lk';
-      }
-    } catch {
-      // Ignore decode error
+  let effectiveRole: AdminRole | undefined;
+
+  try {
+    const PocketBase = (await import('pocketbase')).default;
+    const userPb = new PocketBase(pbUrl);
+    userPb.authStore.save(token, null);
+
+    if (!userPb.authStore.isValid || !userPb.authStore.model) {
+      return { allowed: false, ip, userAgent };
     }
+
+    const user = await userPb.collection('users').getOne(userPb.authStore.model.id);
+    effectiveRole = user.role as AdminRole;
+    actorEmail = user.email || userPb.authStore.model.email || 'admin@ftc.lk';
+  } catch {
+    return { allowed: false, ip, userAgent };
+  }
+
+  if (!effectiveRole) {
+    return { allowed: false, ip, userAgent };
   }
 
   const permissions = ROLE_PERMISSIONS[effectiveRole];
@@ -67,10 +77,10 @@ async function checkPermission(
 
   const modulePerms = (permissions as any)[module];
   if (!modulePerms || !modulePerms[action]) {
-    return { allowed: false, role, actorEmail, ip, userAgent };
+    return { allowed: false, role: effectiveRole, actorEmail, ip, userAgent };
   }
 
-  return { allowed: true, role, actorEmail, ip, userAgent };
+  return { allowed: true, role: effectiveRole, actorEmail, ip, userAgent };
 }
 
 // ─── Products Actions ─────────────────────────────────────────────────────────

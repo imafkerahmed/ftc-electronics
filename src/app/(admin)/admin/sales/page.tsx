@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useTransition } from "react";
+import React, { useState, useEffect, useTransition, useCallback } from "react";
 import Link from "next/link";
 import {
   TrendingUp,
@@ -20,10 +20,23 @@ import {
   Banknote,
   QrCode,
   Store,
+  X,
+  Printer,
+  Receipt,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { getUnifiedSalesTrackerAction } from "@/app/actions/admin";
+import {
+  getUnifiedSalesTrackerAction,
+  getSaleByIdAction,
+  getReceiptPrintPresetsAction,
+} from "@/app/actions/admin";
+import type { PBSale, PBSaleItem } from "@/types/pos";
+import { printReceipt } from "@/lib/receipt-print";
+import {
+  DEFAULT_RECEIPT_CONFIG,
+  normalizeReceiptConfig,
+} from "@/types/receipt-config";
 
 interface UnifiedSale {
   id: string;
@@ -63,6 +76,90 @@ export default function AdminSalesTrackerPage() {
     "All" | "POS Terminal" | "Online Store"
   >("All");
   const [isPending, startTransition] = useTransition();
+
+  const [selectedPosSaleId, setSelectedPosSaleId] = useState<string | null>(null);
+  const [posReceiptDetails, setPosReceiptDetails] = useState<{
+    sale: PBSale;
+    items: PBSaleItem[];
+  } | null>(null);
+  const [loadingReceipt, setLoadingReceipt] = useState(false);
+
+  useEffect(() => {
+    async function fetchReceipt() {
+      if (!selectedPosSaleId) {
+        setPosReceiptDetails(null);
+        return;
+      }
+      setLoadingReceipt(true);
+      try {
+        const res = await getSaleByIdAction(selectedPosSaleId);
+        if (res.success && res.data) {
+          setPosReceiptDetails(res.data as { sale: PBSale; items: PBSaleItem[] });
+        }
+      } catch {
+        /* ignore */
+      } finally {
+        setLoadingReceipt(false);
+      }
+    }
+    void fetchReceipt();
+  }, [selectedPosSaleId]);
+
+  const handleReprintReceipt = async () => {
+    if (!posReceiptDetails) return;
+    const { sale, items } = posReceiptDetails;
+    const rawDateStr = sale.date || sale.created || sale.updated;
+    const d = rawDateStr ? new Date(rawDateStr) : new Date();
+    const formattedDate = (isNaN(d.getTime()) ? new Date() : d).toLocaleString("en-LK");
+    try {
+      const res = await getReceiptPrintPresetsAction();
+      const presets = (res.data || []) as any[];
+      const defaultPreset = presets.find((p) => p.isDefault) || presets[0];
+      const cfg = defaultPreset
+        ? normalizeReceiptConfig(defaultPreset.config)
+        : DEFAULT_RECEIPT_CONFIG;
+
+      printReceipt(
+        cfg,
+        {
+          orderNumber: sale.receipt_number || `FTC-POS-${sale.id.slice(-6).toUpperCase()}`,
+          date: formattedDate,
+          customerName: sale.customer_name || "Walk-in Customer",
+          customerPhone: sale.customer_phone,
+          items: items.map((i) => ({
+            name: i.product_name,
+            qty: i.quantity,
+            unitPrice: i.unit_price,
+          })),
+          subtotal: sale.subtotal,
+          discount: sale.discount,
+          total: sale.total,
+          paymentMethod: sale.payment_method,
+        },
+        "POS Receipt"
+      );
+    } catch {
+      printReceipt(
+        DEFAULT_RECEIPT_CONFIG,
+        {
+          orderNumber: sale.receipt_number || `FTC-POS-${sale.id.slice(-6).toUpperCase()}`,
+          date: formattedDate,
+          customerName: sale.customer_name || "Walk-in Customer",
+          customerPhone: sale.customer_phone,
+          items: items.map((i) => ({
+            name: i.product_name,
+            qty: i.quantity,
+            unitPrice: i.unit_price,
+          })),
+          subtotal: sale.subtotal,
+          discount: sale.discount,
+          total: sale.total,
+          paymentMethod: sale.payment_method,
+        },
+        "POS Receipt"
+      );
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -355,18 +452,23 @@ export default function AdminSalesTrackerPage() {
                       </td>
 
                       <td className="p-4 text-right">
-                        <Link
-                          href={
-                            sale.source === "POS Terminal"
-                              ? `/pos/history/${sale.id}`
-                              : `/admin/orders`
-                          }
-                          className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:underline"
-                        >
-                          View{" "}
-                          {sale.source === "POS Terminal" ? "Receipt" : "Order"}
-                          <ArrowUpRight className="h-3 w-3" />
-                        </Link>
+                        {sale.source === 'POS Terminal' ? (
+                          <button
+                            onClick={() => setSelectedPosSaleId(sale.id)}
+                            className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:underline font-bold"
+                          >
+                            View Receipt
+                            <ArrowUpRight className="h-3 w-3" />
+                          </button>
+                        ) : (
+                          <Link
+                            href="/admin/orders"
+                            className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:underline"
+                          >
+                            View Order
+                            <ArrowUpRight className="h-3 w-3" />
+                          </Link>
+                        )}
                       </td>
                     </tr>
                   );
@@ -376,6 +478,159 @@ export default function AdminSalesTrackerPage() {
           )}
         </div>
       </div>
+
+      {/* POS Receipt Preview Modal */}
+      {selectedPosSaleId && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20">
+              <div className="flex items-center gap-2">
+                <Receipt className="h-5 w-5 text-blue-500" />
+                <h3 className="text-sm font-black text-foreground">POS Receipt Detail</h3>
+              </div>
+              <button
+                onClick={() => setSelectedPosSaleId(null)}
+                className="text-muted-foreground hover:text-foreground p-1 rounded-lg hover:bg-muted"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-5 flex-1 text-xs">
+              {loadingReceipt ? (
+                <div className="py-12 text-center text-muted-foreground flex flex-col items-center justify-center gap-2">
+                  <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+                  Loading receipt details...
+                </div>
+              ) : !posReceiptDetails ? (
+                <div className="py-12 text-center text-red-500">
+                  Failed to load receipt details.
+                </div>
+              ) : (
+                <>
+                  {/* Meta data */}
+                  <div className="grid grid-cols-2 gap-4 bg-muted/40 p-4 border border-border rounded-xl">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-0.5">Receipt No</p>
+                      <p className="font-mono font-bold text-foreground text-xs">
+                        {posReceiptDetails.sale.receipt_number || `FTC-POS-${posReceiptDetails.sale.id.slice(-6).toUpperCase()}`}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-0.5">Cashier</p>
+                      <p className="font-bold text-foreground">{posReceiptDetails.sale.cashier_name}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-0.5">Customer</p>
+                      <p className="font-bold text-foreground">{posReceiptDetails.sale.customer_name || 'Walk-in Customer'}</p>
+                      {posReceiptDetails.sale.customer_phone && (
+                        <p className="font-mono text-[10px] text-muted-foreground">{posReceiptDetails.sale.customer_phone}</p>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-0.5">Transaction Date</p>
+                      <p className="font-bold text-foreground">
+                        {(() => {
+                          const rawDateStr = posReceiptDetails.sale.date || posReceiptDetails.sale.created || posReceiptDetails.sale.updated;
+                          const d = rawDateStr ? new Date(rawDateStr) : new Date();
+                          return (isNaN(d.getTime()) ? new Date() : d).toLocaleString('en-LK');
+                        })()}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Items List */}
+                  <div>
+                    <h4 className="text-[10px] uppercase font-black text-muted-foreground tracking-wider mb-2">Items Purchased</h4>
+                    <div className="border border-border rounded-xl overflow-hidden">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="bg-muted/30 border-b border-border text-muted-foreground font-bold text-[10px]">
+                            <th className="p-3">Product</th>
+                            <th className="p-3 text-center">Qty</th>
+                            <th className="p-3 text-right">Price</th>
+                            <th className="p-3 text-right">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border font-medium">
+                          {posReceiptDetails.items.map((item) => (
+                            <tr key={item.id} className="hover:bg-muted/5">
+                              <td className="p-3">
+                                <p className="font-bold text-foreground">{item.product_name}</p>
+                                {item.unit_serial && (
+                                  <span className="font-mono text-[9px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded mt-0.5 inline-block">
+                                    SN: {item.unit_serial}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-3 text-center">{item.quantity}</td>
+                              <td className="p-3 text-right">{fmt(item.unit_price)}</td>
+                              <td className="p-3 text-right">{fmt(item.line_total)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Financial Breakdown */}
+                  <div className="border-t border-border pt-4 space-y-2">
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Subtotal</span>
+                      <span className="font-semibold text-foreground">{fmt(posReceiptDetails.sale.subtotal)}</span>
+                    </div>
+                    {posReceiptDetails.sale.discount > 0 && (
+                      <div className="flex justify-between text-emerald-500">
+                        <span>Discount</span>
+                        <span className="font-semibold">– {fmt(posReceiptDetails.sale.discount)}</span>
+                      </div>
+                    )}
+                    {posReceiptDetails.sale.tax_amount > 0 && (
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Tax</span>
+                        <span className="font-semibold text-foreground">{fmt(posReceiptDetails.sale.tax_amount)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-sm font-black text-foreground border-t border-border pt-2">
+                      <span>TOTAL</span>
+                      <span className="text-blue-500 text-base">{fmt(posReceiptDetails.sale.total)}</span>
+                    </div>
+                    {posReceiptDetails.sale.payment_method === 'cash' && posReceiptDetails.sale.cash_tendered > 0 && (
+                      <div className="flex justify-between text-muted-foreground border-t border-dashed border-border pt-1.5">
+                        <span>Cash Tendered</span>
+                        <span>{fmt(posReceiptDetails.sale.cash_tendered)}</span>
+                      </div>
+                    )}
+                    {posReceiptDetails.sale.change_due > 0 && (
+                      <div className="flex justify-between text-amber-500 font-bold">
+                        <span>Change Given</span>
+                        <span>{fmt(posReceiptDetails.sale.change_due)}</span>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 border-t border-border bg-muted/20 flex justify-end gap-2 shrink-0">
+              <Button variant="outline" size="sm" onClick={() => setSelectedPosSaleId(null)}>
+                Close
+              </Button>
+              {posReceiptDetails && (
+                <Button
+                  onClick={handleReprintReceipt}
+                  className="bg-blue-600 hover:bg-blue-500 text-white gap-1 text-xs"
+                >
+                  <Printer className="h-3.5 w-3.5" /> Print Receipt
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

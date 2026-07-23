@@ -4,7 +4,14 @@ import { revalidatePath, revalidateTag } from 'next/cache';
 export async function POST(request: NextRequest) {
   try {
     const secret = request.nextUrl.searchParams.get('secret');
-    const expectedSecret = process.env.REVALIDATION_SECRET || 'ftc_revalidate_secret_2026';
+    const expectedSecret = process.env.REVALIDATION_SECRET;
+
+    if (!expectedSecret) {
+      return NextResponse.json(
+        { message: 'Revalidation secret is not configured on the server' },
+        { status: 500 }
+      );
+    }
 
     if (secret !== expectedSecret) {
       return NextResponse.json({ message: 'Invalid revalidation secret' }, { status: 401 });
