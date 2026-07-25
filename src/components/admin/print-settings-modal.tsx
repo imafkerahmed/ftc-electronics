@@ -69,11 +69,17 @@ export default function PrintSettingsModal({ onClose, onPrint, unitCount }: Prin
     void loadPresets();
   }, [loadPresets]);
 
-  // Intercept wheel events on the backdrop and redirect them to the modal body.
-  // This prevents the background page from scrolling when using a trackpad.
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, []);
+
   const handleBackdropWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
+    if (scrollBodyRef.current && scrollBodyRef.current.contains(e.target as Node)) {
+      return;
+    }
     if (scrollBodyRef.current) {
       scrollBodyRef.current.scrollTop += e.deltaY;
     }

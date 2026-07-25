@@ -32,9 +32,9 @@ if (fs.existsSync(envPath)) {
   dotenv.config();
 }
 
-const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || '';
-const superuserEmail = process.env.POCKETBASE_SUPERUSER_EMAIL || '';
-const superuserPassword = process.env.POCKETBASE_SUPERUSER_PASSWORD || '';
+const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
+const superuserEmail = process.env.POCKETBASE_SUPERUSER_EMAIL;
+const superuserPassword = process.env.POCKETBASE_SUPERUSER_PASSWORD;
 
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 
@@ -143,6 +143,19 @@ function generatePbId(): string {
 
 async function seed() {
   console.log('🌱 Starting PocketBase seed...');
+
+  if (!pbUrl) {
+    console.error('NEXT_PUBLIC_POCKETBASE_URL is not configured in .env.local or environment.');
+    process.exit(1);
+  }
+
+  if (!superuserEmail || !superuserPassword) {
+    console.error(
+      ' Superuser credentials missing. Set POCKETBASE_SUPERUSER_EMAIL and POCKETBASE_SUPERUSER_PASSWORD in .env.local.'
+    );
+    process.exit(1);
+  }
+
   console.log(`   URL: ${pbUrl}`);
 
   const pb = new PocketBase(pbUrl);
@@ -151,14 +164,14 @@ async function seed() {
   // Authenticate as superuser
   try {
     await pb.collection('_superusers').authWithPassword(superuserEmail, superuserPassword);
-    console.log('✅ Authenticated as superuser');
+    console.log(' Authenticated as superuser');
   } catch {
     try {
       await (pb as unknown as { admins: { authWithPassword: (e: string, p: string) => Promise<unknown> } })
         .admins.authWithPassword(superuserEmail, superuserPassword);
-      console.log('✅ Authenticated as admin (legacy)');
+      console.log(' Authenticated as admin (legacy)');
     } catch (err) {
-      console.error('❌ Failed to authenticate:', err);
+      console.error(' Failed to authenticate:', err);
       console.log('\n   Make sure:');
       console.log('   1. PocketBase is running at', pbUrl);
       console.log('   2. Superuser credentials are correct in .env.local');
@@ -184,9 +197,9 @@ async function seed() {
           ...cat
         });
         categoryMap.set(cat.name, record.id);
-        console.log(`   ✅ Created category "${cat.name}" (${record.id})`);
+        console.log(`   Created category "${cat.name}" (${record.id})`);
       } catch (err) {
-        console.error(`   ❌ Failed to create category "${cat.name}":`, err);
+        console.error(`   Failed to create category "${cat.name}":`, err);
       }
     }
   }
@@ -207,9 +220,9 @@ async function seed() {
           ...brand
         });
         brandMap.set(brand.name, record.id);
-        console.log(`   ✅ Created brand "${brand.name}" (${record.id})`);
+        console.log(`   Created brand "${brand.name}" (${record.id})`);
       } catch (err: any) {
-        console.error(`   ❌ Failed to create brand "${brand.name}":`, err.message);
+        console.error(`   Failed to create brand "${brand.name}":`, err.message);
         if (err.response?.data) {
           console.error(`      Validation Details:`, JSON.stringify(err.response.data));
         }
@@ -235,7 +248,7 @@ async function seed() {
       const brandId = brandMap.get(prod.brandName);
 
       if (!categoryId || !brandId) {
-        console.error(`   ❌ Missing category/brand for "${prod.name}" (cat: ${prod.categoryName}, brand: ${prod.brandName})`);
+        console.error(`    Missing category/brand for "${prod.name}" (cat: ${prod.categoryName}, brand: ${prod.brandName})`);
         continue;
       }
 
@@ -254,9 +267,9 @@ async function seed() {
         });
         productSlugToIdMap.set(prod.slug, newId);
         created++;
-        console.log(`   ✅ Created product "${prod.name}"`);
+        console.log(`    Created product "${prod.name}"`);
       } catch (err) {
-        console.error(`   ❌ Failed to create product "${prod.name}":`, err);
+        console.error(`    Failed to create product "${prod.name}":`, err);
       }
     }
   }
@@ -269,7 +282,7 @@ async function seed() {
   for (const rev of SEED_REVIEWS) {
     const productId = productSlugToIdMap.get(rev.productSlug);
     if (!productId) {
-      console.error(`   ❌ Could not find product ID for slug "${rev.productSlug}"`);
+      console.error(`    Could not find product ID for slug "${rev.productSlug}"`);
       continue;
     }
 
@@ -289,9 +302,9 @@ async function seed() {
           product: productId,
         });
         reviewsCreated++;
-        console.log(`   ✅ Created review by "${rev.customerName}" for "${rev.productSlug}"`);
+        console.log(`    Created review by "${rev.customerName}" for "${rev.productSlug}"`);
       } catch (err) {
-        console.error(`   ❌ Failed to create review by "${rev.customerName}":`, err);
+        console.error(`    Failed to create review by "${rev.customerName}":`, err);
       }
     }
   }

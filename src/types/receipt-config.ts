@@ -17,6 +17,18 @@ export interface ReceiptPrintConfig {
   showPaymentMethod: boolean;// Show Cash / Card / Transfer
   showQrCode: boolean;       // Render order verify QR at bottom
   isDefault: boolean;        // Default receipt preset
+  logoUrl?: string;          // Custom Store Logo URL from Personalization settings
+}
+
+export interface ReceiptPrintPreset {
+  id: string;
+  name: string;
+  label?: string;
+  category: string;
+  config: string | ReceiptPrintConfig;
+  isDefault?: boolean;
+  created?: string;
+  updated?: string;
 }
 
 export const DEFAULT_RECEIPT_CONFIG: ReceiptPrintConfig = {

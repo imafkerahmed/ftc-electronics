@@ -20,13 +20,14 @@ export interface InvoicePrintConfig {
   showSignatureBlock: boolean; // Render Authorized Signature line & stamp box
   showQrCode: boolean;         // Render E-invoice / Order verify QR code
   isDefault: boolean;          // Default invoice preset flag
+  logoUrl?: string;            // Custom Store Logo URL from Personalization settings
 }
 
 export const DEFAULT_INVOICE_CONFIG: InvoicePrintConfig = {
   label: 'Standard A4 Sales & Quotation Invoice',
   paperWidthMm: 210,
   fontSizeMm: 3.5,
-  documentTitle: 'TAX INVOICE / QUOTATION',
+  documentTitle: 'INVOICE',
   storeName: 'FTC Electronics',
   headerAddress: 'Main Street, Colombo, Sri Lanka',
   headerPhone: '+94 77 123 4567',

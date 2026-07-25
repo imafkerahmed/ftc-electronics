@@ -42,3 +42,9 @@ next-env.d.ts
 
 # agent customizations and logs
 .agent/
+
+# local setup scripts
+/scripts/local/
+*.local.mjs
+*.local.js
+

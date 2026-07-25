@@ -19,8 +19,18 @@ const ROUTE_PERMISSIONS: Record<string, AdminRole[]> = {
   '/admin/homepage': ['super_admin', 'admin', 'store_manager', 'content_editor'],
   '/admin/reviews': ['super_admin', 'admin', 'store_manager', 'content_editor', 'support_staff'],
   '/admin/media': ['super_admin', 'admin', 'store_manager', 'content_editor'],
-  // Dashboard and inventory are accessible by all authenticated admins
+  // Dashboard, inventory, sales, quotations are accessible by all authenticated admins
 };
+
+/**
+ * Safely decodes base64url JSON payload with proper padding.
+ */
+function decodeJwtPayload(payloadPart: string): any {
+  const base64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+  const decoded = atob(padded);
+  return JSON.parse(decoded);
+}
 
 /**
  * Checks if a JWT token is expired without making any network requests.
@@ -31,12 +41,7 @@ function isTokenExpired(token: string): boolean {
     const parts = token.split('.');
     if (parts.length !== 3) return true;
 
-    const payloadPart = parts[1];
-    // Base64url decoding compatibility
-    const base64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
-    const decoded = atob(base64);
-    const payload = JSON.parse(decoded);
-
+    const payload = decodeJwtPayload(parts[1]);
     const exp = payload.exp;
     if (!exp) return true;
 
@@ -48,12 +53,39 @@ function isTokenExpired(token: string): boolean {
 }
 
 /**
+ * Safely decodes and extracts the user role from a JWT token's payload in Edge runtime.
+ */
+function extractRoleFromTokenPayload(token: string): AdminRole | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+
+    const payload = decodeJwtPayload(parts[1]);
+
+    const role = payload.role || payload.record?.role;
+    if (role === 'admin' || role === 'super_admin') return 'super_admin';
+
+    const validAdminRoles: AdminRole[] = ['super_admin', 'store_manager', 'content_editor', 'support_staff', 'read_only'];
+    if (role && validAdminRoles.includes(role as AdminRole)) {
+      return role as AdminRole;
+    }
+
+    if (payload.isAdmin === true || payload.is_admin === true || payload.record?.isAdmin === true || payload.record?.is_admin === true) {
+      return 'super_admin';
+    }
+  } catch {
+    // Ignore error
+  }
+  return null;
+}
+
+/**
  * Checks if the user's role has access to the requested admin route.
  */
 function hasRouteAccess(pathname: string, role: AdminRole): boolean {
-  // Find the most specific matching route
+  // Find the most specific matching route with exact segment boundaries
   const matchingRoute = Object.keys(ROUTE_PERMISSIONS)
-    .filter((route) => pathname.startsWith(route))
+    .filter((route) => pathname === route || pathname.startsWith(route + '/'))
     .sort((a, b) => b.length - a.length)[0];
 
   // If no specific permission defined, allow any authenticated admin
@@ -87,12 +119,21 @@ function addSecurityHeaders(response: NextResponse): NextResponse {
   return response;
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get('pb_auth_token')?.value;
-  const role = request.cookies.get('pb_auth_role')?.value as AdminRole | undefined;
+  const cookieRole = request.cookies.get('pb_auth_role')?.value as AdminRole | undefined;
 
   const hasValidToken = token && !isTokenExpired(token);
+
+  // Extract role from JWT token payload first
+  const jwtRole = token ? extractRoleFromTokenPayload(token) : null;
+
+  const validRoles: AdminRole[] = ['super_admin', 'store_manager', 'content_editor', 'support_staff', 'read_only'];
+  const validCookieRole = cookieRole && validRoles.includes(cookieRole) ? cookieRole : null;
+
+  // Resolve role: prefer JWT payload, fallback to validated cookie role, strictly default to 'read_only' minimum privilege
+  const resolvedRole: AdminRole = jwtRole || validCookieRole || 'read_only';
 
   // ── Admin route protection ──────────────────────────────────────────────
 
@@ -105,8 +146,8 @@ export function middleware(request: NextRequest) {
       return NextResponse.redirect(loginUrl);
     }
 
-    // 2. Check role-based access
-    if (role && !hasRouteAccess(pathname, role)) {
+    // 2. Check role-based access - unconditionally enforce role check
+    if (!hasRouteAccess(pathname, resolvedRole)) {
       // User is authenticated but doesn't have permission for this route
       const dashboardUrl = new URL('/admin/dashboard', request.url);
       dashboardUrl.searchParams.set('error', 'insufficient_permissions');
@@ -128,6 +169,9 @@ export function middleware(request: NextRequest) {
 
   return NextResponse.next();
 }
+
+export const middleware = proxy;
+export default proxy;
 
 export const config = {
   // Apply proxy to all admin routes

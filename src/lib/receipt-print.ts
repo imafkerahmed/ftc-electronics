@@ -17,6 +17,7 @@ export interface ReceiptData {
   discount?: number;
   total: number;
   paymentMethod?: string;
+  logoUrl?: string;
 }
 
 export function printReceipt(
@@ -97,7 +98,11 @@ export function printReceipt(
       </head>
       <body>
         <div class="header">
-          <div class="store-name">${cfg.storeName || 'FTC Electronics'}</div>
+          ${(data.logoUrl || cfg.logoUrl) ? `
+            <img src="${data.logoUrl || cfg.logoUrl}" alt="${cfg.storeName || 'FTC Electronics'}" style="max-height: 60px; max-width: 220px; width: auto; height: auto; object-fit: contain; margin: 0 auto 8px auto; display: block;" />
+          ` : `
+            <div class="store-name">${cfg.storeName || 'FTC Electronics'}</div>
+          `}
           ${cfg.headerAddress ? `<div class="sub-header">${cfg.headerAddress}</div>` : ''}
           ${cfg.headerPhone ? `<div class="sub-header">Tel: ${cfg.headerPhone}</div>` : ''}
           ${cfg.taxNumber ? `<div class="sub-header">${cfg.taxNumber}</div>` : ''}

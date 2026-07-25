@@ -25,6 +25,7 @@ export default function AdminCategoriesPage() {
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [sortOrder, setSortOrder] = useState('1');
+  const [isActive, setIsActive] = useState(true);
 
   // Feedback states
   const [error, setError] = useState<string | null>(null);
@@ -91,6 +92,7 @@ export default function AdminCategoriesPage() {
     setName('');
     setSlug('');
     setSortOrder((categories.length + 1).toString());
+    setIsActive(true);
     setError(null);
     setSuccess(null);
     setIsModalOpen(true);
@@ -101,9 +103,35 @@ export default function AdminCategoriesPage() {
     setName(cat.name);
     setSlug(cat.slug);
     setSortOrder('1'); // fallback default
+    setIsActive(cat.isActive !== false);
     setError(null);
     setSuccess(null);
     setIsModalOpen(true);
+  };
+
+  const handleToggleActive = async (cat: Category, checked: boolean) => {
+    setError(null);
+    setSuccess(null);
+
+    // Optimistically update state
+    setCategories((prev) =>
+      prev.map((c) => (c.id === cat.id ? { ...c, isActive: checked } : c))
+    );
+
+    const res = await updateCategoryAction(cat.id, {
+      name: cat.name,
+      slug: cat.slug,
+      isActive: checked,
+    });
+    if (!res.success) {
+      // Revert on failure
+      setCategories((prev) =>
+        prev.map((c) => (c.id === cat.id ? { ...c, isActive: !checked } : c))
+      );
+      setError(res.error || 'Failed to update category visibility.');
+    } else {
+      setSuccess(`Updated visibility for "${cat.name}".`);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -123,12 +151,14 @@ export default function AdminCategoriesPage() {
           name,
           slug,
           sortOrder: parseInt(sortOrder) || 1,
+          isActive,
         });
       } else {
         res = await createCategoryAction({
           name,
           slug,
           sortOrder: parseInt(sortOrder) || 1,
+          isActive,
         });
       }
 
@@ -207,6 +237,7 @@ export default function AdminCategoriesPage() {
                   <th className="p-4">Category</th>
                   <th className="p-4">Slug</th>
                   <th className="p-4">Products</th>
+                  <th className="p-4 text-center">Status</th>
                   <th className="p-4 text-right">Actions</th>
                 </tr>
               </thead>
@@ -226,7 +257,6 @@ export default function AdminCategoriesPage() {
                     <td className="p-4">
                       <div className="flex items-center gap-3">
                         {cat.image ? (
-                           
                           <img src={cat.image} alt={cat.name} className="h-9 w-9 rounded-lg object-cover border border-border" />
                         ) : (
                           <div className="h-9 w-9 rounded-lg bg-muted border border-border flex items-center justify-center">
@@ -241,6 +271,27 @@ export default function AdminCategoriesPage() {
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-500 border border-blue-500/20">
                         {cat.count} products
                       </span>
+                    </td>
+                    <td className="p-4 text-center">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleActive(cat, !cat.isActive)}
+                        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg border transition-all text-[9px] font-extrabold uppercase tracking-wider cursor-pointer ${
+                          cat.isActive !== false
+                            ? "bg-blue-500/10 text-blue-500 border-blue-500/35 hover:bg-blue-500/15"
+                            : "bg-muted text-muted-foreground border-border hover:bg-muted/75"
+                        }`}
+                        title="Toggle category visibility"
+                      >
+                        <div className={`w-5.5 h-3 rounded-full relative transition-colors shrink-0 ${
+                          cat.isActive !== false ? "bg-blue-600" : "bg-neutral-600"
+                        }`}>
+                          <div className={`w-2 h-2 bg-white rounded-full absolute top-0.5 transition-all duration-200 ${
+                            cat.isActive !== false ? "right-0.5" : "left-0.5"
+                          }`} />
+                        </div>
+                        <span>{cat.isActive !== false ? "Active" : "Disabled"}</span>
+                      </button>
                     </td>
                     <td className="p-4 text-right">
                       <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -298,6 +349,18 @@ export default function AdminCategoriesPage() {
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-foreground/80 block">Sort Position</label>
                 <Input type="number" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} />
+              </div>
+
+              <div className="flex items-center gap-2 py-1">
+                <label className="flex items-center gap-2 text-xs font-semibold text-foreground/80 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isActive}
+                    onChange={(e) => setIsActive(e.target.checked)}
+                    className="rounded border-border accent-blue-500"
+                  />
+                  Active & Visible on Storefront
+                </label>
               </div>
 
               {/* Action Buttons */}

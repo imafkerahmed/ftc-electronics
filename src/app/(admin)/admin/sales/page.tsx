@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useTransition, useCallback } from "react";
+import React, { useState, useEffect, useTransition, useCallback, useRef } from "react";
 import Link from "next/link";
 import {
   TrendingUp,
@@ -23,6 +23,7 @@ import {
   X,
   Printer,
   Receipt,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +31,7 @@ import {
   getUnifiedSalesTrackerAction,
   getSaleByIdAction,
   getReceiptPrintPresetsAction,
+  getInvoicePrintPresetsAction,
 } from "@/app/actions/admin";
 import type { PBSale, PBSaleItem } from "@/types/pos";
 import { printReceipt } from "@/lib/receipt-print";
@@ -37,6 +39,11 @@ import {
   DEFAULT_RECEIPT_CONFIG,
   normalizeReceiptConfig,
 } from "@/types/receipt-config";
+import { printInvoice, type InvoiceData } from "@/lib/invoice-print";
+import {
+  DEFAULT_INVOICE_CONFIG,
+  normalizeInvoiceConfig,
+} from "@/types/invoice-config";
 
 interface UnifiedSale {
   id: string;
@@ -94,7 +101,7 @@ export default function AdminSalesTrackerPage() {
       try {
         const res = await getSaleByIdAction(selectedPosSaleId);
         if (res.success && res.data) {
-          setPosReceiptDetails(res.data as { sale: PBSale; items: PBSaleItem[] });
+          setPosReceiptDetails(res.data);
         }
       } catch {
         /* ignore */
@@ -105,60 +112,149 @@ export default function AdminSalesTrackerPage() {
     void fetchReceipt();
   }, [selectedPosSaleId]);
 
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!selectedPosSaleId) return;
+
+    // Capture currently focused element to restore on close
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+
+    // Move focus into modal on open
+    const frameId = requestAnimationFrame(() => {
+      modalRef.current?.focus();
+    });
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelectedPosSaleId(null);
+        return;
+      }
+
+      if (e.key === "Tab" && modalRef.current) {
+        const focusables: HTMLElement[] = Array.from(
+          modalRef.current.querySelectorAll(
+            'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          )
+        );
+
+        if (focusables.length === 0) return;
+
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first || document.activeElement === modalRef.current) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      cancelAnimationFrame(frameId);
+      window.removeEventListener("keydown", onKeyDown);
+      // Restore focus to triggering element on close
+      previousFocusRef.current?.focus();
+    };
+  }, [selectedPosSaleId]);
+
   const handleReprintReceipt = async () => {
     if (!posReceiptDetails) return;
     const { sale, items } = posReceiptDetails;
     const rawDateStr = sale.date || sale.created || sale.updated;
     const d = rawDateStr ? new Date(rawDateStr) : new Date();
     const formattedDate = (isNaN(d.getTime()) ? new Date() : d).toLocaleString("en-LK");
+
+    let cfg = DEFAULT_RECEIPT_CONFIG;
     try {
       const res = await getReceiptPrintPresetsAction();
-      const presets = (res.data || []) as any[];
+      const presets = res.data || [];
       const defaultPreset = presets.find((p) => p.isDefault) || presets[0];
-      const cfg = defaultPreset
-        ? normalizeReceiptConfig(defaultPreset.config)
-        : DEFAULT_RECEIPT_CONFIG;
-
-      printReceipt(
-        cfg,
-        {
-          orderNumber: sale.receipt_number || `FTC-POS-${sale.id.slice(-6).toUpperCase()}`,
-          date: formattedDate,
-          customerName: sale.customer_name || "Walk-in Customer",
-          customerPhone: sale.customer_phone,
-          items: items.map((i) => ({
-            name: i.product_name,
-            qty: i.quantity,
-            unitPrice: i.unit_price,
-          })),
-          subtotal: sale.subtotal,
-          discount: sale.discount,
-          total: sale.total,
-          paymentMethod: sale.payment_method,
-        },
-        "POS Receipt"
-      );
+      if (defaultPreset) {
+        cfg = normalizeReceiptConfig(defaultPreset.config);
+      }
     } catch {
-      printReceipt(
-        DEFAULT_RECEIPT_CONFIG,
-        {
-          orderNumber: sale.receipt_number || `FTC-POS-${sale.id.slice(-6).toUpperCase()}`,
-          date: formattedDate,
-          customerName: sale.customer_name || "Walk-in Customer",
-          customerPhone: sale.customer_phone,
-          items: items.map((i) => ({
-            name: i.product_name,
-            qty: i.quantity,
-            unitPrice: i.unit_price,
-          })),
-          subtotal: sale.subtotal,
-          discount: sale.discount,
-          total: sale.total,
-          paymentMethod: sale.payment_method,
-        },
-        "POS Receipt"
-      );
+      // Fallback to DEFAULT_RECEIPT_CONFIG
     }
+
+    printReceipt(
+      cfg,
+      {
+        orderNumber: sale.receipt_number || `FTC-POS-${sale.id.slice(-6).toUpperCase()}`,
+        date: formattedDate,
+        customerName: sale.customer_name || "Walk-in Customer",
+        customerPhone: sale.customer_phone,
+        items: items.map((i) => ({
+          name: i.product_name,
+          qty: i.quantity,
+          unitPrice: i.unit_price,
+        })),
+        subtotal: sale.subtotal,
+        discount: sale.discount,
+        total: sale.total,
+        paymentMethod: sale.payment_method,
+      },
+      "POS Receipt"
+    );
+  };
+
+  const handlePrintInvoice = async () => {
+    if (!posReceiptDetails) return;
+    const { sale, items } = posReceiptDetails;
+
+    const rawDateStr = sale.date || sale.created || sale.updated;
+    const d = rawDateStr ? new Date(rawDateStr) : new Date();
+    const formattedDate = (isNaN(d.getTime()) ? new Date() : d).toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+
+    let cfg = DEFAULT_INVOICE_CONFIG;
+    try {
+      const res = await getInvoicePrintPresetsAction();
+      const presets = res.data || [];
+      const defaultPreset = (presets as any[]).find((p) => p.isDefault) || presets[0];
+      if (defaultPreset) {
+        cfg = normalizeInvoiceConfig(defaultPreset.config);
+      }
+    } catch {
+      // Fallback to DEFAULT_INVOICE_CONFIG
+    }
+
+    const docNumber = sale.receipt_number || `INV-POS-${sale.id.slice(-6).toUpperCase()}`;
+
+    const invoiceData: InvoiceData = {
+      docType: "Invoice",
+      docNumber,
+      date: formattedDate,
+      customerName: sale.customer_name || "Walk-in Customer",
+      customerPhone: sale.customer_phone || undefined,
+      items: items.map((i) => ({
+        name: i.product_name,
+        qty: i.quantity,
+        unitPrice: i.unit_price,
+        discount: i.item_discount || undefined,
+        serialNumber: i.unit_serial || undefined,
+      })),
+      subtotal: sale.subtotal,
+      taxAmount: sale.tax_amount || 0,
+      discountAmount: sale.discount || 0,
+      totalAmount: sale.total,
+      paymentMethod: `PAID via ${(sale.payment_method || "POS").toUpperCase()}`,
+      notes: "Official Paid Invoice. Thank you for shopping with FTC Electronics! Warranty claims require original invoice copy.",
+    };
+
+    printInvoice(cfg, invoiceData, "Paid Invoice");
   };
 
   const loadData = async () => {
@@ -481,8 +577,19 @@ export default function AdminSalesTrackerPage() {
 
       {/* POS Receipt Preview Modal */}
       {selectedPosSaleId && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setSelectedPosSaleId(null)}
+        >
+          <div
+            ref={modalRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-label="POS Receipt Detail"
+            onClick={(e) => e.stopPropagation()}
+            className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200 outline-none"
+          >
             {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20">
               <div className="flex items-center gap-2">
@@ -620,12 +727,22 @@ export default function AdminSalesTrackerPage() {
                 Close
               </Button>
               {posReceiptDetails && (
-                <Button
-                  onClick={handleReprintReceipt}
-                  className="bg-blue-600 hover:bg-blue-500 text-white gap-1 text-xs"
-                >
-                  <Printer className="h-3.5 w-3.5" /> Print Receipt
-                </Button>
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handlePrintInvoice}
+                    className="gap-1 text-xs border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10 hover:text-indigo-300 font-bold"
+                  >
+                    <FileText className="h-3.5 w-3.5" /> Print Paid Invoice
+                  </Button>
+                  <Button
+                    onClick={handleReprintReceipt}
+                    className="bg-blue-600 hover:bg-blue-500 text-white gap-1 text-xs font-bold"
+                  >
+                    <Printer className="h-3.5 w-3.5" /> Thermal Receipt
+                  </Button>
+                </>
               )}
             </div>
           </div>

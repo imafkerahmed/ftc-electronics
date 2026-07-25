@@ -469,7 +469,7 @@ function InvoicePresetEditor({
         </div>
         <div className="space-y-1">
           <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Doc Heading</label>
-          <Input value={cfg.documentTitle} onChange={(e) => set('documentTitle', e.target.value)} placeholder='TAX INVOICE / QUOTATION' className="h-8 text-xs" />
+          <Input value={cfg.documentTitle} onChange={(e) => set('documentTitle', e.target.value)} placeholder='INVOICE' className="h-8 text-xs" />
         </div>
       </div>
 
@@ -610,7 +610,7 @@ export default function PrinterPresetsPage() {
   const loadReceiptPresets = async () => {
     setLoadingReceipt(true);
     const res = await getReceiptPrintPresetsAction();
-    if (res.success) setReceiptPresets(res.data as PBPreset[]);
+    if (res.success) setReceiptPresets(res.data as unknown as PBPreset[]);
     setLoadingReceipt(false);
   };
 

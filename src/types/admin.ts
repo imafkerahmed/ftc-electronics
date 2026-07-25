@@ -53,6 +53,7 @@ export interface PBCategory extends PBRecord {
   parentCategory?: string; // self-relation ID
   sortOrder: number;
   productCount: number;
+  isActive?: boolean;
   expand?: {
     parentCategory?: PBCategory;
   };
@@ -572,5 +573,49 @@ export function pbCategoryToCategory(
     slug: record.slug,
     image: imageUrl,
     count: record.productCount || 0,
+    isActive: record.isActive !== false,
   };
 }
+
+// ─── Wholesale Dealers Collection ─────────────────────────────────────────────
+export interface PBWholesaleDealer extends PBRecord {
+  company_name: string;
+  contact_name: string;
+  email: string;
+  phone?: string;
+  tax_id?: string;
+  address?: string;
+  discount_rate?: number;
+  credit_limit?: number;
+  status: 'active' | 'pending' | 'suspended';
+  notes?: string;
+}
+
+// ─── Quotations Collection ───────────────────────────────────────────────────
+export interface PBQuotationItem {
+  name: string;
+  qty: number;
+  unitPrice: number;
+  discount?: number;
+  total?: number;
+}
+
+export interface PBQuotation extends PBRecord {
+  quote_number: string;
+  quote_type?: 'wholesale' | 'direct';
+  dealer_id?: string;
+  customer_name: string;
+  customer_company?: string;
+  customer_email?: string;
+  customer_phone?: string;
+  customer_address?: string;
+  items: PBQuotationItem[];
+  subtotal: number;
+  tax_amount?: number;
+  discount_amount?: number;
+  total_amount: number;
+  valid_until: string;
+  status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
+  notes?: string;
+}
+

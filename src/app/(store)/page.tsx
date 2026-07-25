@@ -103,23 +103,29 @@ export default async function StoreHomePage() {
   const pbUrl =
     process.env.NEXT_PUBLIC_POCKETBASE_URL || "https://ftc-db.codix.site";
 
-  // 1. Pre-fetch shared data to optimize rendering
-  const allBrands = await pbBrands.getAll().catch(() => []);
-  const allCategories = await pbCategories.getAll().catch(() => []);
+  // 1. Pre-fetch shared data in parallel to avoid sequential network waterfalls
+  const [
+    allBrands,
+    rawCategories,
+    rawHeroBanners,
+    contactSetting,
+    hoursSetting,
+    generalSetting
+  ] = await Promise.all([
+    pbBrands.getAll().catch(() => []),
+    pbCategories.getAll().catch(() => []),
+    pbHeroBanners.getActive().catch(() => []),
+    pbSiteSettings.get<any>("contact").catch(() => null),
+    pbSiteSettings.get<any>("hours").catch(() => null),
+    pbSiteSettings.get<any>("general").catch(() => null),
+  ]);
 
-  // Fetch active hero banner slides from PocketBase (admin-managed)
-  // Build the full image URL server-side using the PocketBase file API pattern
-  const rawHeroBanners = await pbHeroBanners.getActive().catch(() => []);
+  const allCategories = rawCategories.filter((c: any) => c.isActive !== false);
+
   const activeHeroBanners = rawHeroBanners.map((banner) => ({
     ...banner,
     imageUrl: pbHeroBanners.getImageUrl(banner, pbUrl),
   }));
-
-  const contactSetting = await pbSiteSettings
-    .get<any>("contact")
-    .catch(() => null);
-  const hoursSetting = await pbSiteSettings.get<any>("hours").catch(() => null);
-  const generalSetting = await pbSiteSettings.get<any>("general").catch(() => null);
 
   const locatorSettings = {
     address: generalSetting?.location?.address || contactSetting?.address,
@@ -252,18 +258,36 @@ export default async function StoreHomePage() {
                   />
                 )}
 
-                {block.type === "product-carousel" && (
-                  <LazyScrollSection heightClass="min-h-[500px]">
-                    <CollectionSection
-                      title={block.title || "Products"}
-                      layout={block.config?.layout || "featured-grid"}
-                      products={products}
-                      seeAllLink={seeAllLink}
-                      rows={block.config?.rows}
-                      limit={block.config?.limit}
-                    />
-                  </LazyScrollSection>
-                )}
+                 {block.type === "product-carousel" && (() => {
+                   let brandLogoUrl = undefined;
+                   if (block.config?.source === "brand") {
+                     const brandSlug = block.config?.value || block.config?.brand;
+                     const brandRecord = allBrands.find(
+                       (b: any) =>
+                         b.slug === brandSlug ||
+                         b.id === brandSlug ||
+                         b.name === brandSlug,
+                     );
+                     if (brandRecord && brandRecord.logo) {
+                       brandLogoUrl = `${pbUrl}/api/files/${brandRecord.collectionId}/${brandRecord.id}/${brandRecord.logo}`;
+                     }
+                   }
+                   return (
+                     <LazyScrollSection heightClass="min-h-[500px]">
+                       <CollectionSection
+                         title={block.title || "Products"}
+                         layout={block.config?.layout || "featured-grid"}
+                         products={products}
+                         seeAllLink={seeAllLink}
+                         rows={block.config?.rows}
+                         limit={block.config?.limit}
+                         description={block.config?.description}
+                         brandLogo={brandLogoUrl}
+                         titleColor={block.config?.titleColor}
+                       />
+                     </LazyScrollSection>
+                   );
+                 })()}
 
                 {block.type === "promo-banner" && (
                   <LazyScrollSection heightClass="min-h-[220px]">

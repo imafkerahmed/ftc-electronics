@@ -26,6 +26,8 @@ import type {
   PBAuditLog,
   PBSiteSetting,
   PBCustomer,
+  PBWholesaleDealer,
+  PBQuotation,
 } from "@/types/admin";
 import { pbProductToProduct, pbCategoryToCategory } from "@/types/admin";
 import type { Product, Category } from "@/types/product";
@@ -1171,7 +1173,9 @@ export const pbSales = {
           }
         } else if (item.unit_barcode) {
           try {
-            const u: any = await adminPb.collection("stock_management").getFirstListItem(`barcode = "${item.unit_barcode}"`);
+            const u: any = await adminPb.collection("stock_management").getFirstListItem(
+              adminPb.filter('barcode = {:barcode}', { barcode: item.unit_barcode })
+            );
             if (u) {
               await adminPb.collection("stock_management").update(u.id, { status: "sold", orderId: sale.id });
             }
@@ -1270,7 +1274,9 @@ export const pbSales = {
             }
           } else if (item.unit_barcode) {
             try {
-              const u: any = await adminPb.collection("stock_management").getFirstListItem(`barcode = "${item.unit_barcode}"`);
+              const u: any = await adminPb.collection("stock_management").getFirstListItem(
+                adminPb.filter('barcode = {:barcode}', { barcode: item.unit_barcode })
+              );
               if (u) {
                 await adminPb.collection("stock_management").update(u.id, { status: "available", orderId: "" });
               }
@@ -1343,3 +1349,84 @@ export const pbCustomers = {
     }
   },
 };
+
+// ─── Wholesale Dealers Collection API ─────────────────────────────────────────
+export const pbWholesaleDealers = {
+  async getAll(): Promise<PBWholesaleDealer[]> {
+    try {
+      const adminPb = await getAdminPb();
+      const list = await adminPb.collection("wholesale_dealers").getFullList<PBWholesaleDealer>();
+      return list.sort((a, b) => new Date(b.created || 0).getTime() - new Date(a.created || 0).getTime());
+    } catch (err) {
+      handleError(err, "pbWholesaleDealers.getAll");
+    }
+  },
+
+  async create(data: Partial<PBWholesaleDealer>): Promise<PBWholesaleDealer> {
+    try {
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("wholesale_dealers").create<PBWholesaleDealer>(data);
+    } catch (err) {
+      handleError(err, "pbWholesaleDealers.create");
+    }
+  },
+
+  async update(id: string, data: Partial<PBWholesaleDealer>): Promise<PBWholesaleDealer> {
+    try {
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("wholesale_dealers").update<PBWholesaleDealer>(id, data);
+    } catch (err) {
+      handleError(err, "pbWholesaleDealers.update");
+    }
+  },
+
+  async delete(id: string): Promise<boolean> {
+    try {
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("wholesale_dealers").delete(id);
+    } catch (err) {
+      handleError(err, "pbWholesaleDealers.delete");
+    }
+  },
+};
+
+// ─── Quotations Collection API ───────────────────────────────────────────────
+export const pbQuotations = {
+  async getAll(): Promise<PBQuotation[]> {
+    try {
+      const adminPb = await getAdminPb();
+      const list = await adminPb.collection("quotations").getFullList<PBQuotation>();
+      return list.sort((a, b) => new Date(b.created || 0).getTime() - new Date(a.created || 0).getTime());
+    } catch (err) {
+      handleError(err, "pbQuotations.getAll");
+    }
+  },
+
+  async create(data: Partial<PBQuotation>): Promise<PBQuotation> {
+    try {
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("quotations").create<PBQuotation>(data);
+    } catch (err) {
+      handleError(err, "pbQuotations.create");
+    }
+  },
+
+  async update(id: string, data: Partial<PBQuotation>): Promise<PBQuotation> {
+    try {
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("quotations").update<PBQuotation>(id, data);
+    } catch (err) {
+      handleError(err, "pbQuotations.update");
+    }
+  },
+
+  async delete(id: string): Promise<boolean> {
+    try {
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("quotations").delete(id);
+    } catch (err) {
+      handleError(err, "pbQuotations.delete");
+    }
+  },
+};
+

@@ -26,7 +26,7 @@ export async function generateStaticParams() {
   ]);
 
   const productParams = products.map((p) => ({ slug: [p.slug] }));
-  const categoryParams = categories.map((c) => ({
+  const categoryParams = categories.filter(c => c.isActive !== false).map((c) => ({
     slug: [c.slug || c.name.toLowerCase().replace(/\s+/g, '-')],
   }));
 
@@ -315,6 +315,9 @@ export default async function DynamicProductOrCategoryPage({ params, searchParam
   const searchParam = typeof resolvedSearchParams.search === 'string' ? resolvedSearchParams.search : undefined;
 
   const category = await getCategoryBySlug(primarySlug);
+  if (category && category.isActive === false) {
+    notFound();
+  }
   const displayName = category ? category.name : primarySlug.replace(/-/g, ' ');
 
   const subName = slugSegments.length >= 2 ? slugSegments[1].replace(/-/g, ' ') : undefined;

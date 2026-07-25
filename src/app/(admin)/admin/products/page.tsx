@@ -609,11 +609,9 @@ export default function AdminProductsPage() {
           onClick={(e) => {
             if (e.target === e.currentTarget) setIsDrawerOpen(false);
           }}
-          onWheel={(e) => e.stopPropagation()}
         >
           <div
             className="w-full max-w-2xl bg-card border border-border rounded-2xl flex flex-col shadow-2xl overflow-hidden my-auto animate-in zoom-in-95 duration-200"
-            onWheel={(e) => e.stopPropagation()}
           >
             {/* Header */}
             <div className="p-5 border-b border-border flex items-center justify-between shrink-0 bg-secondary/10">

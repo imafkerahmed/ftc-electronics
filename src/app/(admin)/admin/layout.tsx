@@ -24,6 +24,8 @@ import {
   Boxes,
   Palette,
   ShoppingBag,
+  FileText,
+  Building2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { logoutAction } from '@/app/actions/auth';
@@ -39,6 +41,8 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { name: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard },
   { name: 'Sales Tracker', href: '/admin/sales', icon: ScrollText },
+  { name: 'Quotations', href: '/admin/quotations', icon: FileText },
+  { name: 'Wholesale Dealers', href: '/admin/wholesale-dealers', icon: Building2 },
   {
     name: 'Catalog',
     icon: Package,
@@ -88,14 +92,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   return (
-    <div className="relative flex min-h-screen bg-background text-foreground font-sans">
+    <div className="relative flex h-screen overflow-hidden bg-background text-foreground font-sans">
       {/* Background */}
       <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.08),rgba(0,0,0,0))]" />
       <div className="absolute inset-0 -z-10 bg-[linear-gradient(to_right,rgba(120,119,198,0.02)_1px,transparent_1px),linear-gradient(to_bottom,rgba(120,119,198,0.02)_1px,transparent_1px)] bg-[size:32px_32px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_80%,transparent_100%)]" />
 
       {/* Sidebar */}
       <aside
-        className={`${collapsed ? 'w-16' : 'w-60'} shrink-0 border-r border-border bg-card/60 backdrop-blur-md flex flex-col justify-between relative z-10 transition-all duration-300`}
+        className={`${collapsed ? 'w-16' : 'w-60'} shrink-0 border-r border-border bg-card/60 backdrop-blur-md flex flex-col justify-between relative z-10 transition-all duration-300 h-full overflow-y-auto`}
       >
         {/* Logo + collapse toggle */}
         <div>

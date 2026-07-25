@@ -43,7 +43,7 @@ export default function ProductsPage({ searchParams }: PageProps) {
   useEffect(() => {
     Promise.all([getProducts(), getCategories()]).then(([prods, cats]) => {
       setProducts(prods);
-      setCategoriesList(cats.map(c => c.name));
+      setCategoriesList(cats.filter(c => c.isActive !== false).map(c => c.name));
       setIsLoading(false);
     });
   }, []);

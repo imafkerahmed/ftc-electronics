@@ -24,6 +24,7 @@ export interface InvoiceData {
   totalAmount: number;
   paymentMethod?: string;
   notes?: string;
+  logoUrl?: string;
 }
 
 export function printInvoice(
@@ -40,7 +41,7 @@ export function printInvoice(
   const currency = 'Rs.';
   const docHeading = data.docType === 'Quotation'
     ? 'QUOTATION'
-    : (cfg.documentTitle || 'INVOICE');
+    : (cfg.documentTitle === 'TAX INVOICE / QUOTATION' ? 'INVOICE' : (cfg.documentTitle || 'INVOICE'));
 
   const itemsHtml = data.items
     .map((item, index) => {
@@ -75,7 +76,7 @@ export function printInvoice(
 
           @page {
             size: ${cfg.paperWidthMm}mm auto;
-            margin: ${isThermal ? '0' : '12mm'};
+            margin: 0;
           }
           * { box-sizing: border-box; margin: 0; padding: 0; }
           body {
@@ -85,7 +86,7 @@ export function printInvoice(
             color: #1e293b;
             background: #fff;
             width: ${cfg.paperWidthMm}mm;
-            padding: ${isThermal ? '4mm 3mm' : '8mm 10mm'};
+            padding: ${isThermal ? '4mm 3mm' : '12mm 14mm'};
             margin: 0 auto;
             -webkit-print-color-adjust: exact;
           }
@@ -273,7 +274,11 @@ export function printInvoice(
         <!-- Top Header: Store Info & Document Title -->
         <div class="top-row">
           <div>
-            <div class="brand-title">${cfg.storeName || 'FTC Electronics'}</div>
+            ${(data.logoUrl || cfg.logoUrl) ? `
+              <img src="${data.logoUrl || cfg.logoUrl}" alt="${cfg.storeName || 'FTC Electronics'}" style="max-height: 80px; max-width: 300px; width: auto; height: auto; object-fit: contain; margin-bottom: 8px; display: block;" />
+            ` : `
+              <div class="brand-title">${cfg.storeName || 'FTC Electronics'}</div>
+            `}
             ${cfg.headerAddress ? `<div class="brand-sub">${cfg.headerAddress}</div>` : ''}
             ${cfg.headerPhone || cfg.headerEmail ? `<div class="brand-sub">${cfg.headerPhone || ''}${cfg.headerPhone && cfg.headerEmail ? ' · ' : ''}${cfg.headerEmail || ''}</div>` : ''}
             ${cfg.taxNumber ? `<div class="brand-sub" style="color:#0f172a; font-weight:600;">${cfg.taxNumber}</div>` : ''}

@@ -12,6 +12,7 @@ import StaggeredMenuComponent from "@/components/ui/StaggeredMenu/StaggeredMenu"
 import SearchOverlay from "@/components/layout/search-overlay";
 import { cn } from "@/lib/utils";
 import { useSiteBranding } from "@/components/providers/site-branding-provider";
+import { pbCategories, pbBrands } from "@/lib/pb-collections";
 
 interface StaggeredMenuProps {
   position?: "left" | "right";
@@ -46,7 +47,7 @@ const defaultAnnouncements = [
 ];
 
 export default function Navbar() {
-  const { logoUrl, siteName, announcement } = useSiteBranding();
+  const { logoUrl, siteName, announcement, isLoading } = useSiteBranding();
   const { cartCount } = useCart();
   const toggleCartDrawer = useUiStore((state) => state.toggleCartDrawer);
   const hasIntroPlayed = useUiStore((state) => state.hasIntroPlayed);
@@ -61,6 +62,24 @@ export default function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [showBanner, setShowBanner] = useState(true);
   const [announcementIdx, setAnnouncementIdx] = useState(0);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [brands, setBrands] = useState<any[]>([]);
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const [cats, brs] = await Promise.all([
+          pbCategories.getAll().catch(() => []),
+          pbBrands.getAll().catch(() => [])
+        ]);
+        setCategories(cats.filter((c: any) => c.isActive !== false));
+        setBrands(brs);
+      } catch (err) {
+        console.error("Failed to load navbar categories/brands:", err);
+      }
+    }
+    fetchData();
+  }, []);
 
   const activeAnnouncements = announcement?.text
     ? [announcement.text, ...defaultAnnouncements]
@@ -112,28 +131,36 @@ export default function Navbar() {
     setIsSearchOpen(true);
   };
 
-  const menuItems = [
-    { label: "Home", link: "/" },
-    {
-      label: "Categories",
-      link: "/products",
-      subItems: [
+  const categorySubItems = categories.length > 0
+    ? categories.map((c) => ({ label: c.name, link: `/products?category=${c.slug}` }))
+    : [
         { label: "Laptops", link: "/products/laptops" },
         { label: "Phones", link: "/products/phones" },
         { label: "Audio", link: "/products/audio" },
         { label: "Accessories", link: "/products/accessories" },
-      ],
-    },
-    {
-      label: "Brands",
-      link: "/products",
-      subItems: [
+      ];
+
+  const brandSubItems = brands.length > 0
+    ? brands.map((b) => ({ label: b.name, link: `/brands/${b.slug}` }))
+    : [
         { label: "Apple", link: "/brands/apple" },
         { label: "Samsung", link: "/brands/samsung" },
         { label: "Sony", link: "/brands/sony" },
         { label: "Bose", link: "/brands/bose" },
         { label: "Asus", link: "/brands/asus" },
-      ],
+      ];
+
+  const menuItems = [
+    { label: "Home", link: "/" },
+    {
+      label: "Categories",
+      link: "/products",
+      subItems: categorySubItems,
+    },
+    {
+      label: "Brands",
+      link: "/products",
+      subItems: brandSubItems,
     },
     { label: "On Sale", link: "/deals" },
     { label: "About", link: "/about" },
@@ -250,21 +277,18 @@ export default function Navbar() {
               {!isIntroActive && (
                 <>
                   <motion.span
-                    layoutId="brand-logo-ftc"
                     transition={{ type: "spring", stiffness: 80, damping: 20 }}
                     className="relative text-blue-600"
                   >
                     FTC
                   </motion.span>
                   <motion.span
-                    layoutId="brand-logo-divider"
                     transition={{ type: "spring", stiffness: 80, damping: 20 }}
                     className="text-muted-foreground font-light"
                   >
                     |
                   </motion.span>
                   <motion.span
-                    layoutId="brand-logo-electronics"
                     transition={{ type: "spring", stiffness: 80, damping: 20 }}
                     className="text-xs uppercase tracking-widest text-foreground/80"
                   >
@@ -333,7 +357,7 @@ export default function Navbar() {
             transition={{ duration: 0.5, ease: "easeInOut" }}
             className="fixed inset-0 z-[100] flex items-center justify-center bg-background pointer-events-none"
           >
-            {isIntroActive && (
+            {isIntroActive && !isLoading && (
               logoUrl ? (
                 <motion.div
                   initial={{ opacity: 0, scale: 0.85 }}
@@ -350,7 +374,6 @@ export default function Navbar() {
               ) : (
                 <div className="flex items-center gap-4 text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-widest uppercase">
                   <motion.span
-                    layoutId="brand-logo-ftc"
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ type: "spring", stiffness: 80, damping: 20 }}
@@ -359,7 +382,6 @@ export default function Navbar() {
                     FTC
                   </motion.span>
                   <motion.span
-                    layoutId="brand-logo-divider"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: 0.15, duration: 0.4 }}
@@ -368,7 +390,6 @@ export default function Navbar() {
                     |
                   </motion.span>
                   <motion.span
-                    layoutId="brand-logo-electronics"
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{

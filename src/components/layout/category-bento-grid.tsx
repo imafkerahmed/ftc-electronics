@@ -1,5 +1,7 @@
 "use client";
 
+import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -7,6 +9,9 @@ import {
   Smartphone,
   Keyboard,
   Headphones,
+  X,
+  ChevronRight,
+  Layers,
 } from "lucide-react";
 
 interface CategoryCard {
@@ -95,6 +100,24 @@ export default function CategoryBentoGrid({
   categories?: any[];
   config?: Record<string, any>;
 }) {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (isModalOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isModalOpen]);
+
   const sectionBgImage = config?.sectionBackgroundImage || config?.backgroundImage;
 
   const activeCategories = defaultCategories.map((def, idx) => {
@@ -173,12 +196,13 @@ export default function CategoryBentoGrid({
               Browse <span className="text-blue-400">Collections</span>
             </h2>
           </div>
-          <Link
-            href="/products"
-            className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 hover:text-blue-400 transition-colors duration-300 group shrink-0"
+          <button
+            type="button"
+            onClick={() => setIsModalOpen(true)}
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 hover:text-blue-400 transition-colors duration-300 group shrink-0 cursor-pointer"
           >
             View All Categories
-          </Link>
+          </button>
         </div>
 
         {/* ── Icon-Based Bento Grid ── */}
@@ -264,6 +288,66 @@ export default function CategoryBentoGrid({
           </div>
         </div>
       </div>
+
+      {/* ── View All Categories Modal ── */}
+      {mounted && isModalOpen && typeof document !== "undefined"
+        ? createPortal(
+            <div data-lenis-prevent className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+              <div className="bg-slate-900 border border-neutral-800 rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-scale-in text-white">
+                {/* Header */}
+                <div className="p-6 border-b border-neutral-800 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xl font-black uppercase tracking-tight text-white">
+                      Browse All <span className="text-blue-400">Collections</span>
+                    </h3>
+                    <p className="text-xs text-neutral-400 mt-1">Explore our full range of technology and gear categories.</p>
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="p-2 text-neutral-400 hover:text-white rounded-xl hover:bg-white/5 transition-all cursor-pointer"
+                    aria-label="Close modal"
+                  >
+                    <X className="h-6 w-6" />
+                  </button>
+                </div>
+
+                {/* Grid Content */}
+                <div data-lenis-prevent className="flex-1 overflow-y-auto p-6 md:p-8 scrollbar-none">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                    {customCategories && customCategories.map((cat) => (
+                      <Link
+                        key={cat.id}
+                        href={`/products?category=${cat.slug}`}
+                        onClick={() => setIsModalOpen(false)}
+                        className="group relative flex flex-col justify-between p-5 rounded-xl bg-slate-800/40 border border-neutral-800 hover:border-blue-500/50 hover:bg-slate-800/80 transition-all duration-300"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div>
+                            <h4 className="font-extrabold uppercase tracking-tight text-white group-hover:text-blue-400 transition-colors duration-200">
+                              {cat.name}
+                            </h4>
+                            <p className="text-[10px] font-bold text-blue-500/80 uppercase mt-0.5 tracking-wider">
+                              {cat.count !== undefined ? `${cat.count} Products` : `${cat.productCount || 0} Products`}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 flex items-center justify-between border-t border-neutral-800/50 pt-3">
+                          <span className="text-[10px] text-neutral-400 group-hover:text-white transition-colors">
+                            Explore collection
+                          </span>
+                          <ChevronRight className="h-4 w-4 text-neutral-500 group-hover:text-blue-400 group-hover:translate-x-0.5 transition-all" />
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </section>
   );
 }

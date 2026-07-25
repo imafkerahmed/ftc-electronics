@@ -3,11 +3,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Ban, ArrowLeft, Printer, Receipt, CheckCircle2, XCircle } from 'lucide-react';
-import { getSaleByIdAction, getReceiptPrintPresetsAction, voidSaleAction } from '@/app/actions/admin';
+import { Ban, ArrowLeft, Printer, Receipt, CheckCircle2, XCircle, FileText } from 'lucide-react';
+import { getSaleByIdAction, getReceiptPrintPresetsAction, getInvoicePrintPresetsAction, voidSaleAction } from '@/app/actions/admin';
 import type { PBSale, PBSaleItem } from '@/types/pos';
 import { printReceipt } from '@/lib/receipt-print';
+import { printInvoice, type InvoiceData } from '@/lib/invoice-print';
 import { DEFAULT_RECEIPT_CONFIG, normalizeReceiptConfig } from '@/types/receipt-config';
+import { DEFAULT_INVOICE_CONFIG, normalizeInvoiceConfig } from '@/types/invoice-config';
 import { Button } from '@/components/ui/button';
 import ManagerPinModal from '@/components/pos/manager-pin-modal';
 
@@ -31,9 +33,8 @@ export default function SaleDetailPage() {
     setLoading(true);
     const res = await getSaleByIdAction(saleId);
     if (res.success && res.data) {
-      const data = res.data as { sale: PBSale; items: PBSaleItem[] };
-      setSale(data.sale);
-      setItems(data.items);
+      setSale(res.data.sale);
+      setItems(res.data.items);
     } else {
       setError(res.error || 'Sale not found.');
     }
@@ -54,37 +55,22 @@ export default function SaleDetailPage() {
   const handleReprint = async () => {
     if (!sale) return;
     const formattedDate = getFormattedDate();
+
+    let cfg = DEFAULT_RECEIPT_CONFIG;
     try {
       const res = await getReceiptPrintPresetsAction();
-      const presets = (res.data || []) as any[];
+      const presets = res.data || [];
       const defaultPreset = presets.find((p) => p.isDefault) || presets[0];
-      const cfg = defaultPreset
-        ? normalizeReceiptConfig(defaultPreset.config)
-        : DEFAULT_RECEIPT_CONFIG;
-
-      printReceipt(
-        cfg,
-        {
-          orderNumber: sale.receipt_number || `POS-${sale.id.slice(-6).toUpperCase()}`,
-          date: formattedDate,
-          customerName: sale.customer_name || 'Walk-in Customer',
-          customerPhone: sale.customer_phone,
-          items: items.map((i) => ({
-            name: i.product_name,
-            qty: i.quantity,
-            unitPrice: i.unit_price,
-          })),
-          subtotal: sale.subtotal,
-          discount: sale.discount,
-          total: sale.total,
-          paymentMethod: sale.payment_method,
-        },
-        'POS Receipt'
-      );
+      if (defaultPreset) {
+        cfg = normalizeReceiptConfig(defaultPreset.config);
+      }
     } catch {
-      printReceipt(
-        DEFAULT_RECEIPT_CONFIG,
-        {
+      // Fallback to DEFAULT_RECEIPT_CONFIG
+    }
+
+    printReceipt(
+      cfg,
+      {
           orderNumber: sale.receipt_number || `POS-${sale.id.slice(-6).toUpperCase()}`,
           date: formattedDate,
           customerName: sale.customer_name || 'Walk-in Customer',
@@ -101,7 +87,46 @@ export default function SaleDetailPage() {
         },
         'POS Receipt'
       );
+  };
+
+  const handlePrintInvoice = async () => {
+    if (!sale) return;
+    let cfg = DEFAULT_INVOICE_CONFIG;
+    try {
+      const res = await getInvoicePrintPresetsAction();
+      const presets = res.data || [];
+      const defaultPreset = (presets as any[]).find((p) => p.isDefault) || presets[0];
+      if (defaultPreset) {
+        cfg = normalizeInvoiceConfig(defaultPreset.config);
+      }
+    } catch {
+      // Fallback
     }
+
+    const docNumber = sale.receipt_number || `INV-POS-${sale.id.slice(-6).toUpperCase()}`;
+
+    const invoiceData: InvoiceData = {
+      docType: 'Invoice',
+      docNumber,
+      date: new Date(sale.created).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+      customerName: sale.customer_name || 'Walk-in Customer',
+      customerPhone: sale.customer_phone || undefined,
+      items: items.map((i) => ({
+        name: i.product_name,
+        qty: i.quantity,
+        unitPrice: i.unit_price,
+        discount: i.item_discount || undefined,
+        serialNumber: i.unit_serial || undefined,
+      })),
+      subtotal: sale.subtotal,
+      taxAmount: sale.tax_amount || 0,
+      discountAmount: sale.discount || 0,
+      totalAmount: sale.total,
+      paymentMethod: `PAID via ${(sale.payment_method || 'POS').toUpperCase()}`,
+      notes: 'Official Paid Invoice. Thank you for shopping with FTC Electronics! Warranty claims require original invoice copy.',
+    };
+
+    printInvoice(cfg, invoiceData, 'POS Paid Invoice');
   };
 
   const handleConfirmVoid = async (pin: string) => {
@@ -167,10 +192,17 @@ export default function SaleDetailPage() {
               </Button>
             )}
             <Button
-              onClick={handleReprint}
-              className="bg-blue-600 hover:bg-blue-500 text-white text-xs"
+              variant="outline"
+              onClick={handlePrintInvoice}
+              className="text-xs border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10 hover:text-indigo-300 font-bold"
             >
-              <Printer className="h-3.5 w-3.5" /> Reprint Receipt
+              <FileText className="h-3.5 w-3.5" /> Print Invoice
+            </Button>
+            <Button
+              onClick={handleReprint}
+              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold"
+            >
+              <Printer className="h-3.5 w-3.5" /> Thermal Receipt
             </Button>
           </div>
         </div>

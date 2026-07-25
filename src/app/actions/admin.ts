@@ -3,10 +3,11 @@
 import { cookies, headers } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 import { getAdminPb, writeAuditLog } from '@/lib/pb-admin';
+import { getTrustedClientIp } from '@/lib/get-client-ip';
 import { ROLE_PERMISSIONS } from '@/types/admin';
 import type { AdminRole, AuditAction } from '@/types/admin';
 import type { BarcodePrintConfig } from '@/types/barcode-config';
-import type { ReceiptPrintConfig } from '@/types/receipt-config';
+import type { ReceiptPrintConfig, ReceiptPrintPreset } from '@/types/receipt-config';
 import type { InvoicePrintConfig } from '@/types/invoice-config';
 import {
   pbProducts,
@@ -20,8 +21,10 @@ import {
   pbEmployees,
   pbSales,
   pbCustomers,
+  pbWholesaleDealers,
+  pbQuotations,
 } from '@/lib/pb-collections';
-import type { SalePayload } from '@/types/pos';
+import type { PaymentMethod, PBSale, PBSaleItem, SalePayload } from '@/types/pos';
 
 // Helper to cast fields safely for audit logging
 function toRecord(obj: any): Record<string, unknown> | undefined {
@@ -34,34 +37,49 @@ function toRecord(obj: any): Record<string, unknown> | undefined {
 async function checkPermission(
   module: keyof typeof ROLE_PERMISSIONS[AdminRole],
   action: 'read' | 'write' | 'delete'
-): Promise<{ allowed: boolean; role?: AdminRole; actorEmail?: string; ip?: string; userAgent?: string }> {
+): Promise<{ allowed: boolean; role?: AdminRole; actorEmail?: string; actorId?: string; ip?: string; userAgent?: string }> {
   const cookieStore = await cookies();
   const token = cookieStore.get('pb_auth_token')?.value;
 
   const headersList = await headers();
-  const ip = headersList.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  const ip = getTrustedClientIp(headersList);
   const userAgent = headersList.get('user-agent') || 'unknown';
 
   if (!token) {
     return { allowed: false, ip, userAgent };
   }
 
-  const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'http://127.0.0.1:8090';
+  const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
+  if (!pbUrl) {
+    return { allowed: false, ip, userAgent };
+  }
   let actorEmail = 'admin@ftc.lk';
+  let actorId = 'admin';
   let effectiveRole: AdminRole | undefined;
 
   try {
     const PocketBase = (await import('pocketbase')).default;
     const userPb = new PocketBase(pbUrl);
-    userPb.authStore.save(token, null);
+    userPb.autoCancellation(false);
+    userPb.authStore.save(token);
 
-    if (!userPb.authStore.isValid || !userPb.authStore.model) {
+    // Validates the token against the PocketBase server and refreshes auth record
+    const authData = await userPb.collection('users').authRefresh();
+    const record = authData.record;
+    if (!record) {
       return { allowed: false, ip, userAgent };
     }
 
-    const user = await userPb.collection('users').getOne(userPb.authStore.model.id);
-    effectiveRole = user.role as AdminRole;
-    actorEmail = user.email || userPb.authStore.model.email || 'admin@ftc.lk';
+    let role = record.role as string | undefined;
+    if (role === 'admin') {
+      role = 'super_admin';
+    } else if (!role && (record.isAdmin === true || record.is_admin === true)) {
+      role = 'super_admin';
+    }
+
+    effectiveRole = role as AdminRole;
+    actorEmail = record.email || 'admin@ftc.lk';
+    actorId = record.id || 'admin';
   } catch {
     return { allowed: false, ip, userAgent };
   }
@@ -72,15 +90,15 @@ async function checkPermission(
 
   const permissions = ROLE_PERMISSIONS[effectiveRole];
   if (!permissions) {
-    return { allowed: false, role: effectiveRole, actorEmail, ip, userAgent };
+    return { allowed: false, role: effectiveRole, actorEmail, actorId, ip, userAgent };
   }
 
   const modulePerms = (permissions as any)[module];
   if (!modulePerms || !modulePerms[action]) {
-    return { allowed: false, role: effectiveRole, actorEmail, ip, userAgent };
+    return { allowed: false, role: effectiveRole, actorEmail, actorId, ip, userAgent };
   }
 
-  return { allowed: true, role: effectiveRole, actorEmail, ip, userAgent };
+  return { allowed: true, role: effectiveRole, actorEmail, actorId, ip, userAgent };
 }
 
 // ─── Products Actions ─────────────────────────────────────────────────────────
@@ -398,7 +416,7 @@ export async function deleteProductAction(id: string) {
 
 // ─── Categories Actions ───────────────────────────────────────────────────────
 
-export async function createCategoryAction(data: { name: string; slug: string; sortOrder: number }) {
+export async function createCategoryAction(data: { name: string; slug: string; sortOrder: number; isActive?: boolean }) {
   const check = await checkPermission('categories', 'write');
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
@@ -423,7 +441,7 @@ export async function createCategoryAction(data: { name: string; slug: string; s
   }
 }
 
-export async function updateCategoryAction(id: string, data: Partial<{ name: string; slug: string; sortOrder: number }>) {
+export async function updateCategoryAction(id: string, data: Partial<{ name: string; slug: string; sortOrder: number; isActive: boolean }>) {
   const check = await checkPermission('categories', 'write');
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
@@ -1144,7 +1162,7 @@ export async function getBarcodePrintPresetsAction() {
     });
     return { success: true, data: JSON.parse(JSON.stringify(records)) };
   } catch {
-    return { success: true, data: [] };
+    return { success: false, error: 'Failed to load barcode presets.', data: [] };
   }
 }
 
@@ -1226,19 +1244,47 @@ export async function setDefaultBarcodePrintPresetAction(id: string) {
 
 // ─── System Configurations (Receipt Print Presets) ───────────────────────────
 
-export async function getReceiptPrintPresetsAction() {
+export async function getReceiptPrintPresetsAction(): Promise<{
+  success: boolean;
+  error?: string;
+  data: ReceiptPrintPreset[];
+}> {
   const check = await checkPermission('systemConfig', 'read');
   if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
 
   try {
     const adminPb = await getAdminPb();
+    const [genSettings, persSettings] = await Promise.all([
+      pbSiteSettings.get<any>('general').catch(() => null),
+      pbSiteSettings.get<any>('personalization').catch(() => null),
+    ]);
+
+    const logoUrl = persSettings?.logoUrl || persSettings?.darkLogoUrl || '';
+    const dbStoreName = genSettings?.siteName || '';
+    const dbAddress = [genSettings?.location?.address, genSettings?.location?.city].filter(Boolean).join(', ');
+    const dbPhone = genSettings?.contactInfo?.phone || '';
+
     const records = await adminPb.collection('system_configurations').getFullList({
       filter: 'category = "receipt_print"',
       sort: '-isDefault',
     });
-    return { success: true, data: JSON.parse(JSON.stringify(records)) };
+
+    const list = records.map((r: any) => {
+      const parsedConfig = typeof r.config === 'string' ? JSON.parse(r.config) : (r.config || {});
+      return {
+        ...r,
+        config: {
+          ...parsedConfig,
+          logoUrl: parsedConfig.logoUrl || logoUrl,
+          storeName: dbStoreName || parsedConfig.storeName || 'FTC Electronics',
+          headerAddress: dbAddress || parsedConfig.headerAddress || '',
+          headerPhone: dbPhone || parsedConfig.headerPhone || '',
+        },
+      };
+    });
+    return { success: true, data: list as ReceiptPrintPreset[] };
   } catch {
-    return { success: true, data: [] };
+    return { success: false, error: 'Failed to load receipt presets.', data: [] };
   }
 }
 
@@ -1326,13 +1372,39 @@ export async function getInvoicePrintPresetsAction() {
 
   try {
     const adminPb = await getAdminPb();
+    const [genSettings, persSettings] = await Promise.all([
+      pbSiteSettings.get<any>('general').catch(() => null),
+      pbSiteSettings.get<any>('personalization').catch(() => null),
+    ]);
+
+    const logoUrl = persSettings?.logoUrl || persSettings?.darkLogoUrl || '';
+    const dbStoreName = genSettings?.siteName || '';
+    const dbAddress = [genSettings?.location?.address, genSettings?.location?.city].filter(Boolean).join(', ');
+    const dbPhone = genSettings?.contactInfo?.phone || '';
+    const dbEmail = genSettings?.contactInfo?.email || '';
+
     const records = await adminPb.collection('system_configurations').getFullList({
       filter: 'category = "invoice_print"',
       sort: '-isDefault',
     });
-    return { success: true, data: JSON.parse(JSON.stringify(records)) };
+
+    const list = records.map((r: any) => {
+      const parsedConfig = typeof r.config === 'string' ? JSON.parse(r.config) : (r.config || {});
+      return {
+        ...r,
+        config: {
+          ...parsedConfig,
+          logoUrl: parsedConfig.logoUrl || logoUrl,
+          storeName: dbStoreName || parsedConfig.storeName || 'FTC Electronics',
+          headerAddress: dbAddress || parsedConfig.headerAddress || '',
+          headerPhone: dbPhone || parsedConfig.headerPhone || '',
+          headerEmail: dbEmail || parsedConfig.headerEmail || '',
+        },
+      };
+    });
+    return { success: true, data: list };
   } catch {
-    return { success: true, data: [] };
+    return { success: false, error: 'Failed to load invoice presets.', data: [] };
   }
 }
 
@@ -1490,7 +1562,9 @@ export async function getRecentSalesAction(limit = 50) {
   }
 }
 
-export async function getSaleByIdAction(id: string) {
+export async function getSaleByIdAction(
+  id: string
+): Promise<{ success: boolean; data?: { sale: PBSale; items: PBSaleItem[] }; error?: string }> {
   try {
     const sale = await pbSales.getById(id);
     if (!sale) return { success: false, error: 'Sale not found.' };
@@ -1688,3 +1762,237 @@ export async function getUnifiedSalesTrackerAction() {
     return { success: false, error: err.message || 'Failed to fetch unified sales.' };
   }
 }
+
+// ─── Wholesale Dealers Actions ──────────────────────────────────────────────────
+
+export async function getWholesaleDealersAction() {
+  const check = await checkPermission('users', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
+
+  try {
+    const list = await pbWholesaleDealers.getAll();
+    return { success: true, data: JSON.parse(JSON.stringify(list || [])) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch wholesale dealers.', data: [] };
+  }
+}
+
+export async function saveWholesaleDealerAction(
+  data: {
+    company_name: string;
+    contact_name: string;
+    email: string;
+    phone?: string;
+    tax_id?: string;
+    address?: string;
+    discount_rate?: number;
+    credit_limit?: number;
+    status: 'active' | 'pending' | 'suspended';
+    notes?: string;
+  },
+  existingId?: string
+) {
+  const check = await checkPermission('users', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    let record;
+    if (existingId) {
+      record = await pbWholesaleDealers.update(existingId, data);
+    } else {
+      record = await pbWholesaleDealers.create(data);
+    }
+    revalidatePath('/admin/wholesale-dealers');
+    return { success: true, data: JSON.parse(JSON.stringify(record)) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to save wholesale dealer.' };
+  }
+}
+
+export async function deleteWholesaleDealerAction(id: string) {
+  const check = await checkPermission('users', 'delete');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    await pbWholesaleDealers.delete(id);
+    revalidatePath('/admin/wholesale-dealers');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to delete wholesale dealer.' };
+  }
+}
+
+export async function getDealerPurchaseHistoryAction(email?: string, phone?: string, companyName?: string) {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
+
+  try {
+    const adminPb = await getAdminPb();
+    
+    // Fetch POS sales matching email, phone or customer name
+    const filters: string[] = [];
+    if (email) filters.push(`customer_email ~ "${email}"`);
+    if (phone) filters.push(`customer_phone ~ "${phone}"`);
+    if (companyName) filters.push(`customer_name ~ "${companyName}"`);
+
+    const filterStr = filters.length > 0 ? filters.join(' || ') : 'id != ""';
+    const sales = await adminPb.collection('sales').getFullList({
+      filter: filterStr,
+      sort: '-created',
+    });
+
+    return { success: true, data: JSON.parse(JSON.stringify(sales)) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch dealer purchase history.', data: [] };
+  }
+}
+
+// ─── Quotations Actions ─────────────────────────────────────────────────────────
+
+export async function getQuotationsAction() {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
+
+  try {
+    const list = await pbQuotations.getAll();
+    return { success: true, data: JSON.parse(JSON.stringify(list || [])) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch quotations.', data: [] };
+  }
+}
+
+export async function saveQuotationAction(
+  data: {
+    quote_number: string;
+    quote_type?: 'wholesale' | 'direct';
+    dealer_id?: string;
+    customer_name: string;
+    customer_company?: string;
+    customer_email?: string;
+    customer_phone?: string;
+    customer_address?: string;
+    items: Array<{ name: string; qty: number; unitPrice: number; discount?: number; total?: number }>;
+    subtotal: number;
+    tax_amount?: number;
+    discount_amount?: number;
+    total_amount: number;
+    valid_until: string;
+    status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
+    notes?: string;
+    createDealerIfNew?: boolean;
+    createCustomerIfNew?: boolean;
+  },
+  existingId?: string
+) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    // Auto-create new Wholesale Dealer if requested
+    if (data.createDealerIfNew && data.customer_name && data.quote_type === 'wholesale') {
+      try {
+        await pbWholesaleDealers.create({
+          company_name: data.customer_company || data.customer_name,
+          contact_name: data.customer_name,
+          email: data.customer_email || `${Date.now()}@dealer.local`,
+          phone: data.customer_phone || '',
+          address: data.customer_address || '',
+          status: 'active',
+          discount_rate: 5,
+        });
+      } catch {
+        /* ignore auto-create error */
+      }
+    }
+
+    // Auto-create new Customer if requested
+    if (data.createCustomerIfNew && data.customer_name && data.quote_type === 'direct') {
+      try {
+        const adminPb = await getAdminPb();
+        await adminPb.collection('customers').create({
+          name: data.customer_name,
+          email: data.customer_email || `${Date.now()}@customer.local`,
+          phone: data.customer_phone || '',
+          status: 'active',
+          notes: 'Auto-created from Quotation',
+        });
+      } catch {
+        /* ignore auto-create error */
+      }
+    }
+
+    const { createDealerIfNew, createCustomerIfNew, ...payload } = data;
+
+    let record;
+    if (existingId) {
+      record = await pbQuotations.update(existingId, payload);
+    } else {
+      record = await pbQuotations.create(payload);
+    }
+    revalidatePath('/admin/quotations');
+    return { success: true, data: JSON.parse(JSON.stringify(record)) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to save quotation.' };
+  }
+}
+
+export async function deleteQuotationAction(id: string) {
+  const check = await checkPermission('orders', 'delete');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    await pbQuotations.delete(id);
+    revalidatePath('/admin/quotations');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to delete quotation.' };
+  }
+}
+
+export async function convertQuotationToSaleAction(quoteId: string, paymentMethod: PaymentMethod = 'cash') {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const quote = await pbQuotations.getAll().then(list => list.find(q => q.id === quoteId));
+    if (!quote) return { success: false, error: 'Quotation not found.' };
+
+    const items = quote.items.map((item) => ({
+      product_id: '',
+      product_name: item.name,
+      sku: 'QUOTE-ITEM',
+      unit_price: item.unitPrice,
+      item_discount: item.discount || 0,
+      quantity: item.qty,
+      line_total: item.total || (item.unitPrice * item.qty - (item.discount || 0)),
+    }));
+
+    const salePayload: SalePayload = {
+      cashier_name: 'Admin User',
+      cashier_id: check.actorId || 'admin',
+      customer_name: quote.customer_name,
+      customer_phone: quote.customer_phone || '',
+      customer_email: quote.customer_email,
+      subtotal: quote.subtotal,
+      discount: quote.discount_amount || 0,
+      tax_amount: quote.tax_amount || 0,
+      total: quote.total_amount,
+      payment_method: paymentMethod,
+      cash_tendered: quote.total_amount,
+      change_due: 0,
+      items_count: items.reduce((acc, i) => acc + i.quantity, 0),
+      notes: `Converted from Quotation #${quote.quote_number}`,
+      items,
+    };
+
+    const saleResult = await pbSales.createSale(salePayload);
+    await pbQuotations.update(quoteId, { status: 'accepted' });
+
+    revalidatePath('/admin/quotations');
+    revalidatePath('/admin/sales');
+    return { success: true, saleId: saleResult.sale.id, receiptNumber: saleResult.sale.receipt_number };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to convert quotation to sale.' };
+  }
+}
+

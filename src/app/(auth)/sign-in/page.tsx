@@ -3,25 +3,43 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { loginAction } from '@/app/actions/auth';
 
 export default function SignInPage() {
   const router = useRouter();
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError(null);
 
-    // Simulate login network delay
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    setLoading(false);
-    
-    // Redirect to home page
-    router.push('/');
+    const fd = new FormData();
+    fd.append('email', formData.email);
+    fd.append('password', formData.password);
+
+    try {
+      const res = await loginAction(fd);
+      setLoading(false);
+
+      if (res.success) {
+        if (res.role && ['super_admin', 'store_manager', 'content_editor', 'support_staff', 'read_only'].includes(res.role)) {
+          router.push('/admin/dashboard');
+        } else {
+          router.push('/');
+        }
+      } else {
+        setError(res.error || 'Invalid email or password.');
+      }
+    } catch {
+      setLoading(false);
+      setError('An error occurred during sign in. Please try again.');
+    }
   };
 
   return (
@@ -36,6 +54,13 @@ export default function SignInPage() {
         <h2 className="text-xl font-bold mt-4 text-foreground">Welcome Back</h2>
         <p className="text-xs text-muted-foreground mt-1">Sign in to manage your orders and profile.</p>
       </div>
+
+      {error && (
+        <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 rounded-lg text-xs flex items-center gap-2">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
 
       {/* Form fields */}
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -53,7 +78,12 @@ export default function SignInPage() {
         </div>
 
         <div>
-          <label htmlFor="signin-password" className="block text-xs text-muted-foreground mb-2">Password</label>
+          <div className="flex items-center justify-between mb-2">
+            <label htmlFor="signin-password" className="block text-xs text-muted-foreground">Password</label>
+            <Link href="/forgot-password" className="text-xs text-blue-500 hover:underline">
+              Forgot password?
+            </Link>
+          </div>
           <Input
             id="signin-password"
             type="password"
@@ -78,10 +108,11 @@ export default function SignInPage() {
       {/* Link back to register */}
       <div className="text-center text-xs text-muted-foreground border-t border-border pt-5">
         Don&apos;t have an account?{' '}
-        <Link href="/sign-up" className="text-blue-650 hover:underline font-semibold">
+        <Link href="/sign-up" className="text-blue-500 hover:underline font-semibold">
           Create Account
         </Link>
       </div>
     </div>
   );
 }
+

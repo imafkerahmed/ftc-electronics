@@ -3,10 +3,12 @@
 import React, { useState, useEffect, useTransition } from 'react';
 import { Button } from '@/components/ui/button';
 import { pbOrders } from '@/lib/pb-collections';
-import { updateOrderStatusAction, getReceiptPrintPresetsAction } from '@/app/actions/admin';
-import { DEFAULT_RECEIPT_CONFIG, type ReceiptPrintConfig } from '@/types/receipt-config';
+import { updateOrderStatusAction, getReceiptPrintPresetsAction, getInvoicePrintPresetsAction } from '@/app/actions/admin';
+import { DEFAULT_RECEIPT_CONFIG, normalizeReceiptConfig, type ReceiptPrintConfig } from '@/types/receipt-config';
+import { DEFAULT_INVOICE_CONFIG, normalizeInvoiceConfig } from '@/types/invoice-config';
 import { printReceipt } from '@/lib/receipt-print';
-import { Loader2, CheckCircle, AlertCircle, ShoppingBag, Printer } from 'lucide-react';
+import { printInvoice, type InvoiceData } from '@/lib/invoice-print';
+import { Loader2, CheckCircle, AlertCircle, ShoppingBag, Printer, FileText } from 'lucide-react';
 
 interface Order {
   id: string;
@@ -30,10 +32,8 @@ export default function AdminOrdersPage() {
     async function loadReceiptPreset() {
       const res = await getReceiptPrintPresetsAction();
       if (res.success && res.data && res.data.length > 0) {
-        const def = (res.data as any[]).find((p) => p.isDefault) || res.data[0];
-        try {
-          setDefaultReceiptConfig({ ...DEFAULT_RECEIPT_CONFIG, ...JSON.parse(def.config) });
-        } catch {}
+        const def = res.data.find((p) => p.isDefault) || res.data[0];
+        setDefaultReceiptConfig(normalizeReceiptConfig(def.config));
       }
     }
     void loadReceiptPreset();
@@ -79,6 +79,42 @@ export default function AdminOrdersPage() {
         setError(res.error || 'Failed to ship order.');
       }
     });
+  };
+
+  const handlePrintOrderInvoice = async (order: Order, docType: 'Quotation' | 'Invoice') => {
+    const isQuotation = docType === 'Quotation';
+    let cfg = DEFAULT_INVOICE_CONFIG;
+    try {
+      const res = await getInvoicePrintPresetsAction();
+      const presets = res.data || [];
+      const defaultPreset = (presets as any[]).find((p) => p.isDefault) || presets[0];
+      if (defaultPreset) {
+        cfg = normalizeInvoiceConfig(defaultPreset.config);
+      }
+    } catch {
+      // Fallback
+    }
+
+    const docNumber = isQuotation ? `QUO-${order.orderId}` : `INV-${order.orderId}`;
+    const invoiceData: InvoiceData = {
+      docType,
+      docNumber,
+      date: order.date || new Date().toLocaleDateString('en-GB'),
+      // eslint-disable-next-line react-hooks/purity
+      dueDate: isQuotation ? new Date(Date.now() + 14 * 86400000).toLocaleDateString('en-GB') : undefined,
+      customerName: order.email,
+      items: [
+        { name: `Order ${order.orderId}`, qty: 1, unitPrice: order.total }
+      ],
+      subtotal: order.total,
+      totalAmount: order.total,
+      paymentMethod: isQuotation ? 'UNPAID / ESTIMATE' : `PAID via ${(order.paymentStatus || 'ONLINE').toUpperCase()}`,
+      notes: isQuotation
+        ? 'Quotation valid for 14 days from issue date.'
+        : 'Official Paid Invoice. Thank you for shopping with FTC Electronics!',
+    };
+
+    printInvoice(cfg, invoiceData, isQuotation ? 'Sales Quotation' : 'Paid Invoice');
   };
 
   const getShippingBadge = (status: Order['shippingStatus']) => {
@@ -166,6 +202,15 @@ export default function AdminOrdersPage() {
                       </td>
                       <td className="p-4">{getShippingBadge(order.shippingStatus)}</td>
                       <td className="p-4 text-right flex items-center justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handlePrintOrderInvoice(order, 'Invoice')}
+                          className="h-8 text-[11px] font-semibold flex items-center gap-1 cursor-pointer border-border hover:bg-muted text-indigo-400 border-indigo-500/30"
+                          title="Print Paid Invoice"
+                        >
+                          <FileText className="h-3 w-3" /> Invoice
+                        </Button>
                         <Button
                           size="sm"
                           variant="outline"

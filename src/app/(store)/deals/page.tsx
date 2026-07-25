@@ -15,20 +15,18 @@ export default async function DealsPage() {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 text-foreground">
-      <div className="relative mb-8 rounded-3xl overflow-hidden bg-gradient-to-r from-rose-950/40 via-card to-amber-955/30 border border-rose-500/20 px-6 py-10 sm:px-10">
-        <div className="pointer-events-none absolute -top-12 -right-12 h-56 w-56 rounded-full bg-rose-500/15 blur-3xl" />
+      <div className="relative mb-8 rounded-3xl overflow-hidden bg-card border border-border px-6 py-10 sm:px-10">
+        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,hsl(var(--border)/0.3)_1px,transparent_1px),linear-gradient(to_bottom,hsl(var(--border)/0.3)_1px,transparent_1px)] bg-[size:32px_32px] opacity-40" />
 
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-bold tracking-wider uppercase mb-3">
-          <Sparkles className="h-4 w-4" /> Limited-Time Offers
+        <div className="relative z-10">
+          <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-foreground mb-2">
+            On-Sale Tech Deals
+          </h1>
+
+          <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 font-medium leading-relaxed max-w-lg">
+            Save big on genuine laptops, smartphones, and accessories with official warranty and 0% interest 3-month installment plans.
+          </p>
         </div>
-
-        <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-foreground mb-2">
-          On-Sale Tech Deals
-        </h1>
-
-        <p className="text-sm text-muted-foreground leading-relaxed max-w-xl">
-          Save big on genuine laptops, smartphones, and accessories with official warranty and 0% interest 3-month installment plans.
-        </p>
       </div>
 
       <div className="flex items-center justify-between py-3 mb-6 border-b border-border/60">

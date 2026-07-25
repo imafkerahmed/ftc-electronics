@@ -4,11 +4,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 import React, { useState, useEffect, useTransition } from 'react';
-import { X, Banknote, CreditCard, QrCode, Receipt, Printer, CheckCircle2, AlertCircle, User, UserPlus, Search, Phone, Mail } from 'lucide-react';
+import { X, Banknote, CreditCard, QrCode, Receipt, Printer, CheckCircle2, AlertCircle, User, UserPlus, Search, Phone, Mail, FileText } from 'lucide-react';
 import type { PosCartItem, PosEmployeeSession, PaymentMethod, SalePayload } from '@/types/pos';
-import { createSaleAction, getReceiptPrintPresetsAction, searchPosCustomersAction, createPosCustomerAction } from '@/app/actions/admin';
+import { createSaleAction, getReceiptPrintPresetsAction, getInvoicePrintPresetsAction, searchPosCustomersAction, createPosCustomerAction } from '@/app/actions/admin';
 import { printReceipt } from '@/lib/receipt-print';
+import { printInvoice, type InvoiceData } from '@/lib/invoice-print';
 import { DEFAULT_RECEIPT_CONFIG, normalizeReceiptConfig } from '@/types/receipt-config';
+import { DEFAULT_INVOICE_CONFIG, normalizeInvoiceConfig } from '@/types/invoice-config';
 
 interface BillData {
   subtotal: number;
@@ -187,16 +189,20 @@ export default function PosPaymentModal({
   };
 
   const handlePrint = async () => {
+    let cfg = DEFAULT_RECEIPT_CONFIG;
     try {
       const res = await getReceiptPrintPresetsAction();
-      const presets = (res.data || []) as any[];
+      const presets = res.data || [];
       const defaultPreset = presets.find((p) => p.isDefault) || presets[0];
-      const cfg = defaultPreset
-        ? normalizeReceiptConfig(defaultPreset.config)
-        : DEFAULT_RECEIPT_CONFIG;
+      if (defaultPreset) {
+        cfg = normalizeReceiptConfig(defaultPreset.config);
+      }
+    } catch {
+      // Fallback
+    }
 
-      printReceipt(
-        cfg,
+    printReceipt(
+      cfg,
         {
           orderNumber: completedSaleId ? `FTC-POS-${completedSaleId.slice(-6).toUpperCase()}` : `FTC-POS-${Date.now().toString(36).toUpperCase()}`,
           date: new Date().toLocaleString('en-LK'),
@@ -215,28 +221,47 @@ export default function PosPaymentModal({
         },
         'POS Receipt'
       );
+  };
+
+  const handlePrintInvoice = async () => {
+    let cfg = DEFAULT_INVOICE_CONFIG;
+    try {
+      const res = await getInvoicePrintPresetsAction();
+      const presets = res.data || [];
+      const defaultPreset = (presets as any[]).find((p) => p.isDefault) || presets[0];
+      if (defaultPreset) {
+        cfg = normalizeInvoiceConfig(defaultPreset.config);
+      }
     } catch {
-      printReceipt(
-        DEFAULT_RECEIPT_CONFIG,
-        {
-          orderNumber: `FTC-POS-${Date.now().toString(36).toUpperCase()}`,
-          date: new Date().toLocaleString('en-LK'),
-          customerName: cName || 'Walk-in Customer',
-          customerPhone: cPhone,
-          items: cart.map((i) => ({
-            name: i.productName,
-            qty: i.quantity,
-            unitPrice: i.unitPrice - i.itemDiscount,
-            serialNumber: i.unitBarcode ? `${i.unitBarcode}${i.unitSerial ? ' (' + i.unitSerial + ')' : ''}` : i.unitSerial,
-          })),
-          subtotal: billData.subtotal,
-          discount: billData.discount,
-          total: billData.total,
-          paymentMethod: method,
-        },
-        'POS Receipt'
-      );
+      // Fallback
     }
+
+    const docNumber = completedSaleId
+      ? `INV-POS-${completedSaleId.slice(-6).toUpperCase()}`
+      : `INV-POS-${Date.now().toString(36).toUpperCase()}`;
+
+    const invoiceData: InvoiceData = {
+      docType: 'Invoice',
+      docNumber,
+      date: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+      customerName: cName || 'Walk-in Customer',
+      customerPhone: cPhone || undefined,
+      items: cart.map((i) => ({
+        name: i.productName,
+        qty: i.quantity,
+        unitPrice: i.unitPrice,
+        discount: i.itemDiscount || undefined,
+        serialNumber: i.unitSerial || i.unitBarcode || undefined,
+      })),
+      subtotal: billData.subtotal,
+      taxAmount: billData.taxAmount,
+      discountAmount: billData.discount,
+      totalAmount: billData.total,
+      paymentMethod: `PAID via ${method.toUpperCase()}`,
+      notes: 'Official Paid Invoice. Thank you for shopping with FTC Electronics! Warranty claims require original invoice copy.',
+    };
+
+    printInvoice(cfg, invoiceData, 'POS Paid Invoice');
   };
 
   // ── Success screen ──────────────────────────────────────────────────────────
@@ -255,12 +280,21 @@ export default function PosPaymentModal({
             </p>
           )}
           <div className="space-y-2 mt-6">
-            <Button
-              onClick={handlePrint}
-              className="w-full h-10 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center gap-2"
-            >
-              <Printer className="h-4 w-4" /> Print Receipt
-            </Button>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                onClick={handlePrint}
+                className="h-10 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center gap-1.5 text-xs font-bold"
+              >
+                <Printer className="h-4 w-4" /> Thermal Receipt
+              </Button>
+              <Button
+                onClick={handlePrintInvoice}
+                variant="outline"
+                className="h-10 rounded-xl border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10 hover:text-indigo-300 flex items-center justify-center gap-1.5 text-xs font-bold"
+              >
+                <FileText className="h-4 w-4" /> Print Invoice
+              </Button>
+            </div>
 
             <div className="grid grid-cols-2 gap-2">
               <Button
@@ -271,7 +305,7 @@ export default function PosPaymentModal({
                     const cleanPhone = phone.replace(/\D/g, '');
                     const orderNo = completedSaleId ? `FTC-POS-${completedSaleId.slice(-6).toUpperCase()}` : '';
                     const itemsStr = cart.map(i => `• ${i.productName} x${i.quantity} - ${fmt(i.lineTotal, currency)}`).join('%0A');
-                    const text = `*FTC | Electronics*%0AReceipt for Order *${orderNo}*%0A*Date:* ${new Date().toLocaleDateString()}%0A*Total:* ${fmt(billData.total, currency)}%0A%0A*Items:*%0A${itemsStr}%0A%0AThank you for shopping with us!`;
+                    const text = `*FTC Electronics*%0AReceipt for Order *${orderNo}*%0A*Date:* ${new Date().toLocaleDateString()}%0A*Total:* ${fmt(billData.total, currency)}%0A%0A*Items:*%0A${itemsStr}%0A%0AThank you for shopping with us!`;
                     window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
                   }
                 }}

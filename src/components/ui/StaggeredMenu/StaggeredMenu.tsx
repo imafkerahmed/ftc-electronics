@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { gsap } from "gsap";
@@ -450,7 +452,7 @@ export const StaggeredMenu: React.FC<StaggeredMenuProps> = ({
             colors && colors.length
               ? colors.slice(0, 4)
               : ["#1e1e22", "#35353c"];
-          let arr = [...raw];
+          const arr = [...raw];
           if (arr.length >= 3) {
             const mid = Math.floor(arr.length / 2);
             arr.splice(mid, 1);
@@ -482,6 +484,7 @@ export const StaggeredMenu: React.FC<StaggeredMenuProps> = ({
         ref={panelRef}
         className="staggered-menu-panel"
         aria-hidden={!open}
+        inert={!open || undefined}
         data-lenis-prevent
       >
         <div className="sm-panel-inner text-foreground dark:text-white relative flex flex-col h-full z-10">

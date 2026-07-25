@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useTransition } from "react";
+import React, { useState, useEffect, useCallback, useRef, useTransition } from "react";
 import {
   LayoutTemplate,
   Save,
@@ -32,6 +32,7 @@ import {
   updateHeroBannerAction,
   deleteHeroBannerAction,
   reorderHeroBannersAction,
+  updateBrandAction,
 } from "@/app/actions/admin";
 import { Input } from "@/components/ui/input";
 import { Plus } from "lucide-react";
@@ -168,6 +169,7 @@ export default function AdminHomepageBuilderPage() {
   const [editingBlock, setEditingBlock] = useState<HomepageBlock | null>(null);
   const [configText, setConfigText] = useState("");
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+  const configFormRef = useRef<HTMLFormElement>(null);
 
   // Hero banner editor state
   const [isHeroModalOpen, setIsHeroModalOpen] = useState(false);
@@ -190,7 +192,7 @@ export default function AdminHomepageBuilderPage() {
     { id: string; name: string; slug: string }[]
   >([]);
   const [availableBrands, setAvailableBrands] = useState<
-    { id: string; name: string; slug: string }[]
+    { id: string; name: string; slug: string; show_in_strip: boolean; logoUrl: string | null }[]
   >([]);
 
   // Product Carousel visual form states
@@ -201,6 +203,8 @@ export default function AdminHomepageBuilderPage() {
   const [productRows, setProductRows] = useState<number>(1);
   const [productLayout, setProductLayout] = useState<string>("featured-grid");
   const [productSeeAll, setProductSeeAll] = useState<string>("");
+  const [productDescription, setProductDescription] = useState<string>("");
+  const [productTitleColor, setProductTitleColor] = useState<string>("");
 
   // Bento Grid Category Builder state (4 slots)
   interface BentoSlotDraft {
@@ -266,6 +270,17 @@ export default function AdminHomepageBuilderPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  useEffect(() => {
+    if (isAddModalOpen || isConfigModalOpen || isHeroModalOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isAddModalOpen, isConfigModalOpen, isHeroModalOpen]);
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
@@ -295,12 +310,18 @@ export default function AdminHomepageBuilderPage() {
           slug: c.slug || c.id,
         })),
       );
-      setAvailableBrands(
-        brs.map((b: any) => ({ id: b.id, name: b.name, slug: b.slug || b.id })),
-      );
-
       const pbUrl =
         process.env.NEXT_PUBLIC_POCKETBASE_URL || "https://ftc-db.codix.site/";
+      setAvailableBrands(
+        brs.map((b: any) => ({
+          id: b.id,
+          name: b.name,
+          slug: b.slug || b.id,
+          show_in_strip: b.show_in_strip || false,
+          logoUrl: b.logo ? `${pbUrl.replace(/\/$/, "")}/api/files/${b.collectionId}/${b.id}/${b.logo}` : null,
+        })),
+      );
+
       const bannersFromCollection = heroRecords.length
         ? heroRecords.map((banner, index) => {
             const imageUrl = banner.image
@@ -468,6 +489,8 @@ export default function AdminHomepageBuilderPage() {
       setProductRows(Number(cfg.rows) || (Number(cfg.limit) ? Math.ceil(Number(cfg.limit) / 5) : 1));
       setProductLayout(String(cfg.layout || "featured-grid"));
       setProductSeeAll(String(cfg.seeAllLink || ""));
+      setProductDescription(String(cfg.description || ""));
+      setProductTitleColor(String(cfg.titleColor || ""));
     }
 
     if (block.type === "category-grid") {
@@ -687,6 +710,8 @@ export default function AdminHomepageBuilderPage() {
         limit: productLayout === "featured-grid" ? productRows * 5 : productLimit,
         layout: productLayout,
         seeAllLink: productSeeAll || undefined,
+        description: productDescription || undefined,
+        titleColor: productTitleColor || undefined,
       };
     } else if (editingBlock.type === "category-grid") {
       parsedConfig = {
@@ -716,6 +741,39 @@ export default function AdminHomepageBuilderPage() {
       }
     });
   };
+
+  const handleConfigModalToggleBrandStrip = async (brand: any, checked: boolean) => {
+    setError(null);
+    setSuccess(null);
+
+    // Optimistically update local availableBrands state
+    setAvailableBrands((prev) =>
+      prev.map((b) => (b.id === brand.id ? { ...b, show_in_strip: checked } : b))
+    );
+
+    const formData = new FormData();
+    formData.append("name", brand.name);
+    formData.append("slug", brand.slug);
+    formData.append("show_in_strip", checked.toString());
+
+    const res = await updateBrandAction(brand.id, formData);
+    if (!res.success) {
+      // Revert on failure
+      setAvailableBrands((prev) =>
+        prev.map((b) => (b.id === brand.id ? { ...b, show_in_strip: !checked } : b))
+      );
+      setError(res.error || "Failed to update brand visibility.");
+    }
+  };
+
+  const handleConfigBackdropWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    if (configFormRef.current && configFormRef.current.contains(e.target as Node)) {
+      return;
+    }
+    if (configFormRef.current) {
+      configFormRef.current.scrollTop += e.deltaY;
+    }
+  }, []);
 
   const handleSave = () => {
     setError(null);
@@ -1383,7 +1441,10 @@ export default function AdminHomepageBuilderPage() {
 
       {/* Config Editor Modal */}
       {isConfigModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs overflow-y-auto">
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs overflow-y-auto"
+          onWheel={handleConfigBackdropWheel}
+        >
           <div className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full my-auto animate-scale-in">
             {/* Header */}
             <div className="p-5 border-b border-border flex items-center justify-between">
@@ -1405,6 +1466,7 @@ export default function AdminHomepageBuilderPage() {
 
             {/* Form Content */}
             <form
+              ref={configFormRef}
               onSubmit={handleSaveConfig}
               className="p-5 space-y-4 max-h-[75vh] overflow-y-auto"
             >
@@ -1547,6 +1609,54 @@ export default function AdminHomepageBuilderPage() {
                         />
                       </div>
                     )}
+                  </div>
+
+                  {/* Description Input */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground/80 block">
+                      Section Description
+                    </label>
+                    <textarea
+                      value={productDescription}
+                      onChange={(e) => setProductDescription(e.target.value)}
+                      placeholder="e.g. Discover premium hardware with guaranteed performance, curated details, and exclusive checkout options."
+                      className="w-full text-xs p-2.5 rounded-lg border border-input bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 h-20 resize-none"
+                    />
+                  </div>
+
+                  {/* Title Accent Color Input */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground/80 block">
+                      Title Accent Color (Second Word)
+                    </label>
+                    <div className="flex gap-2">
+                      <select
+                        value={productTitleColor}
+                        onChange={(e) => setProductTitleColor(e.target.value)}
+                        className="flex-1 text-xs p-2.5 rounded-lg border border-input bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      >
+                        <option value="">🔮 Automatic (Theme Default)</option>
+                        <option value="#3b82f6">🔵 Blue (#3b82f6)</option>
+                        <option value="#a855f7">🟣 Purple (#a855f7)</option>
+                        <option value="#f43f5e">🔴 Rose (#f43f5e)</option>
+                        <option value="#10b981">🟢 Emerald (#10b981)</option>
+                        <option value="#f59e0b">🟡 Amber (#f59e0b)</option>
+                        <option value="#06b6d4">🔵 Cyan (#06b6d4)</option>
+                        <option value="custom">🎨 Custom Hex Color...</option>
+                      </select>
+                      {(productTitleColor === "custom" || (productTitleColor.startsWith("#") && !["#3b82f6", "#a855f7", "#f43f5e", "#10b981", "#f59e0b", "#06b6d4"].includes(productTitleColor))) && (
+                        <Input
+                          type="text"
+                          placeholder="#FF5500"
+                          value={productTitleColor === "custom" ? "" : productTitleColor}
+                          onChange={(e) => setProductTitleColor(e.target.value)}
+                          className="w-28 text-xs"
+                        />
+                      )}
+                    </div>
+                    <span className="text-[10px] text-muted-foreground block">
+                      Customize the color of the second word in the section title.
+                    </span>
                   </div>
 
                   {/* See All Button Destination Link Dropdown Select */}
@@ -1798,6 +1908,38 @@ export default function AdminHomepageBuilderPage() {
                       </div>
                     </div>
                   )}
+                </div>
+              ) : editingBlock?.type === "brand-logo-strip" ? (
+                <div className="space-y-4">
+                  <p className="text-xs text-muted-foreground bg-muted/40 p-3 rounded-lg border border-border">
+                    Enable or disable the brands that appear in the homepage marquee loop:
+                  </p>
+                  
+                  <div className="grid grid-cols-2 gap-2.5 max-h-64 overflow-y-auto pr-1 pb-1">
+                    {availableBrands.map((brand) => (
+                      <label
+                        key={brand.id}
+                        className="flex items-center gap-3 p-2.5 bg-card hover:bg-muted/40 border border-border rounded-xl cursor-pointer transition-colors select-none"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={brand.show_in_strip || false}
+                          onChange={(e) => handleConfigModalToggleBrandStrip(brand, e.target.checked)}
+                          className="rounded border-border accent-blue-600 cursor-pointer h-4 w-4"
+                        />
+                        {brand.logoUrl ? (
+                          <div className="h-8 w-12 rounded bg-slate-850 flex items-center justify-center p-1 border border-border shrink-0">
+                            <img src={brand.logoUrl} alt={brand.name} className="h-full object-contain" />
+                          </div>
+                        ) : (
+                          <div className="h-8 w-12 rounded bg-muted flex items-center justify-center border border-border shrink-0 text-[10px] font-black uppercase text-muted-foreground">
+                            Logo
+                          </div>
+                        )}
+                        <span className="text-xs font-bold text-foreground truncate">{brand.name}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-3">

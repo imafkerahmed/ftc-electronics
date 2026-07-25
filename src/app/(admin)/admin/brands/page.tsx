@@ -140,6 +140,32 @@ export default function AdminBrandsPage() {
     }
   };
 
+  const handleToggleStrip = async (brand: Brand, checked: boolean) => {
+    setError(null);
+    setSuccess(null);
+
+    // Optimistically update state
+    setBrands((prev) =>
+      prev.map((b) => (b.id === brand.id ? { ...b, show_in_strip: checked } : b))
+    );
+
+    const formData = new FormData();
+    formData.append('name', brand.name);
+    formData.append('slug', brand.slug);
+    formData.append('show_in_strip', checked.toString());
+
+    const res = await updateBrandAction(brand.id, formData);
+    if (!res.success) {
+      // Revert on failure
+      setBrands((prev) =>
+        prev.map((b) => (b.id === brand.id ? { ...b, show_in_strip: !checked } : b))
+      );
+      setError(res.error || 'Failed to update brand visibility.');
+    } else {
+      setSuccess(`Updated visibility for "${brand.name}".`);
+    }
+  };
+
   return (
     <div className="space-y-6 text-foreground">
       {/* Feedback Alerts */}
@@ -183,20 +209,36 @@ export default function AdminBrandsPage() {
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
           {brands.map((brand) => (
-            <div key={brand.id} className="bg-card border border-border rounded-xl p-4 hover:border-blue-500/30 transition-colors group relative">
+            <div key={brand.id} className="bg-card border border-border rounded-xl p-4 hover:border-blue-500/30 transition-all group relative">
               <div className="h-14 w-full rounded-lg bg-slate-800 flex items-center justify-center mb-3 border border-border overflow-hidden">
                 {brand.logoUrl ? (
-                   
                   <img src={brand.logoUrl} alt={brand.name} className="h-full object-contain p-2" />
                 ) : (
                   <span className="text-white font-black text-lg tracking-wider">{brand.name}</span>
                 )}
               </div>
+
               <div className="flex items-center justify-between gap-1 flex-wrap">
                 <p className="font-bold text-foreground text-sm">{brand.name}</p>
-                {brand.show_in_strip && (
-                  <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">Strip</span>
-                )}
+                <button
+                  type="button"
+                  onClick={() => handleToggleStrip(brand, !brand.show_in_strip)}
+                  className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg border transition-all text-[9px] font-extrabold uppercase tracking-wider cursor-pointer ${
+                    brand.show_in_strip
+                      ? "bg-blue-500/10 text-blue-500 border-blue-500/35 hover:bg-blue-500/15"
+                      : "bg-muted text-muted-foreground border-border hover:bg-muted/75"
+                  }`}
+                  title="Toggle display in homepage loop"
+                >
+                  <div className={`w-5.5 h-3 rounded-full relative transition-colors shrink-0 ${
+                    brand.show_in_strip ? "bg-blue-600" : "bg-neutral-600"
+                  }`}>
+                    <div className={`w-2 h-2 bg-white rounded-full absolute top-0.5 transition-all duration-200 ${
+                      brand.show_in_strip ? "right-0.5" : "left-0.5"
+                    }`} />
+                  </div>
+                  <span>{brand.show_in_strip ? "Loop: On" : "Loop: Off"}</span>
+                </button>
               </div>
               <p className="text-[10px] text-muted-foreground font-mono">{brand.slug}</p>
               <div className="flex items-center justify-between mt-2">

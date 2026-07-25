@@ -16,6 +16,9 @@ interface CollectionSectionProps {
   products: Product[];
   rows?: number;
   limit?: number;
+  description?: string;
+  titleColor?: string;
+  brandLogo?: string;
 }
 
 export default function CollectionSection({
@@ -25,10 +28,82 @@ export default function CollectionSection({
   products,
   rows,
   limit,
+  description,
+  titleColor,
+  brandLogo,
 }: CollectionSectionProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isInView = useInView(containerRef, { once: true, amount: 0.1 });
+
+  const [extractedColor, setExtractedColor] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!brandLogo) {
+      setExtractedColor(null);
+      return;
+    }
+
+    const img = new window.Image();
+    img.crossOrigin = "Anonymous";
+    img.src = brandLogo;
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        canvas.width = 30;
+        canvas.height = 30;
+        ctx.drawImage(img, 0, 0, 30, 30);
+
+        const imgData = ctx.getImageData(0, 0, 30, 30).data;
+        
+        let rSum = 0, gSum = 0, bSum = 0, count = 0;
+        let bestColor = "";
+        let maxSat = 0;
+
+        for (let i = 0; i < imgData.length; i += 4) {
+          const r = imgData[i];
+          const g = imgData[i + 1];
+          const b = imgData[i + 2];
+          const a = imgData[i + 3];
+
+          if (a < 150) continue;
+
+          const max = Math.max(r, g, b);
+          const min = Math.min(r, g, b);
+          const sat = max > 0 ? (max - min) / max : 0;
+
+          if (max < 40 || min > 220 || sat < 0.15) continue;
+
+          rSum += r;
+          gSum += g;
+          bSum += b;
+          count++;
+
+          if (sat > maxSat) {
+            maxSat = sat;
+            bestColor = `rgb(${r}, ${g}, ${b})`;
+          }
+        }
+
+        if (bestColor) {
+          setExtractedColor(bestColor);
+        } else if (count > 0) {
+          const avgR = Math.round(rSum / count);
+          const avgG = Math.round(gSum / count);
+          const avgB = Math.round(bSum / count);
+          setExtractedColor(`rgb(${avgR}, ${avgG}, ${avgB})`);
+        } else {
+          setExtractedColor(null);
+        }
+      } catch (err) {
+        console.warn("Failed to extract dominant color from brand logo:", err);
+        setExtractedColor(null);
+      }
+    };
+  }, [brandLogo]);
 
   const displayLimit = rows ? rows * 5 : (limit || 5);
 
@@ -173,6 +248,18 @@ export default function CollectionSection({
 
   const renderTitle = (titleText: string) => {
     const match = titleText.match(/^([^\s-]+[\s-]*)(.*)$/);
+    
+    let customColorStyle = {};
+    let customColorClass = config.accentClass;
+    
+    if (extractedColor) {
+      customColorStyle = { color: extractedColor };
+      customColorClass = "";
+    } else if (titleColor) {
+      customColorStyle = { color: titleColor };
+      customColorClass = "";
+    }
+
     if (match) {
       const firstWord = match[1];
       const secondWord = match[2];
@@ -181,7 +268,7 @@ export default function CollectionSection({
           <span className="text-neutral-900 dark:text-neutral-50">
             {firstWord}
           </span>
-          <span className={config.accentClass}>{secondWord}</span>
+          <span className={customColorClass} style={customColorStyle}>{secondWord}</span>
         </span>
       );
     }
@@ -212,33 +299,39 @@ export default function CollectionSection({
       )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col gap-6 md:gap-8">
-        {/* Header containing Title on left, and Controls on right */}
-        {layout !== "featured-grid" ? (
-          <motion.div
-            className="w-full flex items-center justify-between"
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.1 }}
-          >
-            {/* Section Main Title aligned left */}
-            <h2 className="text-xl sm:text-2xl lg:text-3.5xl font-black tracking-tight uppercase leading-none text-left">
-              {renderTitle(title)}
-            </h2>
-
-            <div className="flex items-center gap-4 shrink-0">
-              {/* See All link */}
-              <Link
-                href={seeAllLink}
-                className="group flex items-center text-xs font-semibold text-neutral-455 hover:text-blue-650 dark:hover:text-blue-400 transition-colors duration-200"
-              >
-                <span>See All</span>
-                <ChevronRight className="h-3.5 w-3.5 ml-0.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+        {/* Unified Premium Editorial Header */}
+        <motion.div
+          className="w-full relative pb-4 mb-2"
+          initial={{ opacity: 0, y: -12 }}
+          animate={isInView ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.5, delay: 0.1 }}
+        >
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-current/8 pb-5 relative z-10 w-full">
+            <div className="flex flex-col gap-2">
+              {/* Title */}
+              <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight uppercase leading-none">
+                {renderTitle(title)}
+              </h2>
+              <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 font-medium leading-relaxed max-w-lg">
+                {description || "Discover premium hardware with guaranteed performance, curated details, and exclusive checkout options."}
+              </p>
+            </div>
+            <div className="flex items-center gap-4 shrink-0 justify-between md:justify-end w-full md:w-auto">
+              <Link href={seeAllLink} className="shrink-0">
+                <button
+                  className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 text-[11px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98] bg-neutral-900 dark:bg-neutral-50 text-white dark:text-neutral-950 hover:bg-neutral-800 dark:hover:bg-neutral-200"
+                  aria-label="Explore Collection"
+                >
+                  <span>Explore All</span>
+                  <ChevronRight className="h-3.5 w-3.5 stroke-[2.5]" />
+                </button>
               </Link>
 
               {isCarouselMode && (
                 /* Navigation Arrows */
                 <div className="flex items-center gap-2">
                   <button
+                    type="button"
                     onClick={() => handleScroll("left")}
                     disabled={!canScrollLeft}
                     className={`h-8.5 w-8.5 rounded-full border flex items-center justify-center transition-all duration-300 cursor-pointer backdrop-blur-xs shadow-xs ${
@@ -251,6 +344,7 @@ export default function CollectionSection({
                     <ChevronLeft className="h-4.5 w-4.5" />
                   </button>
                   <button
+                    type="button"
                     onClick={() => handleScroll("right")}
                     disabled={!canScrollRight}
                     className={`h-8.5 w-8.5 rounded-full border flex items-center justify-center transition-all duration-300 cursor-pointer backdrop-blur-xs shadow-xs ${
@@ -265,38 +359,8 @@ export default function CollectionSection({
                 </div>
               )}
             </div>
-          </motion.div>
-        ) : (
-          /* Premium Editorial Header for Featured Grid */
-          <motion.div
-            className="w-full relative pb-4 mb-2"
-            initial={{ opacity: 0, y: -12 }}
-            animate={isInView ? { opacity: 1, y: 0 } : {}}
-            transition={{ duration: 0.5, delay: 0.1 }}
-          >
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-current/8 pb-5 relative z-10">
-              <div className="flex flex-col gap-2">
-                {/* Title */}
-                <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight uppercase leading-none">
-                  {renderTitle(title)}
-                </h2>
-                <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 font-medium leading-relaxed max-w-lg">
-                  Discover premium hardware with guaranteed performance, curated
-                  details, and exclusive checkout options.
-                </p>
-              </div>
-              <Link href={seeAllLink} className="shrink-0">
-                <button
-                  className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 text-[11px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98] bg-neutral-900 dark:bg-neutral-50 text-white dark:text-neutral-950 hover:bg-neutral-800 dark:hover:bg-neutral-200"
-                  aria-label="Explore Collection"
-                >
-                  <span>Explore All</span>
-                  <ChevronRight className="h-3.5 w-3.5 stroke-[2.5]" />
-                </button>
-              </Link>
-            </div>
-          </motion.div>
-        )}
+          </div>
+        </motion.div>
 
         {/* Products Display (Full Width) */}
         <div className="w-full">
