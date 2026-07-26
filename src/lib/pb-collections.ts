@@ -1355,8 +1355,9 @@ export const pbWholesaleDealers = {
   async getAll(): Promise<PBWholesaleDealer[]> {
     try {
       const adminPb = await getAdminPb();
-      const list = await adminPb.collection("wholesale_dealers").getFullList<PBWholesaleDealer>();
-      return list.sort((a, b) => new Date(b.created || 0).getTime() - new Date(a.created || 0).getTime());
+      return await adminPb.collection("wholesale_dealers").getFullList<PBWholesaleDealer>({
+        sort: "-created",
+      });
     } catch (err) {
       handleError(err, "pbWholesaleDealers.getAll");
     }
@@ -1383,6 +1384,12 @@ export const pbWholesaleDealers = {
   async delete(id: string): Promise<boolean> {
     try {
       const adminPb = await getAdminPb();
+      const count = await adminPb.collection("quotations").getList(1, 1, {
+        filter: `dealer_id = "${id}"`,
+      });
+      if (count.totalItems > 0) {
+        throw new Error(`Cannot delete dealer: ${count.totalItems} quotation(s) reference this dealer.`);
+      }
       return await adminPb.collection("wholesale_dealers").delete(id);
     } catch (err) {
       handleError(err, "pbWholesaleDealers.delete");
@@ -1395,10 +1402,20 @@ export const pbQuotations = {
   async getAll(): Promise<PBQuotation[]> {
     try {
       const adminPb = await getAdminPb();
-      const list = await adminPb.collection("quotations").getFullList<PBQuotation>();
-      return list.sort((a, b) => new Date(b.created || 0).getTime() - new Date(a.created || 0).getTime());
+      return await adminPb.collection("quotations").getFullList<PBQuotation>({
+        sort: "-created",
+      });
     } catch (err) {
       handleError(err, "pbQuotations.getAll");
+    }
+  },
+
+  async getById(id: string): Promise<PBQuotation | null> {
+    try {
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("quotations").getOne<PBQuotation>(id);
+    } catch (err) {
+      handleError(err, "pbQuotations.getById");
     }
   },
 

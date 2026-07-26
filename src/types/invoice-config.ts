@@ -3,6 +3,15 @@
  * Designed for both A4 / Letter formal invoices and POS thermal invoices.
  */
 
+export interface InvoiceItem {
+  name: string;
+  qty: number;
+  unitPrice: number;
+  discount?: number;
+  serialNumber?: string;
+  total?: number;
+}
+
 export interface InvoicePrintConfig {
   label: string;               // Preset name e.g. "Standard A4 Tax Invoice"
   paperWidthMm: number;        // 210mm (A4), 216mm (Letter), 80mm (Thermal POS Invoice)
@@ -21,6 +30,18 @@ export interface InvoicePrintConfig {
   showQrCode: boolean;         // Render E-invoice / Order verify QR code
   isDefault: boolean;          // Default invoice preset flag
   logoUrl?: string;            // Custom Store Logo URL from Personalization settings
+}
+
+export interface InvoicePrintPreset {
+  id: string;
+  name?: string;
+  label: string;
+  category: string;
+  /** Serialized InvoicePrintConfig JSON as stored in PocketBase. */
+  config: string;
+  isDefault?: boolean;
+  created?: string;
+  updated?: string;
 }
 
 export const DEFAULT_INVOICE_CONFIG: InvoicePrintConfig = {

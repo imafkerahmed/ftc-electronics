@@ -72,6 +72,14 @@ export default function GeneralSettingsPage() {
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     startTransition(async () => {
+      let cleanGoogleMapsUrl = googleMapsUrl.trim();
+      if (cleanGoogleMapsUrl.includes('<iframe') || cleanGoogleMapsUrl.startsWith('<iframe')) {
+        const match = cleanGoogleMapsUrl.match(/src=["']([^"']+)["']/);
+        if (match && match[1]) {
+          cleanGoogleMapsUrl = match[1];
+        }
+      }
+
       const payload = {
         siteName,
         tagline,
@@ -79,10 +87,11 @@ export default function GeneralSettingsPage() {
         taxRate: parseFloat(taxRate) || 0,
         storeHoursCopy: hours,
         contactInfo: { phone, email, whatsapp },
-        location: { address, city, googleMapsUrl },
+        location: { address, city, googleMapsUrl: cleanGoogleMapsUrl },
       };
       const res = await updateSiteSettingsAction('general', payload);
       if (res.success) {
+        setGoogleMapsUrl(cleanGoogleMapsUrl);
         showToast('General store settings saved successfully!');
       } else {
         showToast(res.error || 'Failed to save settings.', 'error');

@@ -65,6 +65,8 @@ export interface PBSale extends PBRecord {
   items_count?: number;
   status: SaleStatus;
   notes: string;
+  void_reason?: string;
+  voided_at?: string;
 }
 
 export interface PBSaleItem extends PBRecord {

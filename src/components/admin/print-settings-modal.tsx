@@ -70,19 +70,11 @@ export default function PrintSettingsModal({ onClose, onPrint, unitCount }: Prin
   }, [loadPresets]);
 
   useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
-      document.body.style.overflow = '';
+      document.body.style.overflow = originalOverflow;
     };
-  }, []);
-
-  const handleBackdropWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
-    if (scrollBodyRef.current && scrollBodyRef.current.contains(e.target as Node)) {
-      return;
-    }
-    if (scrollBodyRef.current) {
-      scrollBodyRef.current.scrollTop += e.deltaY;
-    }
   }, []);
 
   const handleSelectPreset = (id: string) => {
@@ -174,10 +166,7 @@ export default function PrintSettingsModal({ onClose, onPrint, unitCount }: Prin
   );
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
-      onWheel={handleBackdropWheel}
-    >
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[85vh] min-h-0 overflow-hidden my-auto">
 
         {/* Header (fixed at top of modal) */}

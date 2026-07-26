@@ -6,8 +6,8 @@ import { useParams } from 'next/navigation';
 import { Ban, ArrowLeft, Printer, Receipt, CheckCircle2, XCircle, FileText } from 'lucide-react';
 import { getSaleByIdAction, getReceiptPrintPresetsAction, getInvoicePrintPresetsAction, voidSaleAction } from '@/app/actions/admin';
 import type { PBSale, PBSaleItem } from '@/types/pos';
-import { printReceipt } from '@/lib/receipt-print';
-import { printInvoice, type InvoiceData } from '@/lib/invoice-print';
+import { printReceipt, resolveReceiptConfig } from '@/lib/receipt-print';
+import { printInvoice, resolveInvoiceConfig, type InvoiceData } from '@/lib/invoice-print';
 import { DEFAULT_RECEIPT_CONFIG, normalizeReceiptConfig } from '@/types/receipt-config';
 import { DEFAULT_INVOICE_CONFIG, normalizeInvoiceConfig } from '@/types/invoice-config';
 import { Button } from '@/components/ui/button';
@@ -52,21 +52,17 @@ export default function SaleDetailPage() {
     return (isNaN(d.getTime()) ? new Date() : d).toLocaleString('en-LK');
   };
 
+  const getFormattedInvoiceDate = () => {
+    if (!sale) return new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    const rawDateStr = sale.date || sale.created || sale.updated;
+    const d = rawDateStr ? new Date(rawDateStr) : new Date();
+    return (isNaN(d.getTime()) ? new Date() : d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
   const handleReprint = async () => {
     if (!sale) return;
     const formattedDate = getFormattedDate();
-
-    let cfg = DEFAULT_RECEIPT_CONFIG;
-    try {
-      const res = await getReceiptPrintPresetsAction();
-      const presets = res.data || [];
-      const defaultPreset = presets.find((p) => p.isDefault) || presets[0];
-      if (defaultPreset) {
-        cfg = normalizeReceiptConfig(defaultPreset.config);
-      }
-    } catch {
-      // Fallback to DEFAULT_RECEIPT_CONFIG
-    }
+    const cfg = await resolveReceiptConfig();
 
     printReceipt(
       cfg,
@@ -91,24 +87,15 @@ export default function SaleDetailPage() {
 
   const handlePrintInvoice = async () => {
     if (!sale) return;
-    let cfg = DEFAULT_INVOICE_CONFIG;
-    try {
-      const res = await getInvoicePrintPresetsAction();
-      const presets = res.data || [];
-      const defaultPreset = (presets as any[]).find((p) => p.isDefault) || presets[0];
-      if (defaultPreset) {
-        cfg = normalizeInvoiceConfig(defaultPreset.config);
-      }
-    } catch {
-      // Fallback
-    }
+    const cfg = await resolveInvoiceConfig();
 
+    const isVoided = sale.status === 'voided';
     const docNumber = sale.receipt_number || `INV-POS-${sale.id.slice(-6).toUpperCase()}`;
 
     const invoiceData: InvoiceData = {
       docType: 'Invoice',
-      docNumber,
-      date: new Date(sale.created).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+      docNumber: isVoided ? `${docNumber} (VOIDED)` : docNumber,
+      date: getFormattedInvoiceDate(),
       customerName: sale.customer_name || 'Walk-in Customer',
       customerPhone: sale.customer_phone || undefined,
       items: items.map((i) => ({
@@ -122,11 +109,15 @@ export default function SaleDetailPage() {
       taxAmount: sale.tax_amount || 0,
       discountAmount: sale.discount || 0,
       totalAmount: sale.total,
-      paymentMethod: `PAID via ${(sale.payment_method || 'POS').toUpperCase()}`,
-      notes: 'Official Paid Invoice. Thank you for shopping with FTC Electronics! Warranty claims require original invoice copy.',
+      paymentMethod: isVoided
+        ? 'VOIDED / CANCELLED'
+        : `PAID via ${(sale.payment_method || 'POS').toUpperCase()}`,
+      notes: isVoided
+        ? `*** THIS SALE HAS BEEN VOIDED / CANCELLED *** ${sale.void_reason ? 'Reason: ' + sale.void_reason : ''}`
+        : 'Official Paid Invoice. Thank you for shopping with FTC Electronics! Warranty claims require original invoice copy.',
     };
 
-    printInvoice(cfg, invoiceData, 'POS Paid Invoice');
+    printInvoice(cfg, invoiceData, isVoided ? 'POS Voided Invoice' : 'POS Paid Invoice');
   };
 
   const handleConfirmVoid = async (pin: string) => {

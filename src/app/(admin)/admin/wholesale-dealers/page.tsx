@@ -29,16 +29,23 @@ import {
   saveWholesaleDealerAction,
   deleteWholesaleDealerAction,
   getDealerPurchaseHistoryAction,
-  getInvoicePrintPresetsAction,
 } from '@/app/actions/admin';
-import { printInvoice } from '@/lib/invoice-print';
-import type { PBWholesaleDealer } from '@/types/admin';
+import { printInvoice, resolveInvoiceConfig } from '@/lib/invoice-print';
+import type { PBWholesaleDealer, DealerSaleRecord, DealerSaleItem } from '@/types/admin';
+
+const getDealerSaleDateString = (saleDate?: string, saleCreated?: string) => {
+  return new Date(saleDate || saleCreated || Date.now()).toLocaleDateString();
+};
+
+const getDealerSaleDateTimeString = (saleDate?: string, saleCreated?: string) => {
+  return new Date(saleDate || saleCreated || Date.now()).toLocaleString();
+};
 
 export default function WholesaleDealersPage() {
   const [dealers, setDealers] = useState<PBWholesaleDealer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'pending' | 'suspended'>('all');
   const [isPending, startTransition] = useTransition();
 
   // Toast state
@@ -66,7 +73,7 @@ export default function WholesaleDealersPage() {
 
   // History slide-over modal state
   const [selectedDealerHistory, setSelectedDealerHistory] = useState<PBWholesaleDealer | null>(null);
-  const [purchaseHistory, setPurchaseHistory] = useState<any[]>([]);
+  const [purchaseHistory, setPurchaseHistory] = useState<DealerSaleRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
   // Delete confirm state
@@ -86,7 +93,25 @@ export default function WholesaleDealersPage() {
 
   useEffect(() => {
     void loadDealers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keyboard shortcut: Dismiss active modal on Escape keypress
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (deleteTarget) {
+          setDeleteTarget(null);
+        } else if (selectedDealerHistory) {
+          setSelectedDealerHistory(null);
+        } else if (isModalOpen) {
+          setIsModalOpen(false);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isModalOpen, selectedDealerHistory, deleteTarget]);
 
   // Filtered dealers
   const filteredDealers = dealers.filter((d) => {
@@ -185,57 +210,37 @@ export default function WholesaleDealersPage() {
       setPurchaseHistory(res.data);
     } else {
       setPurchaseHistory([]);
+      showToast(res.error || 'Failed to load purchase history.', 'error');
     }
     setHistoryLoading(false);
   };
 
   // Print Invoice for a History item
-  const handlePrintHistoryInvoice = async (sale: any) => {
-    const presetsRes = await getInvoicePrintPresetsAction();
-    const presets = presetsRes.success && presetsRes.data ? presetsRes.data : [];
-    const defaultPreset = presets.find((p: any) => p.isDefault) || presets[0];
-
-    const cfg = defaultPreset
-      ? typeof defaultPreset.config === 'string'
-        ? JSON.parse(defaultPreset.config)
-        : defaultPreset.config
-      : {
-          label: 'Default A4 Invoice',
-          paperWidthMm: 210,
-          fontSizeMm: 3.5,
-          documentTitle: 'INVOICE',
-          storeName: 'FTC Electronics',
-          headerAddress: 'Main Street, Colombo, Sri Lanka',
-          headerPhone: '+94 77 123 4567',
-          headerEmail: 'info@ftc.lk',
-          taxNumber: 'VAT Reg: 123456789-0000',
-          bankDetailsText: 'Bank: Commercial Bank | Account: 1000293847',
-          termsAndConditions: 'Warranty claims require original invoice copy.',
-          showTaxBreakdown: true,
-          showDueDate: true,
-          showSignatureBlock: true,
-          showQrCode: true,
-          isDefault: true,
-        };
+  const handlePrintHistoryInvoice = async (sale: DealerSaleRecord) => {
+    const cfg = await resolveInvoiceConfig();
 
     const invoiceData = {
       docType: 'Invoice' as const,
-      docNumber: sale.receipt_number || `FTC-POS-${sale.id.slice(-6).toUpperCase()}`,
-      date: new Date(sale.date || sale.created).toLocaleDateString(),
+      docNumber: sale.receipt_number || `FTC-POS-${(sale.id || '').slice(-6).toUpperCase()}`,
+      date: getDealerSaleDateString(sale.date, sale.created),
       customerName: sale.customer_name || selectedDealerHistory?.company_name,
       customerCompany: selectedDealerHistory?.company_name,
       customerPhone: sale.customer_phone || selectedDealerHistory?.phone,
       customerAddress: selectedDealerHistory?.address,
       items: Array.isArray(sale.items)
-        ? sale.items.map((i: any) => ({
-            name: i.product_name || i.name || 'Item',
-            qty: i.quantity || i.qty || 1,
-            unitPrice: i.unit_price || i.price || 0,
-            discount: i.item_discount || 0,
-            total: i.line_total || (i.unit_price * i.quantity),
-          }))
+        ? sale.items.map((i: DealerSaleItem) => {
+            const qty = Number(i.quantity || i.qty) || 1;
+            const unitPrice = Number(i.unit_price || i.price) || 0;
+            return {
+              name: i.product_name || i.name || 'Item',
+              qty,
+              unitPrice,
+              discount: Number(i.item_discount) || 0,
+              total: Number(i.line_total) || unitPrice * qty,
+            };
+          })
         : [],
-      subtotal: sale.subtotal || sale.total,
+      subtotal: sale.subtotal || sale.total || 0,
       taxAmount: sale.tax_amount || 0,
       discountAmount: sale.discount || 0,
       totalAmount: sale.total || 0,
@@ -345,7 +350,7 @@ export default function WholesaleDealersPage() {
           <span className="text-xs text-muted-foreground font-medium">Status:</span>
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'pending' | 'suspended')}
             className="bg-background border border-input rounded-xl px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
           >
             <option value="all">All Statuses</option>
@@ -472,8 +477,17 @@ export default function WholesaleDealersPage() {
 
       {/* Add / Edit Dealer Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-card border border-border rounded-2xl w-full max-w-xl p-6 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setIsModalOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={editingDealer ? 'Edit Wholesale Dealer' : 'Add Wholesale Dealer'}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-card border border-border rounded-2xl w-full max-w-xl p-6 space-y-4 animate-in fade-in zoom-in-95 duration-200"
+          >
             <div className="flex items-center justify-between border-b border-border pb-3">
               <h2 className="text-lg font-black text-foreground flex items-center gap-2">
                 <Building2 className="h-5 w-5 text-indigo-500" />
@@ -634,8 +648,17 @@ export default function WholesaleDealersPage() {
 
       {/* Dealer Purchase History Slide-Over / Modal */}
       {selectedDealerHistory && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-end p-0 sm:p-4">
-          <div className="bg-card border-l sm:border border-border w-full max-w-2xl h-full sm:h-[90vh] sm:rounded-2xl flex flex-col overflow-hidden animate-in slide-in-from-right duration-200">
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-end p-0 sm:p-4"
+          onClick={() => setSelectedDealerHistory(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="B2B Purchase History"
+            onClick={(e) => e.stopPropagation()}
+            className="bg-card border-l sm:border border-border w-full max-w-2xl h-full sm:h-[90vh] sm:rounded-2xl flex flex-col overflow-hidden animate-in slide-in-from-right duration-200"
+          >
             {/* Modal Header */}
             <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
               <div>
@@ -694,7 +717,7 @@ export default function WholesaleDealersPage() {
                           Receipt #{sale.receipt_number || `FTC-POS-${sale.id.slice(-6).toUpperCase()}`}
                         </span>
                         <span className="text-xs text-muted-foreground block">
-                          {new Date(sale.date || sale.created).toLocaleString()}
+                          {getDealerSaleDateTimeString(sale.date, sale.created)}
                         </span>
                       </div>
                       <div className="text-right">
@@ -709,16 +732,21 @@ export default function WholesaleDealersPage() {
 
                     {Array.isArray(sale.items) && sale.items.length > 0 && (
                       <div className="bg-muted/30 rounded-lg p-2.5 text-xs space-y-1">
-                        {sale.items.map((item: any, idx: number) => (
-                          <div key={idx} className="flex items-center justify-between text-muted-foreground">
-                            <span>
-                              {item.product_name || item.name} x{item.quantity || item.qty || 1}
-                            </span>
-                            <span className="font-semibold text-foreground">
-                              LKR {(item.line_total || item.unit_price * (item.quantity || 1)).toLocaleString()}
-                            </span>
-                          </div>
-                        ))}
+                        {sale.items.map((item: DealerSaleItem, idx: number) => {
+                          const qty = Number(item.quantity || item.qty) || 1;
+                          const unitPrice = Number(item.unit_price || item.price) || 0;
+                          const lineTotal = Number(item.line_total) || unitPrice * qty;
+                          return (
+                            <div key={idx} className="flex items-center justify-between text-muted-foreground">
+                              <span>
+                                {item.product_name || item.name} x{qty}
+                              </span>
+                              <span className="font-semibold text-foreground">
+                                LKR {lineTotal.toLocaleString()}
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
 
@@ -742,8 +770,17 @@ export default function WholesaleDealersPage() {
 
       {/* Delete Confirmation Modal */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-card border border-border rounded-2xl w-full max-w-sm p-6 text-center space-y-4">
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setDeleteTarget(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Delete Wholesale Dealer"
+            onClick={(e) => e.stopPropagation()}
+            className="bg-card border border-border rounded-2xl w-full max-w-sm p-6 text-center space-y-4"
+          >
             <div className="h-12 w-12 bg-red-500/10 border border-red-500/20 rounded-full flex items-center justify-center mx-auto text-red-500">
               <Trash2 className="h-6 w-6" />
             </div>

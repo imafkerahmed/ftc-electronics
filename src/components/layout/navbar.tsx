@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
-import { ShoppingBag, Search, User, X } from "lucide-react";
+import { ShoppingBag, Search, User, X, LogIn } from "lucide-react";
 import { useCart } from "@/hooks/use-cart";
 import { useUiStore } from "@/store/use-ui-store";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,8 @@ import SearchOverlay from "@/components/layout/search-overlay";
 import { cn } from "@/lib/utils";
 import { useSiteBranding } from "@/components/providers/site-branding-provider";
 import { pbCategories, pbBrands } from "@/lib/pb-collections";
+import { AuthModal } from "@/components/auth/auth-modal";
+import { getCurrentUserSessionAction } from "@/app/actions/auth";
 
 interface StaggeredMenuProps {
   position?: "left" | "right";
@@ -52,6 +54,7 @@ export default function Navbar() {
   const toggleCartDrawer = useUiStore((state) => state.toggleCartDrawer);
   const hasIntroPlayed = useUiStore((state) => state.hasIntroPlayed);
   const setIntroPlayed = useUiStore((state) => state.setIntroPlayed);
+  const router = useRouter();
 
   const pathname = usePathname();
   const shouldPlayIntro = pathname === "/" && !hasIntroPlayed;
@@ -64,21 +67,82 @@ export default function Navbar() {
   const [announcementIdx, setAnnouncementIdx] = useState(0);
   const [categories, setCategories] = useState<any[]>([]);
   const [brands, setBrands] = useState<any[]>([]);
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [userAvatar, setUserAvatar] = useState("");
+  const [authSuffix, setAuthSuffix] = useState("in");
+
+  // Reactively detect auth state via non-httpOnly cookie (pb_auth_indicator)
+  useEffect(() => {
+    const check = async () => {
+      const loggedIn = document.cookie.includes("pb_auth_indicator=1");
+      setIsLoggedIn(loggedIn);
+      
+      if (loggedIn) {
+        // Read avatar
+        const avatarMatch = document.cookie.match(/pb_auth_avatar=([^;]+)/);
+        setUserAvatar(avatarMatch ? decodeURIComponent(avatarMatch[1]) : "");
+
+        // If avatar isn't cached but indicator is active, perform a quick fallback check for avatar url
+        if (!avatarMatch) {
+          try {
+            const res = await getCurrentUserSessionAction();
+            if (res.success && res.user && res.user.avatar) {
+              setUserAvatar(res.user.avatar);
+              document.cookie = `pb_auth_avatar=${encodeURIComponent(res.user.avatar)}; path=/; max-age=${60 * 60 * 24 * 7}`;
+            }
+          } catch {
+            // Ignore
+          }
+        }
+      } else {
+        setUserAvatar("");
+      }
+    };
+    void check();
+    // Re-check on focus (tab switch) AND on custom auth-change (login/logout)
+    window.addEventListener("focus", check);
+    window.addEventListener("auth-change", check);
+    return () => {
+      window.removeEventListener("focus", check);
+      window.removeEventListener("auth-change", check);
+    };
+  }, []);
+
+  // Interval to rotate the 'in' and 'up' text when not logged in
+  useEffect(() => {
+    if (isLoggedIn) return;
+    const interval = setInterval(() => {
+      setAuthSuffix((prev) => (prev === "in" ? "up" : "in"));
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [isLoggedIn]);
 
   useEffect(() => {
     async function fetchData() {
-      try {
-        const [cats, brs] = await Promise.all([
-          pbCategories.getAll().catch(() => []),
-          pbBrands.getAll().catch(() => [])
-        ]);
-        setCategories(cats.filter((c: any) => c.isActive !== false));
-        setBrands(brs);
-      } catch (err) {
-        console.error("Failed to load navbar categories/brands:", err);
+      const [catsResult, brsResult] = await Promise.allSettled([
+        pbCategories.getAll(),
+        pbBrands.getAll(),
+      ]);
+
+      if (catsResult.status === "fulfilled") {
+        setCategories(
+          (catsResult.value || []).filter((c: any) => c.isActive !== false),
+        );
+      } else {
+        console.error("Failed to load navbar categories:", catsResult.reason);
       }
+
+      if (brsResult.status === "fulfilled") {
+        setBrands(brsResult.value || []);
+      } else {
+        console.error("Failed to load navbar brands:", brsResult.reason);
+      }
+
+      setDataLoaded(true);
     }
-    fetchData();
+    void fetchData();
   }, []);
 
   const activeAnnouncements = announcement?.text
@@ -131,24 +195,33 @@ export default function Navbar() {
     setIsSearchOpen(true);
   };
 
-  const categorySubItems = categories.length > 0
-    ? categories.map((c) => ({ label: c.name, link: `/products?category=${c.slug}` }))
-    : [
-        { label: "Laptops", link: "/products/laptops" },
-        { label: "Phones", link: "/products/phones" },
-        { label: "Audio", link: "/products/audio" },
-        { label: "Accessories", link: "/products/accessories" },
-      ];
+  const categorySubItems =
+    categories.length > 0
+      ? categories.map((c) => ({
+          label: c.name,
+          link: `/products?category=${c.slug}`,
+        }))
+      : !dataLoaded
+        ? [
+            { label: "Laptops", link: "/products/laptops" },
+            { label: "Phones", link: "/products/phones" },
+            { label: "Audio", link: "/products/audio" },
+            { label: "Accessories", link: "/products/accessories" },
+          ]
+        : [];
 
-  const brandSubItems = brands.length > 0
-    ? brands.map((b) => ({ label: b.name, link: `/brands/${b.slug}` }))
-    : [
-        { label: "Apple", link: "/brands/apple" },
-        { label: "Samsung", link: "/brands/samsung" },
-        { label: "Sony", link: "/brands/sony" },
-        { label: "Bose", link: "/brands/bose" },
-        { label: "Asus", link: "/brands/asus" },
-      ];
+  const brandSubItems =
+    brands.length > 0
+      ? brands.map((b) => ({ label: b.name, link: `/brands/${b.slug}` }))
+      : !dataLoaded
+        ? [
+            { label: "Apple", link: "/brands/apple" },
+            { label: "Samsung", link: "/brands/samsung" },
+            { label: "Sony", link: "/brands/sony" },
+            { label: "Bose", link: "/brands/bose" },
+            { label: "Asus", link: "/brands/asus" },
+          ]
+        : [];
 
   const menuItems = [
     { label: "Home", link: "/" },
@@ -310,14 +383,51 @@ export default function Navbar() {
             }}
             className="flex items-center space-x-1 sm:space-x-2"
           >
-            {/* Account */}
-            <Link
-              href="/account/profile"
-              className="text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors p-2 rounded-lg"
+            {/* Account — profile avatar if logged in, icon if not */}
+            <button
+              type="button"
+              onClick={() => {
+                if (isLoggedIn) {
+                  router.push("/account/profile");
+                } else {
+                  setIsAuthModalOpen(true);
+                }
+              }}
+              className="transition-colors cursor-pointer p-1 rounded-full"
               aria-label="User Account"
             >
-              <User className="h-5 w-5" />
-            </Link>
+              {isLoggedIn ? (
+                userAvatar ? (
+                  <img
+                    src={userAvatar}
+                    alt="User Avatar"
+                    className="h-8 w-8 rounded-full object-cover shadow-md ring-2 ring-background hover:scale-105 transition-transform duration-200"
+                  />
+                ) : (
+                  <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 flex items-center justify-center text-white select-none shadow-md ring-2 ring-background hover:scale-105 transition-transform duration-200">
+                    <User className="h-4 w-4" />
+                  </div>
+                )
+              ) : (
+                <div className="flex items-center text-xs font-extrabold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-full border border-border bg-secondary/20 gap-0.5 select-none h-8 min-w-[80px] justify-center relative overflow-hidden">
+                  <span>Sign-</span>
+                  <div className="relative h-4 w-6 flex items-center justify-start overflow-hidden">
+                    <AnimatePresence mode="wait">
+                      <motion.span
+                        key={authSuffix}
+                        initial={{ y: 12, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        exit={{ y: -12, opacity: 0 }}
+                        transition={{ duration: 0.25, ease: "easeInOut" }}
+                        className="absolute text-blue-600 dark:text-blue-400 font-extrabold uppercase"
+                      >
+                        {authSuffix}
+                      </motion.span>
+                    </AnimatePresence>
+                  </div>
+                </div>
+              )}
+            </button>
 
             {/* Cart */}
             <Button
@@ -357,8 +467,8 @@ export default function Navbar() {
             transition={{ duration: 0.5, ease: "easeInOut" }}
             className="fixed inset-0 z-[100] flex items-center justify-center bg-background pointer-events-none"
           >
-            {isIntroActive && !isLoading && (
-              logoUrl ? (
+            {isIntroActive &&
+              (logoUrl ? (
                 <motion.div
                   initial={{ opacity: 0, scale: 0.85 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -403,8 +513,7 @@ export default function Navbar() {
                     Electronics
                   </motion.span>
                 </div>
-              )
-            )}
+              ))}
           </motion.div>
         )}
       </header>
@@ -415,6 +524,12 @@ export default function Navbar() {
           100% { transform: translateX(200%); }
         }
       `}</style>
+
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        initialMode="signin"
+      />
     </>
   );
 }

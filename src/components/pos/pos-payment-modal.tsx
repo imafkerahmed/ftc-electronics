@@ -7,8 +7,8 @@ import React, { useState, useEffect, useTransition } from 'react';
 import { X, Banknote, CreditCard, QrCode, Receipt, Printer, CheckCircle2, AlertCircle, User, UserPlus, Search, Phone, Mail, FileText } from 'lucide-react';
 import type { PosCartItem, PosEmployeeSession, PaymentMethod, SalePayload } from '@/types/pos';
 import { createSaleAction, getReceiptPrintPresetsAction, getInvoicePrintPresetsAction, searchPosCustomersAction, createPosCustomerAction } from '@/app/actions/admin';
-import { printReceipt } from '@/lib/receipt-print';
-import { printInvoice, type InvoiceData } from '@/lib/invoice-print';
+import { printReceipt, resolveReceiptConfig } from '@/lib/receipt-print';
+import { printInvoice, resolveInvoiceConfig, type InvoiceData } from '@/lib/invoice-print';
 import { DEFAULT_RECEIPT_CONFIG, normalizeReceiptConfig } from '@/types/receipt-config';
 import { DEFAULT_INVOICE_CONFIG, normalizeInvoiceConfig } from '@/types/invoice-config';
 
@@ -56,6 +56,7 @@ export default function PosPaymentModal({
   const [cashTendered, setCashTendered] = useState('');
   const [notes, setNotes] = useState('');
   const [completedSaleId, setCompletedSaleId] = useState<string | null>(null);
+  const [completedReceiptNumber, setCompletedReceiptNumber] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [isPending, startTransition] = useTransition();
 
@@ -180,8 +181,11 @@ export default function PosPaymentModal({
 
       const res = await createSaleAction(payload);
       if (res.success && res.data) {
-        const saleId = (res.data as any).sale?.id || (res.data as any).id || '';
+        const saleData = res.data as any;
+        const saleId = saleData.sale?.id || saleData.id || '';
+        const savedReceiptNum = saleData.sale?.receipt_number || saleData.receipt_number || receiptNum;
         setCompletedSaleId(saleId);
+        setCompletedReceiptNumber(savedReceiptNum);
       } else {
         setError(res.error || 'Failed to record sale.');
       }
@@ -189,56 +193,44 @@ export default function PosPaymentModal({
   };
 
   const handlePrint = async () => {
-    let cfg = DEFAULT_RECEIPT_CONFIG;
-    try {
-      const res = await getReceiptPrintPresetsAction();
-      const presets = res.data || [];
-      const defaultPreset = presets.find((p) => p.isDefault) || presets[0];
-      if (defaultPreset) {
-        cfg = normalizeReceiptConfig(defaultPreset.config);
-      }
-    } catch {
-      // Fallback
-    }
+    const cfg = await resolveReceiptConfig();
+
+    const orderNumber = completedReceiptNumber
+      ? completedReceiptNumber
+      : completedSaleId
+        ? `FTC-POS-${completedSaleId.slice(-6).toUpperCase()}`
+        : `FTC-POS-${Date.now().toString(36).toUpperCase()}`;
 
     printReceipt(
       cfg,
-        {
-          orderNumber: completedSaleId ? `FTC-POS-${completedSaleId.slice(-6).toUpperCase()}` : `FTC-POS-${Date.now().toString(36).toUpperCase()}`,
-          date: new Date().toLocaleString('en-LK'),
-          customerName: cName || 'Walk-in Customer',
-          customerPhone: cPhone,
-          items: cart.map((i) => ({
-            name: i.productName,
-            qty: i.quantity,
-            unitPrice: i.unitPrice - i.itemDiscount,
-            serialNumber: i.unitBarcode ? `${i.unitBarcode}${i.unitSerial ? ' (' + i.unitSerial + ')' : ''}` : i.unitSerial,
-          })),
-          subtotal: billData.subtotal,
-          discount: billData.discount,
-          total: billData.total,
-          paymentMethod: method,
-        },
-        'POS Receipt'
-      );
+      {
+        orderNumber,
+        date: new Date().toLocaleString('en-LK'),
+        customerName: cName || 'Walk-in Customer',
+        customerPhone: cPhone,
+        items: cart.map((i) => ({
+          name: i.productName,
+          qty: i.quantity,
+          unitPrice: i.unitPrice - i.itemDiscount,
+          serialNumber: i.unitBarcode ? `${i.unitBarcode}${i.unitSerial ? ' (' + i.unitSerial + ')' : ''}` : i.unitSerial,
+        })),
+        subtotal: billData.subtotal,
+        discount: billData.discount,
+        total: billData.total,
+        paymentMethod: method,
+      },
+      'POS Receipt'
+    );
   };
 
   const handlePrintInvoice = async () => {
-    let cfg = DEFAULT_INVOICE_CONFIG;
-    try {
-      const res = await getInvoicePrintPresetsAction();
-      const presets = res.data || [];
-      const defaultPreset = (presets as any[]).find((p) => p.isDefault) || presets[0];
-      if (defaultPreset) {
-        cfg = normalizeInvoiceConfig(defaultPreset.config);
-      }
-    } catch {
-      // Fallback
-    }
+    const cfg = await resolveInvoiceConfig();
 
-    const docNumber = completedSaleId
-      ? `INV-POS-${completedSaleId.slice(-6).toUpperCase()}`
-      : `INV-POS-${Date.now().toString(36).toUpperCase()}`;
+    const docNumber = completedReceiptNumber
+      ? completedReceiptNumber.replace(/^FTC-POS-/, 'INV-POS-')
+      : completedSaleId
+        ? `INV-POS-${completedSaleId.slice(-6).toUpperCase()}`
+        : `INV-POS-${Date.now().toString(36).toUpperCase()}`;
 
     const invoiceData: InvoiceData = {
       docType: 'Invoice',

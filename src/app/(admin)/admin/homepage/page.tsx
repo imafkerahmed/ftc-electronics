@@ -742,7 +742,10 @@ export default function AdminHomepageBuilderPage() {
     });
   };
 
-  const handleConfigModalToggleBrandStrip = async (brand: any, checked: boolean) => {
+  const handleConfigModalToggleBrandStrip = async (
+    brand: { id: string; name: string; slug: string; show_in_strip?: boolean },
+    checked: boolean
+  ) => {
     setError(null);
     setSuccess(null);
 
@@ -765,15 +768,6 @@ export default function AdminHomepageBuilderPage() {
       setError(res.error || "Failed to update brand visibility.");
     }
   };
-
-  const handleConfigBackdropWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
-    if (configFormRef.current && configFormRef.current.contains(e.target as Node)) {
-      return;
-    }
-    if (configFormRef.current) {
-      configFormRef.current.scrollTop += e.deltaY;
-    }
-  }, []);
 
   const handleSave = () => {
     setError(null);
@@ -1441,10 +1435,7 @@ export default function AdminHomepageBuilderPage() {
 
       {/* Config Editor Modal */}
       {isConfigModalOpen && (
-        <div 
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs overflow-y-auto"
-          onWheel={handleConfigBackdropWheel}
-        >
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs overflow-y-auto">
           <div className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full my-auto animate-scale-in">
             {/* Header */}
             <div className="p-5 border-b border-border flex items-center justify-between">

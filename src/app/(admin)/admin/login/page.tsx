@@ -39,8 +39,8 @@ export default function AdminLoginPage() {
         const params = new URLSearchParams(window.location.search);
         const redirectTo = params.get('redirect') || '/admin/dashboard';
         
-        router.push(redirectTo);
         router.refresh();
+        router.push(redirectTo);
       } else {
         setError(result.error || 'Invalid credentials.');
       }
@@ -77,8 +77,8 @@ export default function AdminLoginPage() {
         <form onSubmit={handleLogin}>
           <CardContent className="space-y-4">
             {error && (
-              <div className="flex items-center gap-2.5 p-3 rounded-lg border border-destructive/20 bg-destructive/10 text-destructive text-xs animate-shake">
-                <AlertCircle className="h-4 w-4 shrink-0" />
+              <div role="alert" aria-live="assertive" className="flex items-center gap-2.5 p-3 rounded-lg border border-destructive/20 bg-destructive/10 text-destructive text-xs animate-shake">
+                <AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0" />
                 <span>{error}</span>
               </div>
             )}

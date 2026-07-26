@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react';
@@ -11,13 +11,35 @@ import { resetPasswordAction } from '@/app/actions/auth';
 function ResetPasswordForm() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const token = searchParams.get('token') || '';
+  const [token, setToken] = useState<string>(() => searchParams.get('token') || '');
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Strip token query parameter from browser address bar / history on mount to prevent leakage
+  useEffect(() => {
+    const urlToken = searchParams.get('token');
+    if (urlToken) {
+      setToken(urlToken);
+      if (typeof window !== 'undefined') {
+        const cleanUrl = window.location.pathname;
+        window.history.replaceState(null, '', cleanUrl);
+      }
+    }
+  }, [searchParams]);
+
+  // Clean up redirect timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,19 +65,20 @@ function ResetPasswordForm() {
 
     try {
       const res = await resetPasswordAction(fd);
-      setLoading(false);
 
       if (res.success) {
         setMessage(res.message || 'Your password has been successfully reset. Redirecting to login...');
-        setTimeout(() => {
-          router.push('/sign-in');
+        router.refresh();
+        timerRef.current = setTimeout(() => {
+          router.push('/');
         }, 2000);
       } else {
         setError(res.error || 'Invalid or expired password reset token.');
       }
     } catch {
-      setLoading(false);
       setError('An unexpected error occurred. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -73,15 +96,15 @@ function ResetPasswordForm() {
       </div>
 
       {message && (
-        <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-lg text-xs flex items-center gap-2">
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
+        <div role="status" aria-live="polite" className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-lg text-xs flex items-center gap-2">
+          <CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0" />
           <span>{message}</span>
         </div>
       )}
 
       {error && (
-        <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 rounded-lg text-xs flex items-center gap-2">
-          <AlertCircle className="h-4 w-4 shrink-0" />
+        <div role="alert" aria-live="assertive" className="p-3 bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 rounded-lg text-xs flex items-center gap-2">
+          <AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0" />
           <span>{error}</span>
         </div>
       )}
@@ -134,7 +157,7 @@ function ResetPasswordForm() {
       {/* Link back to sign in */}
       <div className="text-center text-xs text-muted-foreground border-t border-border pt-5">
         Back to{' '}
-        <Link href="/sign-in" className="text-blue-500 hover:underline font-semibold">
+        <Link href="/" className="text-blue-500 hover:underline font-semibold">
           Sign In
         </Link>
       </div>

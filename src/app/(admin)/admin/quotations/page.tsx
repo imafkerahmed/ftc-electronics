@@ -13,6 +13,7 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
+  XCircle,
   X,
   Building2,
   Phone,
@@ -37,10 +38,16 @@ import {
   getInvoicePrintPresetsAction,
 } from '@/app/actions/admin';
 import { DEFAULT_INVOICE_CONFIG, normalizeInvoiceConfig } from '@/types/invoice-config';
-import { printInvoice, type InvoiceData, type InvoiceItem } from '@/lib/invoice-print';
-import { pbProducts } from '@/lib/pb-collections';
-import type { PBWholesaleDealer } from '@/types/admin';
+import { printInvoice, resolveInvoiceConfig, type InvoiceData, type InvoiceItem } from '@/lib/invoice-print';
+import type { PBWholesaleDealer, PBQuotation } from '@/types/admin';
 import type { PaymentMethod } from '@/types/pos';
+
+interface CustomerOption {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+}
 
 interface Quotation {
   id: string;
@@ -54,6 +61,7 @@ interface Quotation {
   customerAddress?: string;
   date: string;
   dueDate: string;
+  validUntil?: string;
   items: InvoiceItem[];
   subtotal: number;
   taxAmount: number;
@@ -81,7 +89,7 @@ export default function AdminQuotationsPage() {
 
   // Database lookup lists
   const [wholesaleDealers, setWholesaleDealers] = useState<PBWholesaleDealer[]>([]);
-  const [existingCustomers, setExistingCustomers] = useState<any[]>([]);
+  const [existingCustomers, setExistingCustomers] = useState<CustomerOption[]>([]);
 
   // Toast alert
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
@@ -126,7 +134,7 @@ export default function AdminQuotationsPage() {
     ]);
 
     if (qRes.success && qRes.data) {
-      const formatted = qRes.data.map((q: any) => ({
+      const formatted = (qRes.data as PBQuotation[]).map((q) => ({
         id: q.id,
         quoteNumber: q.quote_number,
         quoteType: (q.quote_type as 'wholesale' | 'direct') || (q.customer_company ? 'wholesale' : 'direct'),
@@ -138,6 +146,7 @@ export default function AdminQuotationsPage() {
         customerAddress: q.customer_address,
         date: new Date(q.created || Date.now()).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
         dueDate: q.valid_until ? new Date(q.valid_until).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
+        validUntil: q.valid_until || '',
         items: Array.isArray(q.items) ? q.items : [],
         subtotal: q.subtotal || 0,
         taxAmount: q.tax_amount || 0,
@@ -154,7 +163,14 @@ export default function AdminQuotationsPage() {
     }
 
     if (cRes.success && cRes.data) {
-      setExistingCustomers(cRes.data);
+      setExistingCustomers(
+        cRes.data.map((c: any) => ({
+          id: c.id,
+          name: c.name || c.customer_name || 'Unnamed Customer',
+          email: c.email || '',
+          phone: c.phone || '',
+        }))
+      );
     }
 
     setLoading(false);
@@ -163,6 +179,22 @@ export default function AdminQuotationsPage() {
   useEffect(() => {
     void loadInitialData();
   }, []);
+
+  // Keyboard shortcut: Dismiss active modal on Escape keypress
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (convertingQuote) {
+          setConvertingQuote(null);
+          setConvertedSale(null);
+        } else if (isModalOpen) {
+          setIsModalOpen(false);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isModalOpen, convertingQuote]);
 
   // Handle selecting an existing Wholesale Dealer
   const handleSelectDealer = (dealerId: string) => {
@@ -175,16 +207,6 @@ export default function AdminQuotationsPage() {
       setCustEmail(dealer.email || '');
       setCustPhone(dealer.phone || '');
       setCustAddress(dealer.address || '');
-
-      // Apply wholesale discount rate if items exist
-      if (dealer.discount_rate && dealer.discount_rate > 0) {
-        setLineItems((prev) =>
-          prev.map((item) => ({
-            ...item,
-            discount: item.unitPrice > 0 ? (item.unitPrice * (dealer.discount_rate! / 100)) * item.qty : item.discount,
-          }))
-        );
-      }
     }
   };
 
@@ -214,6 +236,10 @@ export default function AdminQuotationsPage() {
       setCustPhone(quote.customerPhone || '');
       setCustAddress(quote.customerAddress || '');
       setNotes(quote.notes || '');
+      const remaining = quote.validUntil
+        ? Math.max(1, Math.round((new Date(quote.validUntil).getTime() - Date.now()) / 86400000))
+        : 14;
+      setValidDays(remaining);
       setLineItems(quote.items && quote.items.length > 0 ? quote.items : [{ name: '', qty: 1, unitPrice: 0, discount: 0 }]);
     } else {
       setEditingQuote(null);
@@ -226,6 +252,7 @@ export default function AdminQuotationsPage() {
       setCustEmail('');
       setCustPhone('');
       setCustAddress('');
+      setValidDays(14);
       setNotes('Quotation valid for 14 days from issue date. Prices subject to stock availability.');
       setLineItems([{ name: '', qty: 1, unitPrice: 0, discount: 0 }]);
     }
@@ -241,7 +268,7 @@ export default function AdminQuotationsPage() {
     setLineItems((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleUpdateLineItem = (index: number, field: keyof InvoiceItem, val: any) => {
+  const handleUpdateLineItem = <K extends keyof InvoiceItem>(index: number, field: K, val: InvoiceItem[K]) => {
     setLineItems((prev) => {
       const updated = [...prev];
       updated[index] = { ...updated[index], [field]: val };
@@ -249,11 +276,21 @@ export default function AdminQuotationsPage() {
     });
   };
 
+  const dealerRate =
+    quoteType === 'wholesale'
+      ? wholesaleDealers.find((d) => d.id === selectedDealerId)?.discount_rate || 0
+      : 0;
+
+  const lineDiscount = (item: InvoiceItem) =>
+    typeof item.discount === 'number' && item.discount > 0
+      ? item.discount
+      : (item.unitPrice * (item.qty || 1) * dealerRate) / 100;
+
   const calculateSubtotal = () =>
-    lineItems.reduce((acc, item) => acc + item.qty * item.unitPrice, 0);
+    lineItems.reduce((acc, item) => acc + (item.qty || 1) * (item.unitPrice || 0), 0);
 
   const calculateTotalDiscount = () =>
-    lineItems.reduce((acc, item) => acc + (item.discount || 0), 0);
+    lineItems.reduce((acc, item) => acc + lineDiscount(item), 0);
 
   const calculateTotal = () =>
     Math.max(0, calculateSubtotal() - calculateTotalDiscount());
@@ -281,7 +318,13 @@ export default function AdminQuotationsPage() {
         customer_email: custEmail.trim(),
         customer_phone: custPhone.trim(),
         customer_address: custAddress.trim(),
-        items: lineItems.filter((i) => i.name.trim().length > 0),
+        items: lineItems
+          .filter((i) => i.name.trim().length > 0)
+          .map((i) => ({
+            ...i,
+            discount: lineDiscount(i),
+            total: Math.max(0, (i.qty || 1) * (i.unitPrice || 0) - lineDiscount(i)),
+          })),
         subtotal: calculateSubtotal(),
         tax_amount: 0,
         discount_amount: calculateTotalDiscount(),
@@ -332,17 +375,7 @@ export default function AdminQuotationsPage() {
   };
 
   const handlePrintQuotation = async (quote: Quotation) => {
-    let cfg = DEFAULT_INVOICE_CONFIG;
-    try {
-      const res = await getInvoicePrintPresetsAction();
-      const presets = res.data || [];
-      const defaultPreset = (presets as any[]).find((p) => p.isDefault) || presets[0];
-      if (defaultPreset) {
-        cfg = normalizeInvoiceConfig(defaultPreset.config);
-      }
-    } catch {
-      // Fallback
-    }
+    const cfg = await resolveInvoiceConfig();
 
     const invoiceData: InvoiceData = {
       docType: 'Quotation',
@@ -371,17 +404,7 @@ export default function AdminQuotationsPage() {
   };
 
   const handlePrintConvertedPaidInvoice = async (quote: Quotation, receiptNo?: string) => {
-    let cfg = DEFAULT_INVOICE_CONFIG;
-    try {
-      const res = await getInvoicePrintPresetsAction();
-      const presets = res.data || [];
-      const defaultPreset = (presets as any[]).find((p) => p.isDefault) || presets[0];
-      if (defaultPreset) {
-        cfg = normalizeInvoiceConfig(defaultPreset.config);
-      }
-    } catch {
-      // Fallback
-    }
+    const cfg = await resolveInvoiceConfig();
 
     const invoiceData: InvoiceData = {
       docType: 'Invoice',
@@ -418,6 +441,7 @@ export default function AdminQuotationsPage() {
       filterStatus === 'All' ||
       (filterStatus === 'Active' && (q.status === 'sent' || q.status === 'draft')) ||
       (filterStatus === 'Accepted' && q.status === 'accepted') ||
+      (filterStatus === 'Rejected' && q.status === 'rejected') ||
       (filterStatus === 'Expired' && q.status === 'expired');
 
     const matchesType =
@@ -522,7 +546,7 @@ export default function AdminQuotationsPage() {
           {/* Type Filter */}
           <select
             value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value as any)}
+            onChange={(e) => setTypeFilter(e.target.value as 'all' | 'wholesale' | 'direct')}
             className="bg-background border border-input rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-amber-500/20"
           >
             <option value="all">All Types</option>
@@ -531,7 +555,7 @@ export default function AdminQuotationsPage() {
           </select>
 
           {/* Status Filter */}
-          {(['All', 'Active', 'Accepted', 'Expired'] as const).map((status) => (
+          {(['All', 'Active', 'Accepted', 'Rejected', 'Expired'] as const).map((status) => (
             <button
               key={status}
               onClick={() => setFilterStatus(status)}
@@ -632,6 +656,10 @@ export default function AdminQuotationsPage() {
                         ) : quote.status === 'sent' || quote.status === 'draft' ? (
                           <>
                             <Clock className="h-3 w-3" /> Active
+                          </>
+                        ) : quote.status === 'rejected' ? (
+                          <>
+                            <XCircle className="h-3 w-3" /> Rejected
                           </>
                         ) : (
                           <>
@@ -948,7 +976,7 @@ export default function AdminQuotationsPage() {
                       key={idx}
                       className="grid grid-cols-12 gap-2 items-center bg-muted/20 p-2.5 rounded-xl border border-border"
                     >
-                      <div className="col-span-5">
+                      <div className="col-span-4">
                         <Input
                           placeholder="Product name or description"
                           value={item.name}
@@ -983,8 +1011,20 @@ export default function AdminQuotationsPage() {
                         />
                       </div>
 
-                      <div className="col-span-2 text-right font-bold text-foreground font-mono">
-                        {fmt((item.unitPrice || 0) * (item.qty || 1))}
+                      <div className="col-span-2">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="10"
+                          placeholder={dealerRate > 0 ? `${dealerRate}% Off` : 'Discount'}
+                          value={item.discount !== undefined && item.discount > 0 ? item.discount : ''}
+                          onChange={(e) => handleUpdateLineItem(idx, 'discount', parseFloat(e.target.value) || 0)}
+                          className="text-xs bg-background text-right font-mono text-emerald-400"
+                        />
+                      </div>
+
+                      <div className="col-span-1 text-right font-bold text-foreground font-mono text-[11px]">
+                        {fmt(Math.max(0, (item.unitPrice || 0) * (item.qty || 1) - lineDiscount(item)))}
                       </div>
 
                       <div className="col-span-1 text-center">
@@ -1054,8 +1094,20 @@ export default function AdminQuotationsPage() {
 
       {/* Convert Quotation to Sale Modal */}
       {convertingQuote && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-card border border-border rounded-2xl w-full max-w-md p-6 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200">
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => {
+            setConvertingQuote(null);
+            setConvertedSale(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Turn Quotation into Paid Sale"
+            onClick={(e) => e.stopPropagation()}
+            className="bg-card border border-border rounded-2xl w-full max-w-md p-6 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200"
+          >
             <div className="h-12 w-12 bg-emerald-500/10 border border-emerald-500/20 rounded-full flex items-center justify-center mx-auto text-emerald-500">
               <ShoppingBag className="h-6 w-6" />
             </div>

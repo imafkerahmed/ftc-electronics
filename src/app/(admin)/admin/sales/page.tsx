@@ -34,12 +34,12 @@ import {
   getInvoicePrintPresetsAction,
 } from "@/app/actions/admin";
 import type { PBSale, PBSaleItem } from "@/types/pos";
-import { printReceipt } from "@/lib/receipt-print";
+import { printReceipt, resolveReceiptConfig } from "@/lib/receipt-print";
 import {
   DEFAULT_RECEIPT_CONFIG,
   normalizeReceiptConfig,
 } from "@/types/receipt-config";
-import { printInvoice, type InvoiceData } from "@/lib/invoice-print";
+import { printInvoice, resolveInvoiceConfig, type InvoiceData } from "@/lib/invoice-print";
 import {
   DEFAULT_INVOICE_CONFIG,
   normalizeInvoiceConfig,
@@ -159,11 +159,14 @@ export default function AdminSalesTrackerPage() {
     };
 
     window.addEventListener("keydown", onKeyDown);
+    const toRestore = previousFocusRef.current;
     return () => {
       cancelAnimationFrame(frameId);
       window.removeEventListener("keydown", onKeyDown);
-      // Restore focus to triggering element on close
-      previousFocusRef.current?.focus();
+      // Restore focus only if the trigger element is still connected to the DOM
+      if (toRestore?.isConnected) {
+        toRestore.focus();
+      }
     };
   }, [selectedPosSaleId]);
 
@@ -174,17 +177,7 @@ export default function AdminSalesTrackerPage() {
     const d = rawDateStr ? new Date(rawDateStr) : new Date();
     const formattedDate = (isNaN(d.getTime()) ? new Date() : d).toLocaleString("en-LK");
 
-    let cfg = DEFAULT_RECEIPT_CONFIG;
-    try {
-      const res = await getReceiptPrintPresetsAction();
-      const presets = res.data || [];
-      const defaultPreset = presets.find((p) => p.isDefault) || presets[0];
-      if (defaultPreset) {
-        cfg = normalizeReceiptConfig(defaultPreset.config);
-      }
-    } catch {
-      // Fallback to DEFAULT_RECEIPT_CONFIG
-    }
+    const cfg = await resolveReceiptConfig();
 
     printReceipt(
       cfg,
@@ -219,23 +212,13 @@ export default function AdminSalesTrackerPage() {
       year: "numeric",
     });
 
-    let cfg = DEFAULT_INVOICE_CONFIG;
-    try {
-      const res = await getInvoicePrintPresetsAction();
-      const presets = res.data || [];
-      const defaultPreset = (presets as any[]).find((p) => p.isDefault) || presets[0];
-      if (defaultPreset) {
-        cfg = normalizeInvoiceConfig(defaultPreset.config);
-      }
-    } catch {
-      // Fallback to DEFAULT_INVOICE_CONFIG
-    }
-
+    const cfg = await resolveInvoiceConfig();
+    const isVoided = sale.status === 'voided';
     const docNumber = sale.receipt_number || `INV-POS-${sale.id.slice(-6).toUpperCase()}`;
 
     const invoiceData: InvoiceData = {
       docType: "Invoice",
-      docNumber,
+      docNumber: isVoided ? `${docNumber} (VOIDED)` : docNumber,
       date: formattedDate,
       customerName: sale.customer_name || "Walk-in Customer",
       customerPhone: sale.customer_phone || undefined,
@@ -250,11 +233,15 @@ export default function AdminSalesTrackerPage() {
       taxAmount: sale.tax_amount || 0,
       discountAmount: sale.discount || 0,
       totalAmount: sale.total,
-      paymentMethod: `PAID via ${(sale.payment_method || "POS").toUpperCase()}`,
-      notes: "Official Paid Invoice. Thank you for shopping with FTC Electronics! Warranty claims require original invoice copy.",
+      paymentMethod: isVoided
+        ? 'VOIDED / CANCELLED'
+        : `PAID via ${(sale.payment_method || 'POS').toUpperCase()}`,
+      notes: isVoided
+        ? `*** THIS SALE HAS BEEN VOIDED / CANCELLED *** ${sale.void_reason ? 'Reason: ' + sale.void_reason : ''}`
+        : 'Official Paid Invoice. Thank you for shopping with FTC Electronics! Warranty claims require original invoice copy.',
     };
 
-    printInvoice(cfg, invoiceData, "Paid Invoice");
+    printInvoice(cfg, invoiceData, isVoided ? "POS Voided Invoice" : "Paid Invoice");
   };
 
   const loadData = async () => {

@@ -5,10 +5,10 @@ import { revalidatePath } from 'next/cache';
 import { getAdminPb, writeAuditLog } from '@/lib/pb-admin';
 import { getTrustedClientIp } from '@/lib/get-client-ip';
 import { ROLE_PERMISSIONS } from '@/types/admin';
-import type { AdminRole, AuditAction } from '@/types/admin';
+import type { AdminRole, AuditAction, DealerSaleRecord } from '@/types/admin';
 import type { BarcodePrintConfig } from '@/types/barcode-config';
 import type { ReceiptPrintConfig, ReceiptPrintPreset } from '@/types/receipt-config';
-import type { InvoicePrintConfig } from '@/types/invoice-config';
+import type { InvoicePrintConfig, InvoicePrintPreset } from '@/types/invoice-config';
 import {
   pbProducts,
   pbCategories,
@@ -53,8 +53,8 @@ async function checkPermission(
   if (!pbUrl) {
     return { allowed: false, ip, userAgent };
   }
-  let actorEmail = 'admin@ftc.lk';
-  let actorId = 'admin';
+  let actorEmail: string | undefined;
+  let actorId: string | undefined;
   let effectiveRole: AdminRole | undefined;
 
   try {
@@ -78,8 +78,8 @@ async function checkPermission(
     }
 
     effectiveRole = role as AdminRole;
-    actorEmail = record.email || 'admin@ftc.lk';
-    actorId = record.id || 'admin';
+    actorEmail = record.email || undefined;
+    actorId = record.id || undefined;
   } catch {
     return { allowed: false, ip, userAgent };
   }
@@ -93,7 +93,7 @@ async function checkPermission(
     return { allowed: false, role: effectiveRole, actorEmail, actorId, ip, userAgent };
   }
 
-  const modulePerms = (permissions as any)[module];
+  const modulePerms = permissions[module] as Record<string, boolean> | undefined;
   if (!modulePerms || !modulePerms[action]) {
     return { allowed: false, role: effectiveRole, actorEmail, actorId, ip, userAgent };
   }
@@ -1269,21 +1269,30 @@ export async function getReceiptPrintPresetsAction(): Promise<{
       sort: '-isDefault',
     });
 
-    const list = records.map((r: any) => {
-      const parsedConfig = typeof r.config === 'string' ? JSON.parse(r.config) : (r.config || {});
+    const list = records.map((r) => {
+      let parsedConfig: Record<string, any> = {};
+      try {
+        parsedConfig = typeof r.config === 'string' ? JSON.parse(r.config) : (r.config || {});
+      } catch (err) {
+        console.error('[getReceiptPrintPresetsAction] Invalid JSON config for preset:', r.id, err);
+      }
       return {
-        ...r,
-        config: {
+        id: r.id,
+        category: r.category,
+        label: r.label || 'Default Preset',
+        isDefault: Boolean(r.isDefault),
+        config: JSON.stringify({
           ...parsedConfig,
           logoUrl: parsedConfig.logoUrl || logoUrl,
           storeName: dbStoreName || parsedConfig.storeName || 'FTC Electronics',
           headerAddress: dbAddress || parsedConfig.headerAddress || '',
           headerPhone: dbPhone || parsedConfig.headerPhone || '',
-        },
+        }),
       };
     });
     return { success: true, data: list as ReceiptPrintPreset[] };
-  } catch {
+  } catch (err) {
+    console.error('[getReceiptPrintPresetsAction] Failed to load receipt presets:', err);
     return { success: false, error: 'Failed to load receipt presets.', data: [] };
   }
 }
@@ -1388,22 +1397,31 @@ export async function getInvoicePrintPresetsAction() {
       sort: '-isDefault',
     });
 
-    const list = records.map((r: any) => {
-      const parsedConfig = typeof r.config === 'string' ? JSON.parse(r.config) : (r.config || {});
+    const list = records.map((r) => {
+      let parsedConfig: Record<string, any> = {};
+      try {
+        parsedConfig = typeof r.config === 'string' ? JSON.parse(r.config) : (r.config || {});
+      } catch (err) {
+        console.error('[getInvoicePrintPresetsAction] Invalid JSON config for preset:', r.id, err);
+      }
       return {
-        ...r,
-        config: {
+        id: r.id,
+        category: r.category,
+        label: r.label || 'Default Preset',
+        isDefault: Boolean(r.isDefault),
+        config: JSON.stringify({
           ...parsedConfig,
           logoUrl: parsedConfig.logoUrl || logoUrl,
           storeName: dbStoreName || parsedConfig.storeName || 'FTC Electronics',
           headerAddress: dbAddress || parsedConfig.headerAddress || '',
           headerPhone: dbPhone || parsedConfig.headerPhone || '',
           headerEmail: dbEmail || parsedConfig.headerEmail || '',
-        },
+        }),
       };
     });
-    return { success: true, data: list };
-  } catch {
+    return { success: true, data: list as InvoicePrintPreset[] };
+  } catch (err) {
+    console.error('[getInvoicePrintPresetsAction] Failed to load invoice presets:', err);
     return { success: false, error: 'Failed to load invoice presets.', data: [] };
   }
 }
@@ -1822,20 +1840,28 @@ export async function deleteWholesaleDealerAction(id: string) {
   }
 }
 
-export async function getDealerPurchaseHistoryAction(email?: string, phone?: string, companyName?: string) {
+export async function getDealerPurchaseHistoryAction(
+  email?: string,
+  phone?: string,
+  companyName?: string
+): Promise<{ success: boolean; error?: string; data: DealerSaleRecord[] }> {
   const check = await checkPermission('orders', 'read');
   if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
 
   try {
     const adminPb = await getAdminPb();
-    
+
     // Fetch POS sales matching email, phone or customer name
     const filters: string[] = [];
-    if (email) filters.push(`customer_email ~ "${email}"`);
-    if (phone) filters.push(`customer_phone ~ "${phone}"`);
-    if (companyName) filters.push(`customer_name ~ "${companyName}"`);
+    if (email) filters.push(adminPb.filter('customer_email ~ {:email}', { email }));
+    if (phone) filters.push(adminPb.filter('customer_phone ~ {:phone}', { phone }));
+    if (companyName) filters.push(adminPb.filter('customer_name ~ {:companyName}', { companyName }));
 
-    const filterStr = filters.length > 0 ? filters.join(' || ') : 'id != ""';
+    if (filters.length === 0) {
+      return { success: false, error: 'At least one dealer identifier is required.', data: [] };
+    }
+
+    const filterStr = filters.join(' || ');
     const sales = await adminPb.collection('sales').getFullList({
       filter: filterStr,
       sort: '-created',
@@ -1890,34 +1916,48 @@ export async function saveQuotationAction(
   try {
     // Auto-create new Wholesale Dealer if requested
     if (data.createDealerIfNew && data.customer_name && data.quote_type === 'wholesale') {
+      const dealerCheck = await checkPermission('users', 'write');
+      if (!dealerCheck.allowed) {
+        return { success: false, error: 'Unauthorized to auto-create wholesale dealers.' };
+      }
+      if (!data.customer_email) {
+        return { success: false, error: 'A valid customer email is required to auto-create a wholesale dealer.' };
+      }
       try {
         await pbWholesaleDealers.create({
           company_name: data.customer_company || data.customer_name,
           contact_name: data.customer_name,
-          email: data.customer_email || `${Date.now()}@dealer.local`,
+          email: data.customer_email,
           phone: data.customer_phone || '',
           address: data.customer_address || '',
           status: 'active',
           discount_rate: 5,
         });
-      } catch {
-        /* ignore auto-create error */
+      } catch (err) {
+        console.error('[saveQuotationAction] Failed to auto-create wholesale dealer:', err);
       }
     }
 
     // Auto-create new Customer if requested
     if (data.createCustomerIfNew && data.customer_name && data.quote_type === 'direct') {
+      const customerCheck = await checkPermission('users', 'write');
+      if (!customerCheck.allowed) {
+        return { success: false, error: 'Unauthorized to auto-create customer records.' };
+      }
+      if (!data.customer_email) {
+        return { success: false, error: 'A valid customer email is required to auto-create a customer record.' };
+      }
       try {
         const adminPb = await getAdminPb();
         await adminPb.collection('customers').create({
           name: data.customer_name,
-          email: data.customer_email || `${Date.now()}@customer.local`,
+          email: data.customer_email,
           phone: data.customer_phone || '',
           status: 'active',
           notes: 'Auto-created from Quotation',
         });
-      } catch {
-        /* ignore auto-create error */
+      } catch (err) {
+        console.error('[saveQuotationAction] Failed to auto-create customer:', err);
       }
     }
 
@@ -1954,7 +1994,7 @@ export async function convertQuotationToSaleAction(quoteId: string, paymentMetho
   if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
-    const quote = await pbQuotations.getAll().then(list => list.find(q => q.id === quoteId));
+    const quote = await pbQuotations.getById(quoteId);
     if (!quote) return { success: false, error: 'Quotation not found.' };
 
     const items = quote.items.map((item) => ({
@@ -1968,7 +2008,7 @@ export async function convertQuotationToSaleAction(quoteId: string, paymentMetho
     }));
 
     const salePayload: SalePayload = {
-      cashier_name: 'Admin User',
+      cashier_name: check.actorEmail || 'Admin User',
       cashier_id: check.actorId || 'admin',
       customer_name: quote.customer_name,
       customer_phone: quote.customer_phone || '',

@@ -5,7 +5,11 @@ import { usePathname } from "next/navigation";
 
 export function LenisProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isAdminOrPos = pathname.startsWith("/admin") || pathname.startsWith("/pos");
+  const isAdminOrPos =
+    pathname === "/admin" ||
+    pathname.startsWith("/admin/") ||
+    pathname === "/pos" ||
+    pathname.startsWith("/pos/");
 
   if (isAdminOrPos) {
     return <>{children}</>;

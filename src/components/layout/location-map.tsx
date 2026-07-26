@@ -36,7 +36,20 @@ export default function LocationMap({ settings }: LocationMapProps) {
 
   // For the iframe: use the configured URL if it looks like an embed src;
   // otherwise fall back to the default embed. Plain directions links work too.
-  const iframeSrc = settings?.googleMapsLink ||
+  const getCleanMapUrl = (url: string) => {
+    if (!url) return "";
+    const trimmed = url.trim();
+    if (trimmed.includes("<iframe") || trimmed.startsWith("<iframe")) {
+      const match = trimmed.match(/src=["']([^"']+)["']/);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+    return trimmed;
+  };
+
+  const cleanGoogleMapsLink = getCleanMapUrl(settings?.googleMapsLink || "");
+  const iframeSrc = cleanGoogleMapsLink ||
     "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3960.7984670691077!2d79.8482!3d6.9147!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3ae259410f545199%3A0xa6ec07c3905cfb6e!2sGalle%20Rd%2C%20Colombo!5e0!3m2!1sen!2slk!4v1700000000000!5m2!1sen!2slk";
 
   const contactItems = [

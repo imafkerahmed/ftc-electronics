@@ -275,7 +275,7 @@ export default function AdminCategoriesPage() {
                     <td className="p-4 text-center">
                       <button
                         type="button"
-                        onClick={() => handleToggleActive(cat, !cat.isActive)}
+                        onClick={() => handleToggleActive(cat, cat.isActive === false)}
                         className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg border transition-all text-[9px] font-extrabold uppercase tracking-wider cursor-pointer ${
                           cat.isActive !== false
                             ? "bg-blue-500/10 text-blue-500 border-blue-500/35 hover:bg-blue-500/15"

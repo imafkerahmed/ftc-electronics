@@ -51,15 +51,15 @@ export default function ForgotPasswordPage() {
       </div>
 
       {message && (
-        <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-lg text-xs flex items-center gap-2">
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
+        <div role="status" aria-live="polite" className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-lg text-xs flex items-center gap-2">
+          <CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0" />
           <span>{message}</span>
         </div>
       )}
 
       {error && (
-        <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 rounded-lg text-xs flex items-center gap-2">
-          <AlertCircle className="h-4 w-4 shrink-0" />
+        <div role="alert" aria-live="assertive" className="p-3 bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 rounded-lg text-xs flex items-center gap-2">
+          <AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0" />
           <span>{error}</span>
         </div>
       )}
@@ -92,7 +92,7 @@ export default function ForgotPasswordPage() {
       {/* Link back to sign in */}
       <div className="text-center text-xs text-muted-foreground border-t border-border pt-5">
         Remembered your password?{' '}
-        <Link href="/sign-in" className="text-blue-500 hover:underline font-semibold">
+        <Link href="/" className="text-blue-500 hover:underline font-semibold">
           Sign In
         </Link>
       </div>

@@ -22,10 +22,11 @@ export interface ReceiptPrintConfig {
 
 export interface ReceiptPrintPreset {
   id: string;
-  name: string;
-  label?: string;
+  name?: string;
+  label: string;
   category: string;
-  config: string | ReceiptPrintConfig;
+  /** Serialized ReceiptPrintConfig JSON as stored in PocketBase. */
+  config: string;
   isDefault?: boolean;
   created?: string;
   updated?: string;

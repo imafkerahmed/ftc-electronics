@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import type { AdminRole } from '@/types/admin';
+import { type AdminRole, ADMIN_ROLES } from '@/types/admin';
 
 // ─── Route Permission Matrix ────────────────────────────────────────────────
 // Defines which roles can access which admin routes.
@@ -65,8 +65,7 @@ function extractRoleFromTokenPayload(token: string): AdminRole | null {
     const role = payload.role || payload.record?.role;
     if (role === 'admin' || role === 'super_admin') return 'super_admin';
 
-    const validAdminRoles: AdminRole[] = ['super_admin', 'store_manager', 'content_editor', 'support_staff', 'read_only'];
-    if (role && validAdminRoles.includes(role as AdminRole)) {
+    if (role && (ADMIN_ROLES as readonly string[]).includes(role)) {
       return role as AdminRole;
     }
 
@@ -122,18 +121,28 @@ function addSecurityHeaders(response: NextResponse): NextResponse {
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get('pb_auth_token')?.value;
-  const cookieRole = request.cookies.get('pb_auth_role')?.value as AdminRole | undefined;
 
-  const hasValidToken = token && !isTokenExpired(token);
+  const hasValidToken = Boolean(token && !isTokenExpired(token));
 
-  // Extract role from JWT token payload first
+  // Extract role strictly from JWT token payload
   const jwtRole = token ? extractRoleFromTokenPayload(token) : null;
 
-  const validRoles: AdminRole[] = ['super_admin', 'store_manager', 'content_editor', 'support_staff', 'read_only'];
-  const validCookieRole = cookieRole && validRoles.includes(cookieRole) ? cookieRole : null;
+  // Resolve role: strictly derive from JWT payload. Never trust client-controlled cookies. Default to 'read_only' (minimum privilege).
+  const resolvedRole: AdminRole = jwtRole || 'read_only';
 
-  // Resolve role: prefer JWT payload, fallback to validated cookie role, strictly default to 'read_only' minimum privilege
-  const resolvedRole: AdminRole = jwtRole || validCookieRole || 'read_only';
+  // ── Customer account route protection ──────────────────────────────────
+  if (pathname.startsWith('/account')) {
+    if (!hasValidToken) {
+      // Auth is modal-only — send to home page where the modal can be opened
+      const homeUrl = new URL('/', request.url);
+      const redirectResponse = NextResponse.redirect(homeUrl);
+      // Clear stale client-readable indicator and user details so the navbar knows the user is logged out
+      redirectResponse.cookies.delete('pb_auth_indicator');
+      redirectResponse.cookies.delete('pb_auth_name');
+      redirectResponse.cookies.delete('pb_auth_avatar');
+      return redirectResponse;
+    }
+  }
 
   // ── Admin route protection ──────────────────────────────────────────────
 
@@ -165,6 +174,7 @@ export function proxy(request: NextRequest) {
       const dashboardUrl = new URL('/admin/dashboard', request.url);
       return NextResponse.redirect(dashboardUrl);
     }
+    return addSecurityHeaders(NextResponse.next());
   }
 
   return NextResponse.next();

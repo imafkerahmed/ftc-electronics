@@ -610,7 +610,7 @@ export default function PrinterPresetsPage() {
   const loadReceiptPresets = async () => {
     setLoadingReceipt(true);
     const res = await getReceiptPrintPresetsAction();
-    if (res.success) setReceiptPresets(res.data as unknown as PBPreset[]);
+    if (res.success) setReceiptPresets(res.data as PBPreset[]);
     setLoadingReceipt(false);
   };
 

@@ -2,6 +2,7 @@
 // These types map to PocketBase collections and extend the base RecordModel.
 
 import { Product, Category } from "./product";
+import { InvoiceItem } from "./invoice-config";
 
 // ─── Base PocketBase Record ───────────────────────────────────────────────────
 export interface PBRecord {
@@ -152,6 +153,7 @@ export interface PBCustomer extends PBRecord {
   name: string;
   email: string;
   phone?: string;
+  address?: string;
   ordersCount: number;
   totalSpent: number;
   status: "active" | "banned";
@@ -397,14 +399,16 @@ export interface PBMedia extends PBRecord {
   sizeBytes?: number;
 }
 
-// ─── Admin User Roles ─────────────────────────────────────────────────────────
-export type AdminRole =
-  | "admin"
-  | "super_admin"
-  | "store_manager"
-  | "content_editor"
-  | "support_staff"
-  | "read_only";
+export const ADMIN_ROLES = [
+  "admin",
+  "super_admin",
+  "store_manager",
+  "content_editor",
+  "support_staff",
+  "read_only",
+] as const;
+
+export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 export interface AdminPermissions {
   products: { read: boolean; write: boolean; delete: boolean };
@@ -548,9 +552,11 @@ export function pbProductToProduct(record: PBProduct, pbUrl: string): Product {
     badges: record.badges || [],
     status: record.status || "draft",
     bannerImage: record.bannerImage
-      ? (record.bannerImage.startsWith('http://') || record.bannerImage.startsWith('https://') || record.bannerImage.startsWith('data:')
-          ? record.bannerImage
-          : `${pbUrl}/api/files/${record.collectionId}/${record.id}/${record.bannerImage}`)
+      ? record.bannerImage.startsWith("http://") ||
+        record.bannerImage.startsWith("https://") ||
+        record.bannerImage.startsWith("data:")
+        ? record.bannerImage
+        : `${pbUrl}/api/files/${record.collectionId}/${record.id}/${record.bannerImage}`
       : undefined,
     bannerText: record.bannerText || undefined,
   };
@@ -587,22 +593,16 @@ export interface PBWholesaleDealer extends PBRecord {
   address?: string;
   discount_rate?: number;
   credit_limit?: number;
-  status: 'active' | 'pending' | 'suspended';
+  status: "active" | "pending" | "suspended";
   notes?: string;
 }
 
 // ─── Quotations Collection ───────────────────────────────────────────────────
-export interface PBQuotationItem {
-  name: string;
-  qty: number;
-  unitPrice: number;
-  discount?: number;
-  total?: number;
-}
+export type PBQuotationItem = InvoiceItem;
 
 export interface PBQuotation extends PBRecord {
   quote_number: string;
-  quote_type?: 'wholesale' | 'direct';
+  quote_type?: "wholesale" | "direct";
   dealer_id?: string;
   customer_name: string;
   customer_company?: string;
@@ -615,7 +615,34 @@ export interface PBQuotation extends PBRecord {
   discount_amount?: number;
   total_amount: number;
   valid_until: string;
-  status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
+  status: "draft" | "sent" | "accepted" | "rejected" | "expired";
   notes?: string;
 }
 
+// ─── Dealer Purchase History Sale Types ─────────────────────────────────────────
+export interface DealerSaleItem {
+  product_name?: string;
+  name?: string;
+  quantity?: number;
+  qty?: number;
+  unit_price?: number;
+  price?: number;
+  item_discount?: number;
+  line_total?: number;
+}
+
+export interface DealerSaleRecord {
+  id: string;
+  created?: string;
+  receipt_number?: string;
+  date?: string;
+  customer_name?: string;
+  customer_email?: string;
+  customer_phone?: string;
+  payment_method?: string;
+  subtotal?: number;
+  tax_amount?: number;
+  discount?: number;
+  total?: number;
+  items?: DealerSaleItem[];
+}

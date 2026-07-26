@@ -1,4 +1,17 @@
-import { type ReceiptPrintConfig, normalizeReceiptConfig } from '@/types/receipt-config';
+import { type ReceiptPrintConfig, DEFAULT_RECEIPT_CONFIG, normalizeReceiptConfig, type ReceiptPrintPreset } from '@/types/receipt-config';
+import { getReceiptPrintPresetsAction } from '@/app/actions/admin';
+
+export async function resolveReceiptConfig(): Promise<ReceiptPrintConfig> {
+  try {
+    const res = await getReceiptPrintPresetsAction();
+    if (!res.success) return DEFAULT_RECEIPT_CONFIG;
+    const presets = (res.data || []) as ReceiptPrintPreset[];
+    const preset = presets.find((p) => p.isDefault) || presets[0];
+    return preset ? normalizeReceiptConfig(preset.config) : DEFAULT_RECEIPT_CONFIG;
+  } catch {
+    return DEFAULT_RECEIPT_CONFIG;
+  }
+}
 
 export interface ReceiptItem {
   name: string;
@@ -20,6 +33,20 @@ export interface ReceiptData {
   logoUrl?: string;
 }
 
+const esc = (v?: string): string =>
+  (v || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+function safeImageUrl(url?: string): string | undefined {
+  if (!url) return undefined;
+  const trimmed = url.trim();
+  return /^(https?:|data:image\/)/i.test(trimmed) ? trimmed : undefined;
+}
+
 export function printReceipt(
   rawCfg: ReceiptPrintConfig,
   data: ReceiptData,
@@ -32,17 +59,18 @@ export function printReceipt(
 
   const isThermal = cfg.paperWidthMm <= 100;
   const currency = 'Rs.';
+  const logoSrc = safeImageUrl(data.logoUrl || cfg.logoUrl);
 
   const itemsHtml = data.items
     .map((item) => {
       const lineTotal = item.qty * item.unitPrice;
       const serialHtml =
         cfg.showItemSerials && item.serialNumber
-          ? `<div class="item-sn">SN: ${item.serialNumber}</div>`
+          ? `<div class="item-sn">SN: ${esc(item.serialNumber)}</div>`
           : '';
       return `
         <tr>
-          <td class="item-name">${item.name}${serialHtml}</td>
+          <td class="item-name">${esc(item.name)}${serialHtml}</td>
           <td class="item-qty">${item.qty}</td>
           <td class="item-price">${currency} ${item.unitPrice.toLocaleString()}</td>
           <td class="item-total">${currency} ${lineTotal.toLocaleString()}</td>
@@ -98,27 +126,27 @@ export function printReceipt(
       </head>
       <body>
         <div class="header">
-          ${(data.logoUrl || cfg.logoUrl) ? `
-            <img src="${data.logoUrl || cfg.logoUrl}" alt="${cfg.storeName || 'FTC Electronics'}" style="max-height: 60px; max-width: 220px; width: auto; height: auto; object-fit: contain; margin: 0 auto 8px auto; display: block;" />
+          ${logoSrc ? `
+            <img src="${esc(logoSrc)}" alt="${esc(cfg.storeName || 'FTC Electronics')}" style="max-height: 60px; max-width: 220px; width: auto; height: auto; object-fit: contain; margin: 0 auto 8px auto; display: block;" />
           ` : `
-            <div class="store-name">${cfg.storeName || 'FTC Electronics'}</div>
+            <div class="store-name">${esc(cfg.storeName || 'FTC Electronics')}</div>
           `}
-          ${cfg.headerAddress ? `<div class="sub-header">${cfg.headerAddress}</div>` : ''}
-          ${cfg.headerPhone ? `<div class="sub-header">Tel: ${cfg.headerPhone}</div>` : ''}
-          ${cfg.taxNumber ? `<div class="sub-header">${cfg.taxNumber}</div>` : ''}
+          ${cfg.headerAddress ? `<div class="sub-header">${esc(cfg.headerAddress)}</div>` : ''}
+          ${cfg.headerPhone ? `<div class="sub-header">Tel: ${esc(cfg.headerPhone)}</div>` : ''}
+          ${cfg.taxNumber ? `<div class="sub-header">${esc(cfg.taxNumber)}</div>` : ''}
         </div>
 
         <div class="divider"></div>
 
-        <div class="info-row"><span>Receipt #: <strong>${data.orderNumber}</strong></span><span>${data.date}</span></div>
+        <div class="info-row"><span>Receipt #: <strong>${esc(data.orderNumber)}</strong></span><span>${esc(data.date)}</span></div>
         ${
           cfg.showCustomerInfo && (data.customerName || data.customerPhone)
-            ? `<div class="info-row"><span>Customer: ${data.customerName || 'Walk-in'}</span>${data.customerPhone ? `<span>${data.customerPhone}</span>` : ''}</div>`
+            ? `<div class="info-row"><span>Customer: ${esc(data.customerName || 'Walk-in')}</span>${data.customerPhone ? `<span>${esc(data.customerPhone)}</span>` : ''}</div>`
             : ''
         }
         ${
           cfg.showPaymentMethod && data.paymentMethod
-            ? `<div class="info-row"><span>Payment: ${data.paymentMethod}</span></div>`
+            ? `<div class="info-row"><span>Payment: ${esc(data.paymentMethod)}</span></div>`
             : ''
         }
 
@@ -152,8 +180,8 @@ export function printReceipt(
         <div class="divider"></div>
 
         <div class="footer">
-          ${cfg.footerMessage ? `<div>${cfg.footerMessage}</div>` : ''}
-          ${cfg.returnPolicyText ? `<div class="policy">${cfg.returnPolicyText}</div>` : ''}
+          ${cfg.footerMessage ? `<div>${esc(cfg.footerMessage)}</div>` : ''}
+          ${cfg.returnPolicyText ? `<div class="policy">${esc(cfg.returnPolicyText)}</div>` : ''}
           ${
             cfg.showQrCode
               ? `<div class="qr-container"><canvas id="qr"></canvas></div>`

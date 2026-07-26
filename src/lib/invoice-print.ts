@@ -1,11 +1,19 @@
-import { type InvoicePrintConfig, normalizeInvoiceConfig } from '@/types/invoice-config';
+import { type InvoicePrintConfig, DEFAULT_INVOICE_CONFIG, normalizeInvoiceConfig, type InvoiceItem } from '@/types/invoice-config';
+import { getInvoicePrintPresetsAction } from '@/app/actions/admin';
+import type { ReceiptPrintPreset } from '@/types/receipt-config';
 
-export interface InvoiceItem {
-  name: string;
-  qty: number;
-  unitPrice: number;
-  discount?: number;
-  serialNumber?: string;
+export type { InvoiceItem };
+
+export async function resolveInvoiceConfig(): Promise<InvoicePrintConfig> {
+  try {
+    const res = await getInvoicePrintPresetsAction();
+    if (!res.success) return DEFAULT_INVOICE_CONFIG;
+    const presets = (res.data || []) as ReceiptPrintPreset[];
+    const preset = presets.find((p) => p.isDefault) || presets[0];
+    return preset ? normalizeInvoiceConfig(preset.config) : DEFAULT_INVOICE_CONFIG;
+  } catch {
+    return DEFAULT_INVOICE_CONFIG;
+  }
 }
 
 export interface InvoiceData {
@@ -27,6 +35,24 @@ export interface InvoiceData {
   logoUrl?: string;
 }
 
+const esc = (v?: string): string =>
+  (v || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+function safeImageUrl(url?: string): string | undefined {
+  if (!url) return undefined;
+  const trimmed = url.trim();
+  return /^(https?:|data:image\/)/i.test(trimmed) ? trimmed : undefined;
+}
+
+const LEGACY_COMBINED_TITLE = 'TAX INVOICE / QUOTATION';
+const normalizeDocTitle = (t?: string) =>
+  !t || t === LEGACY_COMBINED_TITLE ? 'INVOICE' : t;
+
 export function printInvoice(
   rawCfg: InvoicePrintConfig,
   data: InvoiceData,
@@ -39,21 +65,22 @@ export function printInvoice(
 
   const isThermal = cfg.paperWidthMm <= 100;
   const currency = 'Rs.';
+  const logoSrc = safeImageUrl(data.logoUrl || cfg.logoUrl);
   const docHeading = data.docType === 'Quotation'
     ? 'QUOTATION'
-    : (cfg.documentTitle === 'TAX INVOICE / QUOTATION' ? 'INVOICE' : (cfg.documentTitle || 'INVOICE'));
+    : normalizeDocTitle(cfg.documentTitle);
 
   const itemsHtml = data.items
     .map((item, index) => {
       const lineTotal = item.qty * item.unitPrice - (item.discount || 0);
       const serialHtml = item.serialNumber
-        ? `<div class="item-sn">SN: ${item.serialNumber}</div>`
+        ? `<div class="item-sn">SN: ${esc(item.serialNumber)}</div>`
         : '';
       return `
         <tr>
           <td class="col-idx">${String(index + 1).padStart(2, '0')}</td>
           <td class="col-desc">
-            <span class="item-title">${item.name}</span>
+            <span class="item-title">${esc(item.name)}</span>
             ${serialHtml}
           </td>
           <td class="col-num">${item.qty}</td>
@@ -274,30 +301,30 @@ export function printInvoice(
         <!-- Top Header: Store Info & Document Title -->
         <div class="top-row">
           <div>
-            ${(data.logoUrl || cfg.logoUrl) ? `
-              <img src="${data.logoUrl || cfg.logoUrl}" alt="${cfg.storeName || 'FTC Electronics'}" style="max-height: 80px; max-width: 300px; width: auto; height: auto; object-fit: contain; margin-bottom: 8px; display: block;" />
+            ${logoSrc ? `
+              <img src="${esc(logoSrc)}" alt="${esc(cfg.storeName || 'FTC Electronics')}" style="max-height: 80px; max-width: 300px; width: auto; height: auto; object-fit: contain; margin-bottom: 8px; display: block;" />
             ` : `
-              <div class="brand-title">${cfg.storeName || 'FTC Electronics'}</div>
+              <div class="brand-title">${esc(cfg.storeName || 'FTC Electronics')}</div>
             `}
-            ${cfg.headerAddress ? `<div class="brand-sub">${cfg.headerAddress}</div>` : ''}
-            ${cfg.headerPhone || cfg.headerEmail ? `<div class="brand-sub">${cfg.headerPhone || ''}${cfg.headerPhone && cfg.headerEmail ? ' · ' : ''}${cfg.headerEmail || ''}</div>` : ''}
-            ${cfg.taxNumber ? `<div class="brand-sub" style="color:#0f172a; font-weight:600;">${cfg.taxNumber}</div>` : ''}
+            ${cfg.headerAddress ? `<div class="brand-sub">${esc(cfg.headerAddress)}</div>` : ''}
+            ${cfg.headerPhone || cfg.headerEmail ? `<div class="brand-sub">${esc(cfg.headerPhone || '')}${cfg.headerPhone && cfg.headerEmail ? ' · ' : ''}${esc(cfg.headerEmail || '')}</div>` : ''}
+            ${cfg.taxNumber ? `<div class="brand-sub" style="color:#0f172a; font-weight:600;">${esc(cfg.taxNumber)}</div>` : ''}
           </div>
           <div class="doc-header-right">
-            <div class="doc-type-title">${docHeading}</div>
-            <div class="doc-meta-line">No: <strong>#${data.docNumber}</strong></div>
-            <div class="doc-meta-line">Date: <strong>${data.date}</strong></div>
-            ${cfg.showDueDate && data.dueDate ? `<div class="doc-meta-line">Valid / Due: <strong>${data.dueDate}</strong></div>` : ''}
+            <div class="doc-type-title">${esc(docHeading)}</div>
+            <div class="doc-meta-line">No: <strong>#${esc(data.docNumber)}</strong></div>
+            <div class="doc-meta-line">Date: <strong>${esc(data.date)}</strong></div>
+            ${cfg.showDueDate && data.dueDate ? `<div class="doc-meta-line">Valid / Due: <strong>${esc(data.dueDate)}</strong></div>` : ''}
           </div>
         </div>
 
         <!-- Minimalist Billed To Customer Section -->
         <div class="customer-section">
           <div class="section-label">Billed To</div>
-          <div class="customer-name">${data.customerName || 'Walk-in Customer'}</div>
-          ${data.customerCompany ? `<div class="customer-detail">${data.customerCompany}</div>` : ''}
-          ${data.customerAddress ? `<div class="customer-detail">${data.customerAddress}</div>` : ''}
-          ${data.customerPhone ? `<div class="customer-detail">Tel: ${data.customerPhone}</div>` : ''}
+          <div class="customer-name">${esc(data.customerName || 'Walk-in Customer')}</div>
+          ${data.customerCompany ? `<div class="customer-detail">${esc(data.customerCompany)}</div>` : ''}
+          ${data.customerAddress ? `<div class="customer-detail">${esc(data.customerAddress)}</div>` : ''}
+          ${data.customerPhone ? `<div class="customer-detail">Tel: ${esc(data.customerPhone)}</div>` : ''}
         </div>
 
         <!-- Items Table -->
@@ -322,7 +349,7 @@ export function printInvoice(
               cfg.bankDetailsText
                 ? `<div class="info-block">
                     <div class="info-block-title">Payment / Bank Transfer Info</div>
-                    <div class="info-block-body">${cfg.bankDetailsText}</div>
+                    <div class="info-block-body">${esc(cfg.bankDetailsText)}</div>
                    </div>`
                 : ''
             }
@@ -330,7 +357,7 @@ export function printInvoice(
               cfg.termsAndConditions
                 ? `<div class="info-block">
                     <div class="info-block-title">Terms & Notes</div>
-                    <div class="info-block-body">${cfg.termsAndConditions}</div>
+                    <div class="info-block-body">${esc(cfg.termsAndConditions)}</div>
                    </div>`
                 : ''
             }
