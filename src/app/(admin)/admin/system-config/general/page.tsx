@@ -80,6 +80,25 @@ export default function GeneralSettingsPage() {
         }
       }
 
+      if (cleanGoogleMapsUrl) {
+        try {
+          const parsed = new URL(cleanGoogleMapsUrl);
+          const isGoogleMaps = parsed.protocol === 'https:' && (
+            parsed.hostname.endsWith('.google.com') ||
+            parsed.hostname === 'google.com' ||
+            parsed.hostname.endsWith('.google.lk') ||
+            parsed.hostname === 'google.lk' ||
+            parsed.hostname === 'maps.google.com'
+          );
+          if (!isGoogleMaps) {
+            throw new Error('invalid map URL');
+          }
+        } catch {
+          showToast('Enter a valid HTTPS Google Maps URL.', 'error');
+          return;
+        }
+      }
+
       const payload = {
         siteName,
         tagline,

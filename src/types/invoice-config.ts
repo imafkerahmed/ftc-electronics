@@ -69,11 +69,24 @@ export const DEFAULT_INVOICE_CONFIG: InvoicePrintConfig = {
 export function normalizeInvoiceConfig(raw: string | object): InvoicePrintConfig {
   try {
     const obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
+
+    // Parse and clamp paperWidthMm to safe bounds (safe range 50mm - 500mm)
+    let paperWidthMm = Number(obj?.paperWidthMm);
+    if (!Number.isFinite(paperWidthMm) || paperWidthMm < 50 || paperWidthMm > 500) {
+      paperWidthMm = 210; // Fallback to standard A4
+    }
+
+    // Parse and clamp fontSizeMm to safe bounds (safe range 1mm - 20mm)
+    let fontSizeMm = Number(obj?.fontSizeMm);
+    if (!Number.isFinite(fontSizeMm) || fontSizeMm < 1 || fontSizeMm > 20) {
+      fontSizeMm = 3.5; // Fallback to standard base font size
+    }
+
     return {
       ...DEFAULT_INVOICE_CONFIG,
       ...obj,
-      paperWidthMm: obj?.paperWidthMm || 210,
-      fontSizeMm: obj?.fontSizeMm || 3.5,
+      paperWidthMm,
+      fontSizeMm,
     };
   } catch {
     return { ...DEFAULT_INVOICE_CONFIG };

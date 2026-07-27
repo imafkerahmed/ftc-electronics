@@ -110,7 +110,7 @@ export default function AdminOrdersPage() {
       paymentMethod: isQuotation
         ? 'UNPAID / ESTIMATE'
         : isPaid
-          ? `PAID via ${(order.paymentStatus || 'ONLINE').toUpperCase()}`
+          ? 'PAID'
           : 'PAYMENT PENDING',
       notes: isQuotation
         ? 'Quotation valid for 14 days from issue date.'

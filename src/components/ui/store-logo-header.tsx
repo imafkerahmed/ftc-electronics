@@ -13,7 +13,7 @@ export function StoreLogoHeader({ className = '', noLink = false }: StoreLogoHea
   const { logoUrl, darkLogoUrl, siteName, isLoading } = useSiteBranding();
 
   // Use the light or dark logo (prefer dark logo if available since modals can be light or dark)
-  const activeLogo = logoUrl || darkLogoUrl;
+  const activeLogo = darkLogoUrl || logoUrl;
 
   const logoContent = isLoading ? (
     // Skeleton while branding loads — matches the logo height so layout doesn't shift

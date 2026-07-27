@@ -14,9 +14,16 @@ const nextConfig: NextConfig = {
         hostname: 'images.unsplash.com',
       },
       {
-        // PocketBase file storage — allows Next.js Image to optimize PB-hosted images
         protocol: 'https',
         hostname: 'ftc-db.codix.site',
+      },
+      {
+        protocol: 'http',
+        hostname: '127.0.0.1',
+      },
+      {
+        protocol: 'http',
+        hostname: 'localhost',
       },
     ],
   },

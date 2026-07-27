@@ -1,6 +1,11 @@
-import { type InvoicePrintConfig, DEFAULT_INVOICE_CONFIG, normalizeInvoiceConfig, type InvoiceItem } from '@/types/invoice-config';
+import {
+  type InvoicePrintConfig,
+  DEFAULT_INVOICE_CONFIG,
+  normalizeInvoiceConfig,
+  type InvoiceItem,
+  type InvoicePrintPreset,
+} from '@/types/invoice-config';
 import { getInvoicePrintPresetsAction } from '@/app/actions/admin';
-import type { ReceiptPrintPreset } from '@/types/receipt-config';
 
 export type { InvoiceItem };
 
@@ -8,7 +13,7 @@ export async function resolveInvoiceConfig(): Promise<InvoicePrintConfig> {
   try {
     const res = await getInvoicePrintPresetsAction();
     if (!res.success) return DEFAULT_INVOICE_CONFIG;
-    const presets = (res.data || []) as ReceiptPrintPreset[];
+    const presets = (res.data || []) as InvoicePrintPreset[];
     const preset = presets.find((p) => p.isDefault) || presets[0];
     return preset ? normalizeInvoiceConfig(preset.config) : DEFAULT_INVOICE_CONFIG;
   } catch {
@@ -96,7 +101,7 @@ export function printInvoice(
     <!DOCTYPE html>
     <html>
       <head>
-        <title>${docHeading} \u2014 ${data.docNumber}</title>
+        <title>${esc(docHeading)} &mdash; ${esc(data.docNumber)}</title>
         ${cfg.showQrCode ? '<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"><\/script>' : ''}
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');

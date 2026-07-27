@@ -17,6 +17,45 @@ function scryptAsync(password: string, salt: string, keylen: number, options: cr
   });
 }
 
+// Derived key for GCM encryption of OTP database password fields.
+// Requires a dedicated OTP_ENCRYPTION_KEY — never share this with other secrets.
+// Fails fast in production if the env var is missing so misconfiguration is caught at deploy time.
+const otpKeyMaterial = process.env.OTP_ENCRYPTION_KEY;
+if (!otpKeyMaterial && process.env.NODE_ENV === 'production') {
+  throw new Error('OTP_ENCRYPTION_KEY is required to encrypt pending signup credentials.');
+}
+const OTP_ENCRYPTION_SECRET = crypto.createHash('sha256')
+  .update(otpKeyMaterial || 'dev-only-insecure-otp-key')
+  .digest();
+
+function encryptPassword(plainText: string): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', OTP_ENCRYPTION_SECRET, iv);
+  let encrypted = cipher.update(plainText, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  const authTag = cipher.getAuthTag().toString('hex');
+  return `${iv.toString('hex')}:${encrypted}:${authTag}`;
+}
+
+/**
+ * Decrypts an AES-256-GCM ciphertext produced by encryptPassword.
+ * Returns null if the format is invalid or the GCM auth-tag check fails
+ * (tampered / key-mismatched record) so callers can handle it explicitly.
+ */
+function decryptPassword(cipherText: string): string | null {
+  const parts = cipherText.split(':');
+  if (parts.length !== 3) return null;
+  try {
+    const iv = Buffer.from(parts[0], 'hex');
+    const authTag = Buffer.from(parts[2], 'hex');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', OTP_ENCRYPTION_SECRET, iv);
+    decipher.setAuthTag(authTag);
+    return decipher.update(parts[1], 'hex', 'utf8') + decipher.final('utf8');
+  } catch {
+    return null;
+  }
+}
+
 // ─── Rate Limiting & Protection ──────────────────────────────────────────────
 // In-memory sliding-window rate limiter per IP & action.
 
@@ -30,6 +69,7 @@ const ACTION_RATE_LIMITS: Record<string, RateLimitConfig> = {
   signup: { maxAttempts: 5, windowMs: 15 * 60 * 1000 },         // 5 attempts per 15 mins
   forgotPassword: { maxAttempts: 3, windowMs: 15 * 60 * 1000 }, // 3 attempts per 15 mins
   resetPassword: { maxAttempts: 5, windowMs: 15 * 60 * 1000 },  // 5 attempts per 15 mins
+  verifyOtp: { maxAttempts: 5, windowMs: 15 * 60 * 1000 },      // 5 attempts per 15 mins
 };
 
 const DEFAULT_RATE_LIMIT: RateLimitConfig = { maxAttempts: 5, windowMs: 15 * 60 * 1000 };
@@ -93,6 +133,37 @@ function recordAuthAttempt(ip: string, action: string): void {
 function clearAuthAttempts(ip: string, action: string): void {
   const key = `${ip}#${action}`;
   rateLimitStore.delete(key);
+}
+
+/**
+ * Consolidates setting authentication cookies securely in the client browser.
+ */
+async function setSessionCookies(params: {
+  token: string;
+  role: AdminRole | 'customer';
+  name: string;
+  avatarUrl?: string;
+}): Promise<void> {
+  const cookieStore = await cookies();
+  const secure = process.env.NODE_ENV === 'production';
+
+  // Shared base keeps all security attributes in one place — change once, applies everywhere.
+  const base = {
+    secure,
+    sameSite: 'strict' as const,
+    path: '/',
+    maxAge: 60 * 60 * 24 * 7,
+  };
+
+  cookieStore.set('pb_auth_token', params.token, { ...base, httpOnly: true });
+  cookieStore.set('pb_auth_role', params.role, { ...base, httpOnly: true });
+  cookieStore.set('pb_auth_indicator', '1', { ...base, httpOnly: false });
+  cookieStore.set('pb_auth_name', encodeURIComponent(params.name), { ...base, httpOnly: false });
+  cookieStore.set(
+    'pb_auth_avatar',
+    params.avatarUrl ? encodeURIComponent(params.avatarUrl) : '',
+    { ...base, httpOnly: false, maxAge: params.avatarUrl ? base.maxAge : 0 }
+  );
 }
 
 // ─── OWASP Timing Equalization KDF Helper ────────────────────────────────────
@@ -292,7 +363,7 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
   pb.autoCancellation(false);
 
   let success = false;
-  let userRole: AdminRole = 'read_only';
+  let userRole: AdminRole | 'customer' = 'customer';
   let userId = '';
 
   try {
@@ -313,7 +384,7 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
       userRole = 'super_admin';
     } else {
       success = true;
-      userRole = (role as AdminRole) || 'read_only';
+      userRole = 'customer';
     }
   } catch {
     // Execute dummy KDF to preserve constant-time execution and prevent user enumeration
@@ -323,54 +394,18 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
   if (success) {
     clearAuthAttempts(ip, 'login');
 
-    const cookieStore = await cookies();
-
-    cookieStore.set('pb_auth_token', pb.authStore.token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7,
-    });
-
-    cookieStore.set('pb_auth_role', userRole, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7,
-    });
-
-    // Non-httpOnly indicator so client JS can detect auth state without exposing the token
-    cookieStore.set('pb_auth_indicator', '1', {
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7,
-    });
-
-    // Store display name for navbar avatar (non-sensitive)
-    const model = pb.authStore.model;
+    const model = pb.authStore.record;
     const displayName = model?.name || email.split('@')[0];
-    cookieStore.set('pb_auth_name', encodeURIComponent(displayName), {
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7,
-    });
+    const avatarUrl = model?.avatar
+      ? `${pbUrl}/api/files/_pb_users_auth_/${model.id}/${model.avatar}`
+      : undefined;
 
-    if (model?.avatar) {
-      const avatarUrl = `${pbUrl}/api/files/_pb_users_auth_/${model.id}/${model.avatar}`;
-      cookieStore.set('pb_auth_avatar', encodeURIComponent(avatarUrl), {
-        httpOnly: false,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/',
-        maxAge: 60 * 60 * 24 * 7,
-      });
-    }
+    await setSessionCookies({
+      token: pb.authStore.token,
+      role: userRole,
+      name: displayName,
+      avatarUrl,
+    });
 
     writeAuditLog(
       email,
@@ -419,83 +454,61 @@ export async function setOAuthSessionAction(token: string): Promise<AuthActionRe
     const pb = new PocketBase(pbUrl);
     pb.authStore.save(token, null);
 
-    if (!pb.authStore.isValid) {
+    // Cryptographically verify token signature & refresh record against PocketBase
+    let record;
+    try {
+      const refreshed = await pb.collection('users').authRefresh();
+      record = refreshed.record;
+    } catch {
       return { success: false, error: 'Invalid authentication token.' };
     }
 
-    const record = pb.authStore.record;
-    let userRole: AdminRole = (record?.role as AdminRole) || 'read_only';
+    if (!record) {
+      return { success: false, error: 'Invalid authentication token.' };
+    }
 
-    // If user has no role set in PocketBase (new OAuth customer), set role to 'read_only'
-    if (!record?.role && record?.id) {
-      try {
-        const adminPb = await getAdminPb();
-        await adminPb.collection('users').update(record.id, { role: 'customer' });
-      } catch {
-        // Ignore if update fails
-      }
-      userRole = 'customer' as any;
-    } else if ((userRole as string) === 'admin') {
+    let userRole: AdminRole | 'customer' = 'customer';
+    const role = record.role as string | undefined;
+
+    // Check role validity against defined AdminRoles
+    if (role && (ADMIN_ROLES as readonly string[]).includes(role)) {
+      userRole = role as AdminRole;
+    } else if (record.isAdmin === true || record.is_admin === true) {
       userRole = 'super_admin';
+    } else {
+      // New OAuth customer with no role set yet -> Provision in database
+      if (!record.role && record.id) {
+        try {
+          const adminPb = await getAdminPb();
+          await adminPb.collection('users').update(record.id, { role: 'customer' });
+        } catch (provisionErr) {
+          console.error('[setOAuthSessionAction] Role provisioning failed:', provisionErr);
+        }
+      }
+      userRole = 'customer';
     }
 
     const headersList = await headers();
     const ip = getTrustedClientIp(headersList);
     const userAgent = headersList.get('user-agent') || 'unknown';
 
-    const cookieStore = await cookies();
+    const displayName = record.name || record.email?.split('@')[0] || 'User';
+    const avatarUrl = record.avatar
+      ? `${pbUrl}/api/files/_pb_users_auth_/${record.id}/${record.avatar}`
+      : undefined;
 
-    cookieStore.set('pb_auth_token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7,
+    await setSessionCookies({
+      token,
+      role: userRole,
+      name: displayName,
+      avatarUrl,
     });
-
-    cookieStore.set('pb_auth_role', userRole, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7,
-    });
-
-    // Non-httpOnly indicator so client JS can detect auth state without exposing the token
-    cookieStore.set('pb_auth_indicator', '1', {
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7,
-    });
-
-    // Store display name for navbar avatar (non-sensitive)
-    const displayName = record?.name || record?.email?.split('@')[0] || 'User';
-    cookieStore.set('pb_auth_name', encodeURIComponent(displayName), {
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7,
-    });
-
-    if (record?.avatar) {
-      const avatarUrl = `${pbUrl}/api/files/_pb_users_auth_/${record.id}/${record.avatar}`;
-      cookieStore.set('pb_auth_avatar', encodeURIComponent(avatarUrl), {
-        httpOnly: false,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/',
-        maxAge: 60 * 60 * 24 * 7,
-      });
-    }
 
     writeAuditLog(
-      record?.email || 'oauth_user',
+      record.email || 'oauth_user',
       'login',
       'auth',
-      record?.id || '',
+      record.id,
       undefined,
       { role: userRole, provider: 'google', ip },
       { ip, userAgent }
@@ -565,8 +578,23 @@ export async function signUpAction(formData: FormData): Promise<AuthActionResult
       };
     }
 
-    // Generate 6-digit random code
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    // Prune expired signup OTP records — capped at 50 to avoid unbounded sequential deletes.
+    try {
+      const expiredOtps = await adminPb.collection('signup_otps').getList(1, 50, {
+        filter: adminPb.filter('expiresAt < {:now}', { now: new Date().toISOString() }),
+        fields: 'id',
+      });
+      await Promise.all(
+        expiredOtps.items.map((oldOtp) =>
+          adminPb.collection('signup_otps').delete(oldOtp.id).catch(() => {})
+        )
+      );
+    } catch (pruneErr) {
+      console.error('Failed to prune expired OTPs:', pruneErr);
+    }
+
+    // Generate 6-digit random code using cryptographically secure random integers
+    const code = (100000 + crypto.randomInt(900000)).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes TTL
 
     // Create temporary record in PocketBase signup_otps collection
@@ -574,8 +602,9 @@ export async function signUpAction(formData: FormData): Promise<AuthActionResult
       email,
       code,
       name,
-      password, // Save temporary plain password to create user upon verification
+      password: encryptPassword(password), // Save encrypted temporary password to create user upon verification
       expiresAt,
+      attempts: 0,
     });
 
     // Send OTP email
@@ -624,6 +653,16 @@ export async function verifyOtpAction(otpId: string, code: string): Promise<Auth
   const ip = getTrustedClientIp(headersList);
   const userAgent = headersList.get('user-agent') || 'unknown';
 
+  // 1. IP-based Rate Limit Check
+  const rateCheck = checkAuthRateLimit(ip, 'verifyOtp');
+  if (!rateCheck.allowed) {
+    const minutes = Math.ceil((rateCheck.retryAfterMs || 0) / 60000);
+    return {
+      success: false,
+      error: `Too many verification attempts. Please try again in ${minutes} minute${minutes > 1 ? 's' : ''}.`
+    };
+  }
+
   try {
     const adminPb = await getAdminPb();
     
@@ -635,8 +674,36 @@ export async function verifyOtpAction(otpId: string, code: string): Promise<Auth
       return { success: false, error: 'Verification session expired. Please sign up again.' };
     }
 
+    const currentAttempts = Number(record.attempts || 0);
+
+    // 2. Brute Force Protection (Check/Self-Destruct if limit exceeded)
+    if (currentAttempts >= 5) {
+      try {
+        await adminPb.collection('signup_otps').delete(otpId);
+      } catch {}
+      return { success: false, error: 'Too many incorrect verification attempts. Please sign up again.' };
+    }
+
     // Verify OTP code
     if (record.code !== code.trim()) {
+      recordAuthAttempt(ip, 'verifyOtp');
+
+      // Atomic server-side increment: avoids read-modify-write race across concurrent requests.
+      let newAttempts = currentAttempts + 1;
+      try {
+        const updated = await adminPb.collection('signup_otps').update(otpId, {
+          'attempts+': 1,
+        });
+        newAttempts = Number(updated.attempts ?? newAttempts);
+      } catch {}
+
+      if (newAttempts >= 5) {
+        try {
+          await adminPb.collection('signup_otps').delete(otpId);
+        } catch {}
+        return { success: false, error: 'Too many incorrect verification attempts. Please sign up again.' };
+      }
+
       return { success: false, error: 'Incorrect verification code. Please check and try again.' };
     }
 
@@ -663,11 +730,21 @@ export async function verifyOtpAction(otpId: string, code: string): Promise<Auth
       return { success: false, error: 'An account with this email address already exists.' };
     }
 
+    // Decrypt the temporary user password — returns null if tampered or key-mismatched.
+    const decryptedPassword = decryptPassword(record.password);
+    if (decryptedPassword === null) {
+      console.error('[verifyOtpAction] decryptPassword returned null for otpId:', otpId);
+      try {
+        await adminPb.collection('signup_otps').delete(otpId);
+      } catch {}
+      return { success: false, error: 'Verification session is invalid. Please sign up again.' };
+    }
+
     // Create real user in users collection
     const newUser = await adminPb.collection('users').create({
       email: record.email,
-      password: record.password,
-      passwordConfirm: record.password,
+      password: decryptedPassword,
+      passwordConfirm: decryptedPassword,
       name: record.name,
       role: 'customer',
     });
@@ -694,41 +771,28 @@ export async function verifyOtpAction(otpId: string, code: string): Promise<Auth
     }
 
     const pb = new PocketBase(pbUrl);
-    const authData = await pb.collection('users').authWithPassword(record.email, record.password);
+
+    // Use decryptedPassword (not record.password which holds the AES-GCM ciphertext).
+    // Wrap in try/catch: a login failure must not discard the successfully created account.
+    let authData;
+    try {
+      authData = await pb.collection('users').authWithPassword(record.email, decryptedPassword);
+    } catch (loginErr) {
+      console.error('[verifyOtpAction] Auto-login after signup failed:', loginErr);
+      return { success: true, message: 'Account verified successfully! Please sign in.' };
+    }
 
     if (authData?.token) {
-      const cookieStore = await cookies();
-      
-      cookieStore.set('pb_auth_token', authData.token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/',
-        maxAge: 60 * 60 * 24 * 7,
-      });
+      const displayName = record.name || record.email.split('@')[0] || 'User';
+      const avatarUrl = authData.record?.avatar
+        ? `${pbUrl}/api/files/_pb_users_auth_/${authData.record.id}/${authData.record.avatar}`
+        : undefined;
 
-      cookieStore.set('pb_auth_role', 'customer', {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/',
-        maxAge: 60 * 60 * 24 * 7,
-      });
-
-      cookieStore.set('pb_auth_indicator', '1', {
-        httpOnly: false,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/',
-        maxAge: 60 * 60 * 24 * 7,
-      });
-
-      cookieStore.set('pb_auth_name', encodeURIComponent(record.name), {
-        httpOnly: false,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/',
-        maxAge: 60 * 60 * 24 * 7,
+      await setSessionCookies({
+        token: authData.token,
+        role: 'customer',
+        name: displayName,
+        avatarUrl,
       });
       
       // Notify navbar client-side
@@ -743,7 +807,7 @@ export async function verifyOtpAction(otpId: string, code: string): Promise<Auth
     console.error('[verifyOtpAction] Verification/login failed:', err);
     return { 
       success: false, 
-      error: err.message || 'Unable to complete verification right now. Please try again.' 
+      error: 'Unable to complete verification right now. Please try again.' 
     };
   }
 }
@@ -983,35 +1047,20 @@ export async function getCurrentUserSessionAction(): Promise<{
       return { success: false, error: 'Not authenticated.' };
     }
 
-    // Decode the JWT payload without verification (middleware already verified it)
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return { success: false, error: 'Invalid session token.' };
-    }
-
-    let payload: Record<string, any>;
-    try {
-      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-      const padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, '=');
-      payload = JSON.parse(Buffer.from(padded, 'base64').toString('utf-8'));
-    } catch {
-      return { success: false, error: 'Malformed session token.' };
-    }
-
-    // Check expiry
-    if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) {
-      return { success: false, error: 'Session expired.' };
-    }
-
-    // The JWT contains the user id — fetch full profile from PocketBase
-    const userId = payload.id;
-    if (!userId) return { success: false, error: 'Invalid session.' };
-
     const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
     if (!pbUrl) return { success: false, error: 'Server error.' };
 
-    const adminPb = await getAdminPb();
-    const record = await adminPb.collection('users').getOne(userId);
+    // Instantiate client with user's own token to verify signature authenticity
+    const pb = new PocketBase(pbUrl);
+    pb.authStore.save(token, null);
+
+    // authRefresh will validate the token against PocketBase's secret and throw if forged/expired
+    const authData = await pb.collection('users').authRefresh();
+    const record = authData.record;
+
+    if (!record) {
+      return { success: false, error: 'Not authenticated.' };
+    }
 
     const avatarUrl = record.avatar
       ? `${pbUrl}/api/files/_pb_users_auth_/${record.id}/${record.avatar}`
@@ -1035,7 +1084,6 @@ export async function getCurrentUserSessionAction(): Promise<{
   }
 }
 
-
 /**
  * Updates the current logged-in customer's profile details in PocketBase.
  */
@@ -1050,28 +1098,23 @@ export async function updateUserProfilePageAction(data: {
 
     if (!token) return { success: false, error: 'Not authenticated.' };
 
-    // Decode JWT to get userId
-    const parts = token.split('.');
-    if (parts.length !== 3) return { success: false, error: 'Invalid token.' };
+    const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
+    if (!pbUrl) return { success: false, error: 'Server error.' };
 
-    let payload: Record<string, any>;
-    try {
-      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-      const padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, '=');
-      payload = JSON.parse(Buffer.from(padded, 'base64').toString('utf-8'));
-    } catch {
-      return { success: false, error: 'Malformed token.' };
+    // Instantiate client with user's own token to verify signature authenticity
+    const pb = new PocketBase(pbUrl);
+    pb.authStore.save(token, null);
+
+    // authRefresh will validate the token against PocketBase's secret and throw if forged/expired
+    const authData = await pb.collection('users').authRefresh();
+    const record = authData.record;
+
+    if (!record) {
+      return { success: false, error: 'Not authenticated.' };
     }
 
-    if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) {
-      return { success: false, error: 'Session expired.' };
-    }
-
-    const userId = payload.id;
-    if (!userId) return { success: false, error: 'Invalid session.' };
-
-    const adminPb = await getAdminPb();
-    await adminPb.collection('users').update(userId, {
+    // Perform update on the authenticated client instance to enforce PB policy security rules
+    await pb.collection('users').update(record.id, {
       name: data.name,
       phone: data.phone,
       address: data.address,
@@ -1088,7 +1131,8 @@ export async function updateUserProfilePageAction(data: {
 
     return { success: true };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to update profile.' };
+    console.error('[updateUserProfilePageAction] Failed:', err);
+    return { success: false, error: 'Failed to update profile.' };
   }
 }
 
@@ -1106,41 +1150,29 @@ export async function getCustomerOrdersAction(): Promise<{
 
     if (!token) return { success: false, orders: [], error: 'Not authenticated.' };
 
-    // Decode JWT to get userId (same pattern as getCurrentUserSessionAction)
-    const parts = token.split('.');
-    if (parts.length !== 3) return { success: false, orders: [], error: 'Invalid token.' };
+    const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
+    if (!pbUrl) return { success: false, orders: [], error: 'Server error.' };
 
-    let payload: Record<string, any>;
-    try {
-      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-      const padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, '=');
-      payload = JSON.parse(Buffer.from(padded, 'base64').toString('utf-8'));
-    } catch {
-      return { success: false, orders: [], error: 'Malformed token.' };
+    // Instantiate client with user's own token to verify signature authenticity
+    const pb = new PocketBase(pbUrl);
+    pb.authStore.save(token, null);
+
+    // authRefresh will validate the token against PocketBase's secret and throw if forged/expired
+    const authData = await pb.collection('users').authRefresh();
+    const record = authData.record;
+
+    if (!record) {
+      return { success: false, orders: [], error: 'Not authenticated.' };
     }
 
-    if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) {
-      return { success: false, orders: [], error: 'Session expired.' };
-    }
-
-    const userId = payload.id;
-    if (!userId) return { success: false, orders: [], error: 'Invalid session.' };
+    const userEmail = record.email || '';
+    if (!userEmail) return { success: false, orders: [], error: 'User email not found.' };
 
     const adminPb = await getAdminPb();
-
-    // Get user email to query orders
-    let userEmail = '';
-    try {
-      const user = await adminPb.collection('users').getOne(userId);
-      userEmail = user.email || '';
-    } catch {
-      return { success: false, orders: [], error: 'User not found.' };
-    }
-
     let records: any[] = [];
     try {
       records = await adminPb.collection('orders').getFullList({
-        filter: `customer_email = "${userEmail}" || email = "${userEmail}"`,
+        filter: adminPb.filter('customer_email = {:email} || email = {:email}', { email: userEmail }),
         sort: '-created',
       });
     } catch {
@@ -1149,7 +1181,8 @@ export async function getCustomerOrdersAction(): Promise<{
 
     return { success: true, orders: records };
   } catch (err: any) {
-    return { success: false, orders: [], error: err.message || 'Failed to load orders.' };
+    console.error('[getCustomerOrdersAction] Failed:', err);
+    return { success: false, orders: [], error: 'Failed to load orders.' };
   }
 }
 

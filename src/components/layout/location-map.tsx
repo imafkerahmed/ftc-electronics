@@ -21,19 +21,6 @@ export default function LocationMap({ settings }: LocationMapProps) {
   const city = settings?.city || "";
   const fullAddress = city && !rawAddress.includes(city) ? `${rawAddress}, ${city}` : rawAddress;
 
-  const storeInfo = {
-    name: "FTC Flagship Store",
-    address: fullAddress,
-    phone: settings?.phone || "+94 11 234 5678",
-    email: settings?.email || "support@ftcelectronics.com",
-    hours: settings?.hours || [
-      { days: "Monday – Saturday", time: "9:00 AM – 8:00 PM" },
-      { days: "Sunday & Holidays", time: "10:00 AM – 6:00 PM" },
-    ],
-    googleMapsLink: settings?.googleMapsLink || "https://maps.google.com/?q=Galle+Rd,+Colombo+03,+Sri+Lanka",
-    whatsappLink: settings?.whatsappLink || "https://wa.me/94112345678",
-  };
-
   // For the iframe: use the configured URL if it looks like an embed src;
   // otherwise fall back to the default embed. Plain directions links work too.
   const getCleanMapUrl = (url: string) => {
@@ -49,6 +36,20 @@ export default function LocationMap({ settings }: LocationMapProps) {
   };
 
   const cleanGoogleMapsLink = getCleanMapUrl(settings?.googleMapsLink || "");
+
+  const storeInfo = {
+    name: "FTC Flagship Store",
+    address: fullAddress,
+    phone: settings?.phone || "+94 11 234 5678",
+    email: settings?.email || "support@ftcelectronics.com",
+    hours: settings?.hours || [
+      { days: "Monday – Saturday", time: "9:00 AM – 8:00 PM" },
+      { days: "Sunday & Holidays", time: "10:00 AM – 6:00 PM" },
+    ],
+    googleMapsLink: cleanGoogleMapsLink || "https://maps.google.com/?q=Galle+Rd,+Colombo+03,+Sri+Lanka",
+    whatsappLink: settings?.whatsappLink || "https://wa.me/94112345678",
+  };
+
   const iframeSrc = cleanGoogleMapsLink ||
     "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3960.7984670691077!2d79.8482!3d6.9147!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3ae259410f545199%3A0xa6ec07c3905cfb6e!2sGalle%20Rd%2C%20Colombo!5e0!3m2!1sen!2slk!4v1700000000000!5m2!1sen!2slk";
 

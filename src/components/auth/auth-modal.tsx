@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useTransition } from 'react';
+import { useState, useEffect, useRef, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { X, ArrowRight, AlertCircle, CheckCircle2, Eye, EyeOff, KeyRound, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { StoreLogoHeader } from '@/components/ui/store-logo-header';
 import { loginAction, signUpAction, setOAuthSessionAction, verifyOtpAction } from '@/app/actions/auth';
 import { pb } from '@/lib/pocketbase';
+import { ClientResponseError } from 'pocketbase';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 
 interface AuthModalProps {
@@ -30,6 +31,14 @@ export function AuthModal({
   const [otpId, setOtpId] = useState<string>('');
   const [otpCode, setOtpCode] = useState<string>('');
   const [sendingOtp, setSendingOtp] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  // Countdown timer for resend cooldown
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendCooldown]);
   
   // Password peek states
   const [showPassword, setShowPassword] = useState(false);
@@ -47,6 +56,73 @@ export function AuthModal({
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [, startTransition] = useTransition();
+
+  const isMountedRef = useRef(true);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const activeElementRef = useRef<HTMLElement | null>(null);
+
+  // Track component mounted status to prevent memory leak updates
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  // Track previously active element for focus restoration on close
+  useEffect(() => {
+    if (isOpen) {
+      activeElementRef.current = document.activeElement as HTMLElement;
+    } else {
+      if (activeElementRef.current && document.contains(activeElementRef.current)) {
+        activeElementRef.current.focus();
+      }
+      activeElementRef.current = null;
+    }
+  }, [isOpen]);
+
+  // Focus trap / cycling tab behavior inside modal
+  useEffect(() => {
+    if (!isOpen) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+
+    // Find all focusable elements inside the modal — excluding disabled controls and
+    // tabIndex={-1} elements (e.g. password-peek buttons) so trap boundaries are correct.
+    const focusableSelector =
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const focusableElements = (
+      Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector))
+    ).filter((el) => el.tabIndex !== -1);
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    if (firstElement) {
+      firstElement.focus();
+    }
+
+    const handleTabKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+
+      const activeEl = document.activeElement;
+      if (e.shiftKey) {
+        if (activeEl === firstElement || !focusableElements.includes(activeEl as HTMLElement)) {
+          lastElement?.focus();
+          e.preventDefault();
+        }
+      } else {
+        if (activeEl === lastElement || !focusableElements.includes(activeEl as HTMLElement)) {
+          firstElement?.focus();
+          e.preventDefault();
+        }
+      }
+    };
+
+    panel.addEventListener('keydown', handleTabKey);
+    return () => {
+      panel.removeEventListener('keydown', handleTabKey);
+    };
+  }, [isOpen, mode, loading, sendingOtp]);
 
   // Reset states when modal opens
   useEffect(() => {
@@ -70,20 +146,24 @@ export function AuthModal({
     if (!isOpen) return;
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isOpen]);
 
+  // Escape key handler
+  useEffect(() => {
+    if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Avoid closing on ESC if loading, sending code, or in OTP mode
-      if (e.key === 'Escape' && !loading && !sendingOtp && mode !== 'signup_otp') {
+      if (e.key === 'Escape' && !loading && !sendingOtp) {
         onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
-
     return () => {
-      document.body.style.overflow = originalOverflow;
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isOpen, onClose, loading, sendingOtp, mode]);
+  }, [isOpen, onClose, loading, sendingOtp]);
 
   if (!isOpen) return null;
 
@@ -95,6 +175,7 @@ export function AuthModal({
       const authData = await pb.collection('users').authWithOAuth2({ provider: 'google' });
       if (authData?.token) {
         const res = await setOAuthSessionAction(authData.token);
+        if (!isMountedRef.current) return;
         if (res.success) {
           window.dispatchEvent(new Event('auth-change'));
           onClose();
@@ -111,12 +192,18 @@ export function AuthModal({
       } else {
         setError('Google authentication did not complete.');
       }
-    } catch (err: any) {
-      if (err?.name !== 'ClientResponseError 0') {
-        setError(err?.message || 'Google authentication failed. Please try again.');
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      const isCancelled = err instanceof ClientResponseError && (err.isAbort || err.status === 0);
+      if (!isCancelled) {
+        setError(
+          err instanceof Error ? err.message : 'Google authentication failed. Please try again.'
+        );
       }
     } finally {
-      setGoogleLoading(false);
+      if (isMountedRef.current) {
+        setGoogleLoading(false);
+      }
     }
   };
 
@@ -135,6 +222,7 @@ export function AuthModal({
       setLoading(true);
       try {
         const res = await loginAction(fd);
+        if (!isMountedRef.current) return;
         setLoading(false);
         if (res.success) {
           window.dispatchEvent(new Event('auth-change'));
@@ -149,8 +237,10 @@ export function AuthModal({
           setError(res.error || 'Invalid email or password.');
         }
       } catch {
-        setLoading(false);
-        setError('An unexpected error occurred. Please try again.');
+        if (isMountedRef.current) {
+          setLoading(false);
+          setError('An unexpected error occurred. Please try again.');
+        }
       }
     } else {
       // Client-side quick input validation
@@ -179,6 +269,7 @@ export function AuthModal({
       // Dispatch sign up request in the background
       signUpAction(fd)
         .then((res) => {
+          if (!isMountedRef.current) return;
           setSendingOtp(false);
           if (res.success && res.requiresOtp && res.otpId) {
             setOtpId(res.otpId);
@@ -194,11 +285,45 @@ export function AuthModal({
           }
         })
         .catch(() => {
+          if (!isMountedRef.current) return;
           setSendingOtp(false);
           setMode('signup');
           setError('An unexpected error occurred. Please try again.');
           setMessage(null);
         });
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (resendCooldown > 0 || sendingOtp) return;
+    setError(null);
+    setMessage('Resending verification code to your email...');
+    setSendingOtp(true);
+    setResendCooldown(60);
+
+    const fd = new FormData();
+    fd.append('name', formData.name);
+    fd.append('email', formData.email);
+    fd.append('password', formData.password);
+    fd.append('confirmPassword', formData.confirmPassword);
+
+    try {
+      const res = await signUpAction(fd);
+      if (!isMountedRef.current) return;
+      setSendingOtp(false);
+      if (res.success && res.requiresOtp && res.otpId) {
+        setOtpId(res.otpId);
+        setOtpCode('');
+        setMessage(res.message || 'New verification code sent to your email.');
+      } else {
+        setError(res.error || 'Failed to resend code. Please try again.');
+        setMessage(null);
+      }
+    } catch {
+      if (!isMountedRef.current) return;
+      setSendingOtp(false);
+      setError('An unexpected error occurred. Please try again.');
+      setMessage(null);
     }
   };
 
@@ -214,6 +339,7 @@ export function AuthModal({
 
     try {
       const res = await verifyOtpAction(otpId, otpCode);
+      if (!isMountedRef.current) return;
       setLoading(false);
       if (res.success) {
         window.dispatchEvent(new Event('auth-change'));
@@ -228,8 +354,11 @@ export function AuthModal({
         setError(res.error || 'Verification failed. Please check the code and try again.');
       }
     } catch (err: any) {
+      if (!isMountedRef.current) return;
       setLoading(false);
-      setError(err?.message || 'An unexpected error occurred during verification.');
+      setError(
+        err instanceof Error ? err.message : 'An unexpected error occurred during verification.'
+      );
     }
   };
 
@@ -237,18 +366,22 @@ export function AuthModal({
     <div
       className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200"
       onClick={() => {
-        // Prevent closing modal if loading, sending OTP code, or on OTP screen
-        if (!loading && !sendingOtp && mode !== 'signup_otp') {
+        // Prevent closing modal if loading or sending OTP code
+        if (!loading && !sendingOtp) {
           onClose();
         }
       }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="auth-modal-title"
+        ref={panelRef}
         className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden relative p-6 sm:p-8 animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Close Button - hide if loading, sending code, or in OTP mode */}
-        {!loading && !sendingOtp && mode !== 'signup_otp' && (
+        {/* Close Button - hide only if loading or sending code */}
+        {!loading && !sendingOtp && (
           <button
             onClick={onClose}
             className="absolute right-4 top-4 p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
@@ -261,7 +394,7 @@ export function AuthModal({
         {/* Store Logo & Heading */}
         <div className="text-center mb-6">
           <StoreLogoHeader noLink className="mb-2" />
-          <h3 className="text-lg font-bold text-foreground mt-3">
+          <h3 id="auth-modal-title" className="text-lg font-bold text-foreground mt-3">
             {mode === 'signup_otp'
               ? 'Verify Your Email'
               : mode === 'signin'
@@ -378,6 +511,8 @@ export function AuthModal({
                 onChange={(val) => setOtpCode(val)}
                 className="gap-2"
                 disabled={sendingOtp}
+                aria-label="One-Time Password Verification Code"
+                autoComplete="one-time-code"
               >
                 <InputOTPGroup>
                   <InputOTPSlot index={0} />
@@ -401,18 +536,30 @@ export function AuthModal({
               </Button>
 
               {!loading && !sendingOtp && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode('signup');
-                    setOtpCode('');
-                    setError(null);
-                    setMessage(null);
-                  }}
-                  className="w-full text-center text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors mt-2 cursor-pointer"
-                >
-                  Incorrect email? Go back and sign up again.
-                </button>
+                <div className="flex flex-col gap-2.5 mt-2">
+                  <button
+                    type="button"
+                    onClick={handleResendOtp}
+                    disabled={resendCooldown > 0}
+                    className="w-full text-center text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {resendCooldown > 0
+                      ? `Resend code in ${resendCooldown}s`
+                      : "Didn't receive the email? Resend code"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('signup');
+                      setOtpCode('');
+                      setError(null);
+                      setMessage(null);
+                    }}
+                    className="w-full text-center text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors cursor-pointer"
+                  >
+                    Incorrect email? Go back and sign up again.
+                  </button>
+                </div>
               )}
             </div>
           </form>

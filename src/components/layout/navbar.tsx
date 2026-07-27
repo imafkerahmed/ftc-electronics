@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
 import { ShoppingBag, Search, User, X, LogIn } from "lucide-react";
@@ -76,21 +77,20 @@ export default function Navbar() {
   // Reactively detect auth state via non-httpOnly cookie (pb_auth_indicator)
   useEffect(() => {
     const check = async () => {
-      const loggedIn = document.cookie.includes("pb_auth_indicator=1");
+      const loggedIn = /(?:^|;\s*)pb_auth_indicator=1(?:;|$)/.test(document.cookie);
       setIsLoggedIn(loggedIn);
       
       if (loggedIn) {
         // Read avatar
         const avatarMatch = document.cookie.match(/pb_auth_avatar=([^;]+)/);
         setUserAvatar(avatarMatch ? decodeURIComponent(avatarMatch[1]) : "");
-
+ 
         // If avatar isn't cached but indicator is active, perform a quick fallback check for avatar url
         if (!avatarMatch) {
           try {
             const res = await getCurrentUserSessionAction();
             if (res.success && res.user && res.user.avatar) {
               setUserAvatar(res.user.avatar);
-              document.cookie = `pb_auth_avatar=${encodeURIComponent(res.user.avatar)}; path=/; max-age=${60 * 60 * 24 * 7}`;
             }
           } catch {
             // Ignore
@@ -113,9 +113,13 @@ export default function Navbar() {
   // Interval to rotate the 'in' and 'up' text when not logged in
   useEffect(() => {
     if (isLoggedIn) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
     const interval = setInterval(() => {
+      if (document.hidden) return;
       setAuthSuffix((prev) => (prev === "in" ? "up" : "in"));
     }, 2500);
+
     return () => clearInterval(interval);
   }, [isLoggedIn]);
 
@@ -394,13 +398,17 @@ export default function Navbar() {
                 }
               }}
               className="transition-colors cursor-pointer p-1 rounded-full"
-              aria-label="User Account"
+              aria-label={isLoggedIn ? "Open your account" : "Sign in or create an account"}
             >
               {isLoggedIn ? (
                 userAvatar ? (
-                  <img
+                  <Image
                     src={userAvatar}
                     alt="User Avatar"
+                    width={32}
+                    height={32}
+                    unoptimized={!userAvatar.startsWith("http") && !userAvatar.startsWith("/")}
+                    onError={() => setUserAvatar("")}
                     className="h-8 w-8 rounded-full object-cover shadow-md ring-2 ring-background hover:scale-105 transition-transform duration-200"
                   />
                 ) : (
@@ -409,7 +417,7 @@ export default function Navbar() {
                   </div>
                 )
               ) : (
-                <div className="flex items-center text-xs font-extrabold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-full border border-border bg-secondary/20 gap-0.5 select-none h-8 min-w-[80px] justify-center relative overflow-hidden">
+                <div aria-hidden="true" className="flex items-center text-xs font-extrabold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-full border border-border bg-secondary/20 gap-0.5 select-none h-8 min-w-[80px] justify-center relative overflow-hidden">
                   <span>Sign-</span>
                   <div className="relative h-4 w-6 flex items-center justify-start overflow-hidden">
                     <AnimatePresence mode="wait">

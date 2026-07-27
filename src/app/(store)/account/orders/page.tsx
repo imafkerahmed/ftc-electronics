@@ -55,8 +55,8 @@ export default function OrdersHistoryPage() {
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 gap-4">
-        <AlertCircle className="h-10 w-10 text-red-400" />
+      <div role="alert" aria-live="assertive" className="flex flex-col items-center justify-center py-16 gap-4">
+        <AlertCircle aria-hidden="true" className="h-10 w-10 text-red-400" />
         <p className="text-sm font-medium text-foreground">Unable to load orders</p>
         <p className="text-xs text-muted-foreground">{error}</p>
         <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
@@ -143,7 +143,14 @@ export default function OrdersHistoryPage() {
                     <span className="text-muted-foreground">
                       Tracking Number: <code className="text-blue-600 font-mono">{order.tracking_number}</code>
                     </span>
-                    <Button variant="ghost" size="sm" className="h-8 text-muted-foreground hover:text-foreground hover:bg-muted border border-border">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        window.open(`https://www.17track.net/en/track?nums=${encodeURIComponent(order.tracking_number)}`, '_blank', 'noopener,noreferrer');
+                      }}
+                      className="h-8 text-muted-foreground hover:text-foreground hover:bg-muted border border-border"
+                    >
                       Track Package
                     </Button>
                   </div>

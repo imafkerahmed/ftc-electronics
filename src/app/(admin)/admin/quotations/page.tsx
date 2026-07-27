@@ -164,7 +164,7 @@ export default function AdminQuotationsPage() {
 
     if (cRes.success && cRes.data) {
       setExistingCustomers(
-        cRes.data.map((c: any) => ({
+        cRes.data.map((c: { id: string; name?: string; customer_name?: string; email?: string; phone?: string }) => ({
           id: c.id,
           name: c.name || c.customer_name || 'Unnamed Customer',
           email: c.email || '',
@@ -1016,7 +1016,7 @@ export default function AdminQuotationsPage() {
                           type="number"
                           min="0"
                           step="10"
-                          placeholder={dealerRate > 0 ? `${dealerRate}% Off` : 'Discount'}
+                          placeholder={dealerRate > 0 ? `e.g. ${Math.round((item.unitPrice||0)*(item.qty||1)*dealerRate/100)} (LKR)` : 'Discount (LKR)'}
                           value={item.discount !== undefined && item.discount > 0 ? item.discount : ''}
                           onChange={(e) => handleUpdateLineItem(idx, 'discount', parseFloat(e.target.value) || 0)}
                           className="text-xs bg-background text-right font-mono text-emerald-400"

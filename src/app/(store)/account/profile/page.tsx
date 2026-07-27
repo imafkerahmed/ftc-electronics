@@ -18,13 +18,18 @@ export default function ProfilePage() {
   useEffect(() => {
     async function loadUser() {
       setLoading(true);
-      const res = await getCurrentUserSessionAction();
-      if (res.success && res.user) {
-        setProfile(res.user);
-      } else {
+      try {
+        const res = await getCurrentUserSessionAction();
+        if (res.success && res.user) {
+          setProfile(res.user);
+        } else {
+          router.push('/');
+        }
+      } catch {
         router.push('/');
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     }
     void loadUser();
   }, [router]);
@@ -36,19 +41,24 @@ export default function ProfilePage() {
     setSuccess(null);
     setError(null);
 
-    const res = await updateUserProfilePageAction({
-      name: profile.name,
-      phone: profile.phone,
-      address: profile.address,
-    });
+    try {
+      const res = await updateUserProfilePageAction({
+        name: profile.name,
+        phone: profile.phone,
+        address: profile.address,
+      });
 
-    setSaving(false);
-    if (res.success) {
-      setSuccess('Profile details saved successfully.');
-      // Instantly notify navbar to fetch/refresh the display name and avatar letter
-      window.dispatchEvent(new Event('auth-change'));
-    } else {
-      setError(res.error || 'Failed to update profile.');
+      if (res.success) {
+        setSuccess('Profile details saved successfully.');
+        // Instantly notify navbar to fetch/refresh the display name and avatar letter
+        window.dispatchEvent(new Event('auth-change'));
+      } else {
+        setError(res.error || 'Failed to update profile.');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An unexpected error occurred.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -125,7 +135,6 @@ export default function ProfilePage() {
             id="profile-email"
             type="email"
             readOnly
-            disabled
             value={profile.email}
             className="h-10 bg-muted/60 border-border text-muted-foreground text-sm cursor-not-allowed"
           />

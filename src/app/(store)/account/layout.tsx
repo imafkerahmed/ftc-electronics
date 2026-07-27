@@ -16,16 +16,17 @@ export default function AccountLayout({
 
   const handleSignOut = async () => {
     try {
-      pb.authStore.clear();
       await logoutAction();
-      // Immediately tell the navbar to re-check auth state
-      window.dispatchEvent(new Event('auth-change'));
-      router.refresh();
-      router.push('/');
-    } catch {
-      window.dispatchEvent(new Event('auth-change'));
-      router.push('/');
+    } catch (err) {
+      console.error('Failed to invalidate server session:', err);
+      return;
     }
+
+    pb.authStore.clear();
+    // Immediately tell the navbar to re-check auth state
+    window.dispatchEvent(new Event('auth-change'));
+    router.refresh();
+    router.push('/');
   };
 
   const menuItems = [

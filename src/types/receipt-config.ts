@@ -56,10 +56,24 @@ export const DEFAULT_RECEIPT_CONFIG: ReceiptPrintConfig = {
 export function normalizeReceiptConfig(raw: string | object): ReceiptPrintConfig {
   try {
     const obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
+
+    // Parse and clamp paperWidthMm to safe bounds (safe range 30mm - 500mm)
+    let paperWidthMm = Number(obj?.paperWidthMm);
+    if (!Number.isFinite(paperWidthMm) || paperWidthMm < 30 || paperWidthMm > 500) {
+      paperWidthMm = 80; // Fallback to standard 80mm thermal
+    }
+
+    // Parse and clamp fontSizeMm to safe bounds (safe range 1mm - 20mm)
+    let fontSizeMm = Number(obj?.fontSizeMm ?? (obj?.fontSizePx ? Math.round(obj.fontSizePx / 3) : 4));
+    if (!Number.isFinite(fontSizeMm) || fontSizeMm < 1 || fontSizeMm > 20) {
+      fontSizeMm = 4; // Fallback to standard base size
+    }
+
     return {
       ...DEFAULT_RECEIPT_CONFIG,
       ...obj,
-      fontSizeMm: obj?.fontSizeMm ?? (obj?.fontSizePx ? Math.round(obj.fontSizePx / 3) : 4),
+      paperWidthMm,
+      fontSizeMm,
     };
   } catch {
     return { ...DEFAULT_RECEIPT_CONFIG };

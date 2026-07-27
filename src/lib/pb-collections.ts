@@ -1385,7 +1385,7 @@ export const pbWholesaleDealers = {
     try {
       const adminPb = await getAdminPb();
       const count = await adminPb.collection("quotations").getList(1, 1, {
-        filter: `dealer_id = "${id}"`,
+        filter: adminPb.filter('dealer_id = {:id}', { id }),
       });
       if (count.totalItems > 0) {
         throw new Error(`Cannot delete dealer: ${count.totalItems} quotation(s) reference this dealer.`);

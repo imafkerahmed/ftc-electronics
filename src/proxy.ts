@@ -23,62 +23,6 @@ const ROUTE_PERMISSIONS: Record<string, AdminRole[]> = {
 };
 
 /**
- * Safely decodes base64url JSON payload with proper padding.
- */
-function decodeJwtPayload(payloadPart: string): any {
-  const base64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
-  const decoded = atob(padded);
-  return JSON.parse(decoded);
-}
-
-/**
- * Checks if a JWT token is expired without making any network requests.
- * Uses Edge-runtime friendly atob for base64url decoding.
- */
-function isTokenExpired(token: string): boolean {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return true;
-
-    const payload = decodeJwtPayload(parts[1]);
-    const exp = payload.exp;
-    if (!exp) return true;
-
-    // exp is in seconds, Date.now() is in milliseconds
-    return Date.now() >= exp * 1000;
-  } catch {
-    return true;
-  }
-}
-
-/**
- * Safely decodes and extracts the user role from a JWT token's payload in Edge runtime.
- */
-function extractRoleFromTokenPayload(token: string): AdminRole | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-
-    const payload = decodeJwtPayload(parts[1]);
-
-    const role = payload.role || payload.record?.role;
-    if (role === 'admin' || role === 'super_admin') return 'super_admin';
-
-    if (role && (ADMIN_ROLES as readonly string[]).includes(role)) {
-      return role as AdminRole;
-    }
-
-    if (payload.isAdmin === true || payload.is_admin === true || payload.record?.isAdmin === true || payload.record?.is_admin === true) {
-      return 'super_admin';
-    }
-  } catch {
-    // Ignore error
-  }
-  return null;
-}
-
-/**
  * Checks if the user's role has access to the requested admin route.
  */
 function hasRouteAccess(pathname: string, role: AdminRole): boolean {
@@ -118,20 +62,136 @@ function addSecurityHeaders(response: NextResponse): NextResponse {
   return response;
 }
 
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get('pb_auth_token')?.value;
 
-  const hasValidToken = Boolean(token && !isTokenExpired(token));
+  // ── HMAC-signed validation cache ─────────────────────────────────────────
+  // Stamp format written to pb_auth_cache: "<role>:<expirySeconds>:<hmac>"
+  // where hmac = HMAC-SHA256(cacheSecret, role+":"+expiry+token).
+  // This lets the middleware skip the PB round-trip for up to 60 s.
+  async function stampCacheOnResponse(
+    response: NextResponse,
+    role: string,
+  ): Promise<void> {
+    const cacheSecret = process.env.AUTH_CACHE_SECRET;
+    if (!cacheSecret || !token) return;
+    try {
+      const expiry = Math.floor(Date.now() / 1000) + 60;
+      const payload = `${role}:${expiry}`;
+      const key = await crypto.subtle.importKey(
+        'raw',
+        new TextEncoder().encode(cacheSecret),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign']
+      );
+      const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload + token));
+      const mac = Buffer.from(sig).toString('hex');
+      response.cookies.set('pb_auth_cache', `${role}:${expiry}:${mac}`, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        path: '/',
+        maxAge: 60,
+      });
+    } catch {
+      // Non-critical — cache miss on next request is fine
+    }
+  }
 
-  // Extract role strictly from JWT token payload
-  const jwtRole = token ? extractRoleFromTokenPayload(token) : null;
+  const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
+  let hasValidToken = false;
+  let resolvedRole: AdminRole | 'customer' = 'customer';
+  let servedFromCache = false;
 
-  // Resolve role: strictly derive from JWT payload. Never trust client-controlled cookies. Default to 'read_only' (minimum privilege).
-  const resolvedRole: AdminRole = jwtRole || 'read_only';
+  // Only routes that actually need an auth decision pay the PB round-trip.
+  const needsAuthCheck =
+    pathname === '/account' ||
+    pathname.startsWith('/account/') ||
+    pathname.startsWith('/admin');
+
+  if (needsAuthCheck && token && pbUrl) {
+    // ── Short-lived validation cache (60 s) ───────────────────────────────
+    // The Edge runtime has no shared memory, so we store a HMAC-signed stamp
+    // in a cookie to skip repeated PocketBase calls on fast client navigations.
+    // The stamp is "<tokenHash>.<expiryEpochSeconds>" signed with AUTH_CACHE_SECRET.
+    const cacheSecret = process.env.AUTH_CACHE_SECRET;
+    const cacheStamp = request.cookies.get('pb_auth_cache')?.value;
+
+    if (cacheSecret && cacheStamp) {
+      try {
+        // stamp format: <role>:<expiry>:<hmac>
+        const parts = cacheStamp.split(':');
+        if (parts.length === 3) {
+          const [cachedRole, expiry, mac] = parts;
+          const payload = `${cachedRole}:${expiry}`;
+          const key = await crypto.subtle.importKey(
+            'raw',
+            new TextEncoder().encode(cacheSecret),
+            { name: 'HMAC', hash: 'SHA-256' },
+            false,
+            ['sign']
+          );
+          const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload + token));
+          const expected = Buffer.from(sig).toString('hex');
+          if (expected === mac && Number(expiry) > Date.now() / 1000) {
+            hasValidToken = true;
+            resolvedRole = (ADMIN_ROLES as readonly string[]).includes(cachedRole)
+              ? (cachedRole as AdminRole)
+              : 'customer';
+            servedFromCache = true;
+          }
+        }
+      } catch {
+        // Cache miss / tampered — fall through to live PB check
+      }
+    }
+
+    if (!servedFromCache) {
+      try {
+        // Validate the token cryptographically against the PocketBase server.
+        // AbortSignal.timeout(3000) ensures a slow/unreachable PB degrades to
+        // the fail-secure branch instead of blocking the whole route.
+        const authRefreshRes = await fetch(`${pbUrl}/api/collections/users/auth-refresh`, {
+          method: 'POST',
+          headers: {
+            'Authorization': token,
+          },
+          cache: 'no-store',
+          signal: AbortSignal.timeout(3000),
+        });
+
+        if (authRefreshRes.ok) {
+          const data = await authRefreshRes.json();
+          const record = data.record;
+
+          if (record) {
+            hasValidToken = true;
+            let role = record.role as string | undefined;
+            if (role === 'admin') {
+              role = 'super_admin';
+            }
+
+            if (role && (ADMIN_ROLES as readonly string[]).includes(role)) {
+              resolvedRole = role as AdminRole;
+            } else if (record.isAdmin === true || record.is_admin === true) {
+              resolvedRole = 'super_admin';
+            } else {
+              resolvedRole = 'customer';
+            }
+          }
+        }
+      } catch {
+        // Fail secure - token remains unverified
+      }
+    }
+  }
+
+  const isAdminUser = hasValidToken && (ADMIN_ROLES as readonly string[]).includes(resolvedRole);
 
   // ── Customer account route protection ──────────────────────────────────
-  if (pathname.startsWith('/account')) {
+  if (pathname === '/account' || pathname.startsWith('/account/')) {
     if (!hasValidToken) {
       // Auth is modal-only — send to home page where the modal can be opened
       const homeUrl = new URL('/', request.url);
@@ -148,7 +208,7 @@ export function proxy(request: NextRequest) {
 
   // 1. If trying to access protected admin pages without auth → redirect to login
   if (pathname.startsWith('/admin') && pathname !== '/admin/login') {
-    if (!hasValidToken) {
+    if (!isAdminUser) {
       const loginUrl = new URL('/admin/login', request.url);
       // Save original path to redirect back after login
       loginUrl.searchParams.set('redirect', pathname);
@@ -156,7 +216,7 @@ export function proxy(request: NextRequest) {
     }
 
     // 2. Check role-based access - unconditionally enforce role check
-    if (!hasRouteAccess(pathname, resolvedRole)) {
+    if (!hasRouteAccess(pathname, resolvedRole as AdminRole)) {
       // User is authenticated but doesn't have permission for this route
       const dashboardUrl = new URL('/admin/dashboard', request.url);
       dashboardUrl.searchParams.set('error', 'insufficient_permissions');
@@ -165,16 +225,24 @@ export function proxy(request: NextRequest) {
 
     // 3. Add security headers to admin responses
     const response = NextResponse.next();
+    if (!servedFromCache) await stampCacheOnResponse(response, resolvedRole);
     return addSecurityHeaders(response);
   }
 
   // 4. If already logged in and trying to visit login page → redirect to dashboard
   if (pathname === '/admin/login') {
-    if (hasValidToken) {
+    if (isAdminUser) {
       const dashboardUrl = new URL('/admin/dashboard', request.url);
       return NextResponse.redirect(dashboardUrl);
     }
     return addSecurityHeaders(NextResponse.next());
+  }
+
+  // ── Account route: allow through after successful auth ───────────────────
+  if (hasValidToken && (pathname === '/account' || pathname.startsWith('/account/'))) {
+    const response = NextResponse.next();
+    if (!servedFromCache) await stampCacheOnResponse(response, resolvedRole);
+    return response;
   }
 
   return NextResponse.next();
