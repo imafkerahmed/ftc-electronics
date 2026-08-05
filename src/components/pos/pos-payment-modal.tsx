@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import React, { useState, useEffect, useTransition } from 'react';
 import { X, Banknote, CreditCard, QrCode, Receipt, Printer, CheckCircle2, AlertCircle, User, UserPlus, Search, Phone, Mail, FileText } from 'lucide-react';
 import type { PosCartItem, PosEmployeeSession, PaymentMethod, SalePayload } from '@/types/pos';
-import { createSaleAction, getReceiptPrintPresetsAction, getInvoicePrintPresetsAction, searchPosCustomersAction, createPosCustomerAction } from '@/app/actions/admin';
+import { createSaleAction, getReceiptPrintPresetsAction, getInvoicePrintPresetsAction, searchPosCustomersAction, createPosCustomerAction, sendPosSaleEmailAction } from '@/app/actions/admin';
 import { printReceipt, resolveReceiptConfig } from '@/lib/receipt-print';
 import { printInvoice, resolveInvoiceConfig, type InvoiceData } from '@/lib/invoice-print';
 import { DEFAULT_RECEIPT_CONFIG, normalizeReceiptConfig } from '@/types/receipt-config';
@@ -311,17 +311,24 @@ export default function PosPaymentModal({
 
               <Button
                 variant="outline"
-                onClick={() => {
+                disabled={isPending}
+                onClick={async () => {
+                  if (!completedSaleId) return;
                   const email = prompt("Enter customer email address:");
-                  if (email) {
-                    const orderNo = completedSaleId ? `FTC-POS-${completedSaleId.slice(-6).toUpperCase()}` : '';
-                    const itemsStr = cart.map(i => `• ${i.productName} x${i.quantity} (${fmt(i.lineTotal, currency)})`).join('%0A');
-                    const subject = `Receipt for Order ${orderNo} - FTC Electronics`;
-                    const body = `Thank you for shopping with FTC Electronics!%0A%0AOrder Number: ${orderNo}%0ADate: ${new Date().toLocaleDateString()}%0ATotal Amount: ${fmt(billData.total, currency)}%0A%0AItems Purchased:%0A${itemsStr}%0A%0AWe hope to see you again soon!`;
-                    window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${body}`;
+                  if (!email) return;
+                  
+                  try {
+                    const res = await sendPosSaleEmailAction(completedSaleId, email);
+                    if (res.success) {
+                      alert(`Invoice emailed to ${email} successfully!`);
+                    } else {
+                      alert(res.error || 'Failed to send email.');
+                    }
+                  } catch (err) {
+                    alert('An error occurred while sending the email.');
                   }
                 }}
-                className="h-10 rounded-xl text-xs flex items-center justify-center gap-1.5"
+                className="h-10 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Mail className="h-4 w-4 text-blue-500" />
                 Email

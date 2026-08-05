@@ -201,6 +201,7 @@ export default function AdminHomepageBuilderPage() {
   const [productBrand, setProductBrand] = useState<string>("");
   const [productLimit, setProductLimit] = useState<number>(8);
   const [productRows, setProductRows] = useState<number>(1);
+  const [productMobileRows, setProductMobileRows] = useState<number>(2);
   const [productLayout, setProductLayout] = useState<string>("featured-grid");
   const [productSeeAll, setProductSeeAll] = useState<string>("");
   const [productDescription, setProductDescription] = useState<string>("");
@@ -487,6 +488,7 @@ export default function AdminHomepageBuilderPage() {
       setProductBrand(String(cfg.brand || cfg.value || ""));
       setProductLimit(Number(cfg.limit) || 8);
       setProductRows(Number(cfg.rows) || (Number(cfg.limit) ? Math.ceil(Number(cfg.limit) / 5) : 1));
+      setProductMobileRows(cfg.mobileRows !== undefined ? Number(cfg.mobileRows) : 2);
       setProductLayout(String(cfg.layout || "featured-grid"));
       setProductSeeAll(String(cfg.seeAllLink || ""));
       setProductDescription(String(cfg.description || ""));
@@ -707,6 +709,7 @@ export default function AdminHomepageBuilderPage() {
         category: productSource === "category" ? productCategory : undefined,
         brand: productSource === "brand" ? productBrand : undefined,
         rows: productRows,
+        mobileRows: productMobileRows,
         limit: productLayout === "featured-grid" ? productRows * 5 : productLimit,
         layout: productLayout,
         seeAllLink: productSeeAll || undefined,
@@ -1545,7 +1548,7 @@ export default function AdminHomepageBuilderPage() {
                   )}
 
                   {/* Display Layout & Rows / Count Limit */}
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="space-y-1.5">
                       <label className="text-xs font-semibold text-foreground/80 block">
                         Display Layout
@@ -1564,42 +1567,44 @@ export default function AdminHomepageBuilderPage() {
                       </select>
                     </div>
 
-                    {productLayout === "featured-grid" ? (
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-foreground/80 block">
-                          Number of Grid Rows
-                        </label>
-                        <select
-                          value={productRows}
-                          onChange={(e) => {
-                            const r = Number(e.target.value) || 1;
-                            setProductRows(r);
-                            setProductLimit(r * 5);
-                          }}
-                          className="w-full text-xs p-2.5 rounded-lg border border-input bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                        >
-                          <option value={1}>1 Row (5 Products)</option>
-                          <option value={2}>2 Rows (10 Products)</option>
-                          <option value={3}>3 Rows (15 Products)</option>
-                          <option value={4}>4 Rows (20 Products)</option>
-                        </select>
-                      </div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-foreground/80 block">
-                          Item Count Limit
-                        </label>
-                        <Input
-                          type="number"
-                          min={1}
-                          max={24}
-                          value={productLimit}
-                          onChange={(e) =>
-                            setProductLimit(Number(e.target.value) || 8)
-                          }
-                        />
-                      </div>
-                    )}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-foreground/80 block">
+                        Desktop Grid Rows
+                      </label>
+                      <select
+                        value={productRows}
+                        onChange={(e) => {
+                          const r = Number(e.target.value) || 1;
+                          setProductRows(r);
+                          setProductLimit(r * 5);
+                        }}
+                        className="w-full text-xs p-2.5 rounded-lg border border-input bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      >
+                        <option value={1}>1 Row (5 Products)</option>
+                        <option value={2}>2 Rows (10 Products)</option>
+                        <option value={3}>3 Rows (15 Products)</option>
+                        <option value={4}>4 Rows (20 Products)</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-foreground/80 block">
+                        📱 Mobile Grid Rows
+                      </label>
+                      <select
+                        value={productMobileRows}
+                        onChange={(e) =>
+                          setProductMobileRows(Number(e.target.value))
+                        }
+                        className="w-full text-xs p-2.5 rounded-lg border border-input bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      >
+                        <option value={1}>1 Row (2 Products on Mobile)</option>
+                        <option value={2}>2 Rows (4 Products on Mobile)</option>
+                        <option value={3}>3 Rows (6 Products on Mobile)</option>
+                        <option value={4}>4 Rows (8 Products on Mobile)</option>
+                        <option value={0}>Show All Products on Mobile</option>
+                      </select>
+                    </div>
                   </div>
 
                   {/* Description Input */}

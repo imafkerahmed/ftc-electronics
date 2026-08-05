@@ -71,20 +71,16 @@ export default function Footer() {
             </p>
           </div>
 
-          {/* Social icons + Back to top */}
+          {/* Social icons + Digital Card link + Back to top */}
           <div className="flex items-center gap-3">
-            {socialLinks.map((s) => (
-              <a
-                key={s.label}
-                href={s.href}
-                aria-label={s.label}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="h-9 w-9 rounded-xl border border-white/8 bg-white/4 hover:bg-white/10 hover:border-white/15 flex items-center justify-center transition-all duration-250 hover:scale-105 text-neutral-400 hover:text-white"
-              >
-                {s.icon}
-              </a>
-            ))}
+            <Link
+              href="/connect"
+              className="h-9 px-3.5 rounded-xl border border-blue-500/20 bg-blue-500/10 hover:bg-blue-500/20 text-xs font-semibold text-blue-400 hover:text-white flex items-center gap-1.5 transition-all duration-250 hover:scale-105"
+              title="Digital Visiting Card & QR Link Hub"
+            >
+              <Share2 className="h-3.5 w-3.5 text-blue-400" />
+              <span>Digital Card</span>
+            </Link>
             <div className="w-px h-6 bg-white/8 mx-1" />
             <button
               onClick={scrollToTop}

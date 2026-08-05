@@ -17,6 +17,7 @@ const ROUTE_PERMISSIONS: Record<string, AdminRole[]> = {
   '/admin/categories': ['super_admin', 'admin', 'store_manager', 'content_editor'],
   '/admin/brands': ['super_admin', 'admin', 'store_manager', 'content_editor'],
   '/admin/homepage': ['super_admin', 'admin', 'store_manager', 'content_editor'],
+  '/admin/announcements': ['super_admin', 'admin', 'store_manager', 'content_editor'],
   '/admin/reviews': ['super_admin', 'admin', 'store_manager', 'content_editor', 'support_staff'],
   '/admin/media': ['super_admin', 'admin', 'store_manager', 'content_editor'],
   // Dashboard, inventory, sales, quotations are accessible by all authenticated admins

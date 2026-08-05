@@ -266,9 +266,15 @@ export default function PosScanTerminal({
       const res = await fetch(
         `/api/pos/scan?q=${encodeURIComponent(q.trim())}`,
       );
+      if (!res.ok) {
+        event.status = "error";
+        setScanLog((prev) => [event, ...prev]);
+        flashFeedback("error");
+        return;
+      }
       const data = await res.json();
 
-      if (res.ok && data.success && data.data) {
+      if (data.success && data.data) {
         const item = data.data;
         const uniqueKey = item.unitBarcode
           ? `${item.productId}-${item.unitBarcode}`
@@ -544,6 +550,7 @@ export default function PosScanTerminal({
                     hour: "2-digit",
                     minute: "2-digit",
                     second: "2-digit",
+                    timeZone: "Asia/Colombo",
                   })}
                 </span>
               </div>

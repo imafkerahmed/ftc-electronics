@@ -3,6 +3,7 @@ import Footer from '@/components/layout/footer';
 import MobileNav from '@/components/layout/mobile-nav';
 import CartDropdown from '@/components/cart/cart-dropdown';
 import WhatsAppButton from '@/components/ui/whatsapp-button';
+import AnnouncementModal from '@/components/layout/announcement-modal';
 
 export default function StoreLayout({
   children,
@@ -17,6 +18,9 @@ export default function StoreLayout({
 
       {/* Navigation Header */}
       <Navbar />
+
+      {/* Announcement Popup Ad Overlay */}
+      <AnnouncementModal />
 
       {/* Main Page Area */}
       <main className="flex-grow relative z-10">{children}</main>

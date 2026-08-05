@@ -18,6 +18,8 @@ import Link from "next/link";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { validatePosCouponAction } from "@/app/actions/admin";
 
+const POS_CART_STORAGE_KEY = 'ftc_pos_cart_v1';
+
 function calcLineTotal(item: Omit<PosCartItem, "lineTotal">) {
   return (item.unitPrice - item.itemDiscount) * item.quantity;
 }
@@ -47,10 +49,18 @@ export default function PosPage() {
   const [couponSuccess, setCouponSuccess] = useState("");
   const [couponError, setCouponError] = useState("");
 
-  const POS_CART_STORAGE_KEY = 'ftc_pos_cart_state_v1';
+  const [currentDate, setCurrentDate] = useState("");
 
   // Hydrate session & cart state from storage on mount
   useEffect(() => {
+    setCurrentDate(
+      new Date().toLocaleDateString("en-LK", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })
+    );
     const s = getPosSession();
     if (isPosSessionValid(s)) setSession(s);
     setSessionChecked(true);
@@ -316,12 +326,7 @@ export default function PosPage() {
             </span>
           </Link>
           <span className="text-xs text-muted-foreground font-mono hidden md:inline ml-1">
-            {new Date().toLocaleDateString("en-LK", {
-              weekday: "short",
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-            })}
+            {currentDate}
           </span>
         </div>
 

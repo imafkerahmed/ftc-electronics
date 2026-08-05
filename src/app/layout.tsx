@@ -4,6 +4,7 @@ import "./globals.css";
 import { cn } from "@/lib/utils";
 import { LenisProvider } from "@/components/layout/lenis-provider";
 import { SiteBrandingProvider } from "@/components/providers/site-branding-provider";
+import { FramerMotionConfigProvider } from "@/components/providers/framer-motion-config-provider";
 
 const inter = Inter({subsets:['latin'],variable:'--font-sans'});
 
@@ -20,9 +21,6 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "FTC Electronics | Premium Electronics & Authorized Reseller",
   description: "Official online store for FTC Electronics.",
-  icons: {
-    icon: "/favicon.ico",
-  },
 };
 
 export default function RootLayout({
@@ -37,9 +35,11 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <SiteBrandingProvider>
-          <LenisProvider>
-            {children}
-          </LenisProvider>
+          <FramerMotionConfigProvider>
+            <LenisProvider>
+              {children}
+            </LenisProvider>
+          </FramerMotionConfigProvider>
         </SiteBrandingProvider>
       </body>
     </html>

@@ -18,6 +18,7 @@ export interface Product {
   description: string;
   price: number;
   discountPrice?: number;
+  wholesalePrice?: number;
   images: string[];
   category: string;
   brand: string;

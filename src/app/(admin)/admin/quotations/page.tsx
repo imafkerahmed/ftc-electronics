@@ -25,6 +25,8 @@ import {
   Percent,
   Check,
   UserPlus,
+  Mail,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,11 +38,14 @@ import {
   getWholesaleDealersAction,
   searchPosCustomersAction,
   getInvoicePrintPresetsAction,
+  sendQuotationEmailAction,
 } from '@/app/actions/admin';
 import { DEFAULT_INVOICE_CONFIG, normalizeInvoiceConfig } from '@/types/invoice-config';
 import { printInvoice, resolveInvoiceConfig, type InvoiceData, type InvoiceItem } from '@/lib/invoice-print';
 import type { PBWholesaleDealer, PBQuotation } from '@/types/admin';
 import type { PaymentMethod } from '@/types/pos';
+import type { Product } from '@/types/product';
+import { pbProducts } from '@/lib/pb-collections';
 
 interface CustomerOption {
   id: string;
@@ -118,20 +123,28 @@ export default function AdminQuotationsPage() {
   const [lineItems, setLineItems] = useState<InvoiceItem[]>([
     { name: '', qty: 1, unitPrice: 0, discount: 0 },
   ]);
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [focusedLineItemIndex, setFocusedLineItemIndex] = useState<number | null>(null);
 
   // Convert to Sale Modal State
   const [convertingQuote, setConvertingQuote] = useState<Quotation | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [convertedSale, setConvertedSale] = useState<{ saleId: string; receiptNumber?: string } | null>(null);
+  const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
 
   // Load Quotations, Dealers, and Customers
   const loadInitialData = async () => {
     setLoading(true);
-    const [qRes, dRes, cRes] = await Promise.all([
+    const [qRes, dRes, cRes, pRes] = await Promise.all([
       getQuotationsAction(),
       getWholesaleDealersAction(),
       searchPosCustomersAction(''),
+      pbProducts.getAll({ perPage: 300, status: 'published' }).catch(() => ({ items: [] })),
     ]);
+
+    if (pRes && pRes.items) {
+      setAllProducts(pRes.items);
+    }
 
     if (qRes.success && qRes.data) {
       const formatted = (qRes.data as PBQuotation[]).map((q) => ({
@@ -330,7 +343,7 @@ export default function AdminQuotationsPage() {
         discount_amount: calculateTotalDiscount(),
         total_amount: calculateTotal(),
         valid_until: expiryDateISO,
-        status: editingQuote ? editingQuote.status : ('sent' as const),
+        status: editingQuote ? editingQuote.status : ('draft' as const),
         notes: notes.trim(),
         createDealerIfNew: createIfNew && quoteType === 'wholesale',
         createCustomerIfNew: createIfNew && quoteType === 'direct',
@@ -429,6 +442,24 @@ export default function AdminQuotationsPage() {
     };
 
     printInvoice(cfg, invoiceData, `Paid Invoice — ${quote.quoteNumber}`);
+  };
+
+  const handleSendEmail = (quote: Quotation) => {
+    if (!quote.customerEmail) {
+      showToast('No customer email configured for this quotation.', 'error');
+      return;
+    }
+    setSendingEmailId(quote.id);
+    startTransition(async () => {
+      const res = await sendQuotationEmailAction(quote.id);
+      if (res.success) {
+        showToast(`Quotation emailed to ${quote.customerEmail} successfully!`);
+        void loadInitialData();
+      } else {
+        showToast(res.error || 'Failed to send email.', 'error');
+      }
+      setSendingEmailId(null);
+    });
   };
 
   const filteredQuotations = quotations.filter((q) => {
@@ -682,6 +713,24 @@ export default function AdminQuotationsPage() {
                             title="Turn quotation into Paid Sale"
                           >
                             <ArrowRightCircle className="h-3.5 w-3.5" /> Convert to Sale
+                          </Button>
+                        )}
+
+                        {quote.status !== 'accepted' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleSendEmail(quote)}
+                            disabled={sendingEmailId === quote.id || isPending || !quote.customerEmail}
+                            className="h-8 text-[11px] font-bold gap-1 text-blue-500 border-blue-500/30 hover:bg-blue-500/10 rounded-lg disabled:opacity-40 disabled:hover:bg-transparent cursor-pointer"
+                            title={quote.customerEmail ? "Send quotation via email to customer" : "Customer email not configured"}
+                          >
+                            {sendingEmailId === quote.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Mail className="h-3 w-3" />
+                            )}
+                            {quote.status === 'sent' ? 'Resend' : 'Email'}
                           </Button>
                         )}
 
@@ -976,24 +1025,70 @@ export default function AdminQuotationsPage() {
                       key={idx}
                       className="grid grid-cols-12 gap-2 items-center bg-muted/20 p-2.5 rounded-xl border border-border"
                     >
-                      <div className="col-span-4">
+                      <div className="col-span-5 relative">
                         <Input
                           placeholder="Product name or description"
                           value={item.name}
                           onChange={(e) => handleUpdateLineItem(idx, 'name', e.target.value)}
+                          onFocus={() => setFocusedLineItemIndex(idx)}
+                          onBlur={() => setTimeout(() => setFocusedLineItemIndex(null), 250)}
                           className="text-xs bg-background"
                           required
                         />
+                        {focusedLineItemIndex === idx && item.name.trim().length >= 1 && (
+                          (() => {
+                            const term = item.name.toLowerCase();
+                            const suggestions = allProducts.filter(
+                              (p) =>
+                                p.name.toLowerCase().includes(term) ||
+                                (p.slug && p.slug.toLowerCase().includes(term))
+                            );
+                            if (suggestions.length === 0) return null;
+                            return (
+                              <div className="absolute left-0 top-full mt-1 w-[160%] min-w-[320px] max-w-[500px] bg-popover border border-border rounded-xl shadow-xl max-h-56 overflow-y-auto z-50 p-1 divide-y divide-border/40">
+                                {suggestions.map((prod) => (
+                                  <button
+                                    type="button"
+                                    key={prod.id}
+                                    onMouseDown={(e) => {
+                                      // Prevent blur from closing the dropdown before click registers
+                                      e.preventDefault();
+                                      const retailPrice = prod.discountPrice || prod.price;
+                                      const resolvedPrice =
+                                        quoteType === 'wholesale' && prod.wholesalePrice
+                                          ? prod.wholesalePrice
+                                          : retailPrice;
+
+                                      handleUpdateLineItem(idx, 'name', prod.name);
+                                      handleUpdateLineItem(idx, 'unitPrice', resolvedPrice);
+                                      setFocusedLineItemIndex(null);
+                                    }}
+                                    className="w-full text-left px-3 py-2 text-[11px] hover:bg-muted/70 transition-colors flex justify-between items-center rounded-lg cursor-pointer"
+                                  >
+                                    <span className="font-semibold text-foreground truncate mr-2">{prod.name}</span>
+                                    <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+                                      {quoteType === 'wholesale' && prod.wholesalePrice ? (
+                                        <span className="text-amber-500 font-bold">WS: {fmt(prod.wholesalePrice)}</span>
+                                      ) : (
+                                        <span>RT: {fmt(prod.discountPrice || prod.price)}</span>
+                                      )}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            );
+                          })()
+                        )}
                       </div>
 
-                      <div className="col-span-2">
+                      <div className="col-span-1">
                         <Input
                           type="number"
                           min="1"
                           placeholder="Qty"
                           value={item.qty}
                           onChange={(e) => handleUpdateLineItem(idx, 'qty', parseInt(e.target.value) || 1)}
-                          className="text-xs bg-background text-center font-bold"
+                          className="text-xs bg-background text-center font-bold px-1"
                           required
                         />
                       </div>

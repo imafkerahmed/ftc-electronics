@@ -47,16 +47,13 @@ function safeImageUrl(url?: string): string | undefined {
   return /^(https?:|data:image\/)/i.test(trimmed) ? trimmed : undefined;
 }
 
-export function printReceipt(
+export function getReceiptHtml(
   rawCfg: ReceiptPrintConfig,
   data: ReceiptData,
+  isPreview = false,
   title = 'Order Receipt'
-) {
+): string {
   const cfg = normalizeReceiptConfig(rawCfg);
-
-  const printWindow = window.open('', '_blank');
-  if (!printWindow) return;
-
   const isThermal = cfg.paperWidthMm <= 100;
   const currency = 'Rs.';
   const logoSrc = safeImageUrl(data.logoUrl || cfg.logoUrl);
@@ -79,7 +76,7 @@ export function printReceipt(
     })
     .join('');
 
-  printWindow.document.write(`
+  return `
     <!DOCTYPE html>
     <html>
       <head>
@@ -96,7 +93,7 @@ export function printReceipt(
             font-size: ${cfg.fontSizeMm}mm;
             line-height: 1.3;
             color: #000;
-            background: #fff;
+            background: ${isPreview ? 'transparent' : '#fff'};
             width: ${cfg.paperWidthMm}mm;
             padding: ${isThermal ? '4mm 3mm' : '10mm 15mm'};
             margin: 0 auto;
@@ -156,9 +153,9 @@ export function printReceipt(
           <thead>
             <tr>
               <th>Item</th>
-              <th className="num">Qty</th>
-              <th className="num">Price</th>
-              <th className="num">Total</th>
+              <th class="num">Qty</th>
+              <th class="num">Price</th>
+              <th class="num">Total</th>
             </tr>
           </thead>
           <tbody>${itemsHtml}</tbody>
@@ -198,12 +195,26 @@ export function printReceipt(
                   } catch(e) {}`
                 : ''
             }
-            setTimeout(function() { window.print(); }, 600);
+            ${isPreview ? '' : 'setTimeout(function() { window.print(); }, 600);'}
           };
         <\/script>
       </body>
     </html>
-  `);
+  `;
+}
+
+export function printReceipt(
+  rawCfg: ReceiptPrintConfig,
+  data: ReceiptData,
+  title = 'Order Receipt'
+) {
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) return;
+
+  const html = getReceiptHtml(rawCfg, data, false, title);
+  const parser = new DOMParser();
+  const parsedDoc = parser.parseFromString(html, 'text/html');
+  printWindow.document.replaceChild(parsedDoc.documentElement, printWindow.document.documentElement);
   printWindow.document.close();
 }
 

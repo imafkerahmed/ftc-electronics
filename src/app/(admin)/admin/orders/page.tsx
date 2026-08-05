@@ -3,12 +3,12 @@
 import React, { useState, useEffect, useTransition } from 'react';
 import { Button } from '@/components/ui/button';
 import { pbOrders } from '@/lib/pb-collections';
-import { updateOrderStatusAction, getReceiptPrintPresetsAction, getInvoicePrintPresetsAction } from '@/app/actions/admin';
+import { updateOrderStatusAction, getReceiptPrintPresetsAction, getInvoicePrintPresetsAction, sendOrderInvoiceEmailAction } from '@/app/actions/admin';
 import { DEFAULT_RECEIPT_CONFIG, normalizeReceiptConfig, type ReceiptPrintConfig } from '@/types/receipt-config';
 import { DEFAULT_INVOICE_CONFIG, normalizeInvoiceConfig } from '@/types/invoice-config';
 import { printReceipt } from '@/lib/receipt-print';
 import { printInvoice, resolveInvoiceConfig, type InvoiceData } from '@/lib/invoice-print';
-import { Loader2, CheckCircle, AlertCircle, ShoppingBag, Printer, FileText } from 'lucide-react';
+import { Loader2, CheckCircle, AlertCircle, ShoppingBag, Printer, FileText, Mail } from 'lucide-react';
 
 interface Order {
   id: string;
@@ -33,6 +33,7 @@ export default function AdminOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [defaultReceiptConfig, setDefaultReceiptConfig] = useState<ReceiptPrintConfig>(DEFAULT_RECEIPT_CONFIG);
 
@@ -86,6 +87,25 @@ export default function AdminOrdersPage() {
       } else {
         setError(res.error || 'Failed to ship order.');
       }
+    });
+  };
+
+  const handleSendEmail = (order: Order) => {
+    setError(null);
+    setSuccess(null);
+    if (!order.email || order.email === 'guest@example.com') {
+      setError('No customer email configured for this order.');
+      return;
+    }
+    setSendingEmailId(order.id);
+    startTransition(async () => {
+      const res = await sendOrderInvoiceEmailAction(order.id);
+      if (res.success) {
+        setSuccess(`Invoice emailed to ${order.email} successfully!`);
+      } else {
+        setError(res.error || 'Failed to send invoice email.');
+      }
+      setSendingEmailId(null);
     });
   };
 
@@ -215,6 +235,21 @@ export default function AdminOrdersPage() {
                           title="Print Paid Invoice"
                         >
                           <FileText className="h-3 w-3" /> Invoice
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleSendEmail(order)}
+                          disabled={sendingEmailId === order.id || isPending || !order.email || order.email === 'guest@example.com'}
+                          className="h-8 text-[11px] font-semibold flex items-center gap-1 cursor-pointer border-border hover:bg-muted text-blue-400 border-blue-500/30 disabled:opacity-40"
+                          title={order.email && order.email !== 'guest@example.com' ? "Send tax invoice via email to customer" : "Customer email not configured"}
+                        >
+                          {sendingEmailId === order.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Mail className="h-3 w-3" />
+                          )}
+                          Email
                         </Button>
                         <Button
                           size="sm"

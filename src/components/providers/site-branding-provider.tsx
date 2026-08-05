@@ -70,14 +70,16 @@ export function SiteBrandingProvider({ children }: { children: React.ReactNode }
         // Dynamically update browser tab favicon and title if custom favicon is set
         if (typeof window !== 'undefined') {
           if (faviconUrl) {
-            let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
-            if (!link) {
-              link = document.createElement('link');
+            const links = document.querySelectorAll<HTMLLinkElement>("link[rel*='icon']");
+            if (links.length > 0) {
+              links.forEach((l) => (l.href = faviconUrl));
+            } else {
+              const link = document.createElement('link');
               link.type = 'image/x-icon';
               link.rel = 'shortcut icon';
+              link.href = faviconUrl;
               document.getElementsByTagName('head')[0].appendChild(link);
             }
-            link.href = faviconUrl;
           }
           if (siteName && siteName !== 'FTC Electronics') {
             document.title = `${siteName} | ${tagline}`;

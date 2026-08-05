@@ -179,12 +179,12 @@ export default function EmployeeLockScreen({ onUnlock }: EmployeeLockScreenProps
 
               {/* Numeric keypad styled like admin buttons */}
               <div className="grid grid-cols-3 gap-2.5">
-                {['1','2','3','4','5','6','7','8','9','','0','⌫'].map((k, i) => (
-                  k === '' ? (
-                    <div key={i} />
-                  ) : k === '⌫' ? (
+                {['1','2','3','4','5','6','7','8','9','empty','0','backspace'].map((k) => (
+                  k === 'empty' ? (
+                    <div key="empty" />
+                  ) : k === 'backspace' ? (
                     <button
-                      key={i}
+                      key="backspace"
                       type="button"
                       onClick={handleBackspace}
                       className="h-12 rounded-xl bg-muted/50 hover:bg-muted border border-border flex items-center justify-center text-foreground transition-all cursor-pointer active:scale-95"
@@ -193,7 +193,7 @@ export default function EmployeeLockScreen({ onUnlock }: EmployeeLockScreenProps
                     </button>
                   ) : (
                     <button
-                      key={i}
+                      key={`num-${k}`}
                       type="button"
                       onClick={() => handlePinDigit(k)}
                       className="h-12 rounded-xl bg-background/80 hover:bg-blue-500/10 hover:border-blue-500/40 border border-border text-foreground font-bold text-lg flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-xs"

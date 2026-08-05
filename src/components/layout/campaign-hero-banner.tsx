@@ -36,6 +36,7 @@ interface HeroSlide {
   accentColor: string;
   imageSrc: string;
   imageAlt: string;
+  imageScale?: number;
 }
 
 // DB record type (matching PBHeroBanner shape from PocketBase)
@@ -55,6 +56,7 @@ interface DBHeroBanner {
   image?: string;
   imageUrl?: string;
   imageAlt?: string;
+  imageScale?: number;
   sortOrder: number;
   isEnabled: boolean;
 }
@@ -73,6 +75,7 @@ function dbBannerToSlide(banner: DBHeroBanner, index: number): HeroSlide {
     accentColor: banner.accentColor ?? accentDefaults[index % accentDefaults.length],
     imageSrc: banner.imageUrl ?? "",
     imageAlt: banner.imageAlt ?? banner.titleHighlight,
+    imageScale: banner.imageScale,
   };
 }
 
@@ -213,7 +216,7 @@ export default function CampaignHeroBanner({
 
   return (
     <section
-      className="relative isolate overflow-hidden border-b border-slate-200/80 bg-gradient-to-b from-slate-100/90 via-slate-50/70 to-slate-100/90 dark:from-neutral-950 dark:via-neutral-900 dark:to-neutral-950"
+      className="relative isolate overflow-hidden border-b border-slate-200/80 bg-gradient-to-b from-slate-100/90 via-slate-50/70 to-slate-100/90 dark:from-neutral-950 dark:via-neutral-900 dark:to-neutral-950 pt-14 sm:pt-16 lg:pt-18"
       aria-label="Campaign Promotion Banner"
       onMouseEnter={() => setIsPlaying(false)}
       onMouseLeave={() => setIsPlaying(true)}
@@ -229,7 +232,7 @@ export default function CampaignHeroBanner({
         />
       </div>
 
-      <div className="relative mx-auto flex min-h-[460px] w-full max-w-7xl items-center px-6 py-10 sm:min-h-[500px] sm:py-14 lg:px-12 lg:py-16">
+      <div className="relative mx-auto flex min-h-0 sm:min-h-[320px] lg:min-h-[350px] w-full max-w-7xl items-center px-4 pt-3 pb-12 sm:px-8 sm:pt-6 sm:pb-12 lg:px-12 lg:pt-6 lg:pb-12">
         <AnimatePresence initial={false} custom={direction} mode="wait">
           <motion.div
             key={currentIndex}
@@ -238,10 +241,11 @@ export default function CampaignHeroBanner({
             initial="enter"
             animate="center"
             exit="exit"
-            className="grid w-full items-center gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:gap-14"
+            className="grid w-full items-center gap-2.5 sm:gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:gap-10"
           >
-            <div className="max-w-2xl">
-              <h1 className="max-w-xl text-4xl font-black leading-[0.94] tracking-[-0.05em] text-neutral-950 dark:text-neutral-50 sm:text-5xl lg:text-6xl">
+            {/* Text Content - Order 2 on Mobile, Order 1 on Desktop */}
+            <div className="max-w-2xl order-2 lg:order-1">
+              <h1 className="max-w-xl text-2xl sm:text-4xl lg:text-5xl font-black leading-tight sm:leading-[0.96] tracking-[-0.03em] sm:tracking-[-0.04em] text-neutral-950 dark:text-neutral-50">
                 <span className="block whitespace-pre-line">
                   {activeSlide.titlePrefix}
                 </span>
@@ -250,39 +254,43 @@ export default function CampaignHeroBanner({
                 </span>
               </h1>
 
-              <p className="mt-5 max-w-xl text-base leading-7 text-neutral-600 dark:text-neutral-400 sm:text-lg font-medium">
+              <p className="mt-1.5 sm:mt-3 max-w-xl text-xs sm:text-base leading-relaxed text-neutral-600 dark:text-neutral-400 font-medium line-clamp-2 sm:line-clamp-none">
                 {activeSlide.description}
               </p>
 
-              <div className="mt-8 flex flex-wrap items-center gap-3">
+              <div className="mt-3 sm:mt-5 flex flex-wrap items-center gap-2 sm:gap-3">
                 <Link
                   href={activeSlide.link}
-                  className="inline-flex items-center gap-2 rounded-full bg-neutral-950 dark:bg-white px-6 py-3.5 text-sm font-bold text-white dark:text-neutral-950 shadow-md transition-transform duration-200 hover:-translate-y-0.5"
+                  className="inline-flex items-center gap-1.5 sm:gap-2 rounded-full bg-neutral-950 dark:bg-white px-4 sm:px-5 py-2 sm:py-2.5 text-xs sm:text-sm font-bold text-white dark:text-neutral-950 shadow-md transition-transform duration-200 hover:-translate-y-0.5"
                 >
                   {activeSlide.ctaText}
-                  <ArrowRight className="h-4 w-4" />
+                  <ArrowRight className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </Link>
 
                 {activeSlide.ctaSecondary && activeSlide.secondaryLink && (
                   <Link
                     href={activeSlide.secondaryLink}
-                    className="inline-flex items-center gap-2 rounded-full border border-neutral-300 dark:border-neutral-700 bg-white/90 dark:bg-neutral-900/90 px-6 py-3.5 text-sm font-bold text-neutral-700 dark:text-neutral-200 shadow-xs transition-colors duration-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    className="inline-flex items-center gap-1.5 sm:gap-2 rounded-full border border-neutral-300 dark:border-neutral-700 bg-white/90 dark:bg-neutral-900/90 px-4 sm:px-5 py-2 sm:py-2.5 text-xs sm:text-sm font-bold text-neutral-700 dark:text-neutral-200 shadow-xs transition-colors duration-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   >
                     {activeSlide.ctaSecondary}
-                    <ArrowRight className="h-4 w-4" />
+                    <ArrowRight className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                   </Link>
                 )}
               </div>
             </div>
 
-            <div className="relative flex justify-center lg:justify-end">
-              <div className="relative w-full max-w-[540px] aspect-[4/3] flex items-center justify-center">
+            {/* Brand Logo Image - Order 1 on Mobile (at the top), Order 2 on Desktop */}
+            <div className="relative flex justify-center lg:justify-end order-1 lg:order-2">
+              <div className="relative w-full max-w-[260px] sm:max-w-[420px] h-[120px] sm:h-[200px] lg:h-[230px] flex items-center justify-center overflow-hidden">
                 {activeSlide.imageSrc && (
                   <Image
                     src={activeSlide.imageSrc}
                     alt={activeSlide.imageAlt}
                     fill
                     className="object-contain p-2 mix-blend-multiply dark:mix-blend-screen transition-transform duration-500 hover:scale-105"
+                    style={{
+                      transform: activeSlide.imageScale ? `scale(${activeSlide.imageScale})` : undefined
+                    }}
                     priority={currentIndex === 0}
                     sizes="(max-width: 1024px) 100vw, 540px"
                   />
@@ -311,7 +319,7 @@ export default function CampaignHeroBanner({
         <ChevronRight className="h-5 w-5" />
       </button>
 
-      <div className="absolute bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full bg-white/90 px-3 py-2 shadow-sm">
+      <div className="absolute bottom-3 sm:bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full bg-white/90 dark:bg-neutral-900/90 px-3 py-1.5 sm:py-2 shadow-sm border border-neutral-200/60 dark:border-neutral-800/60">
         {slides.map((slide, index) => {
           const isActive = index === currentIndex;
           return (

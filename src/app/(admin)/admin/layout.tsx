@@ -58,6 +58,7 @@ const NAV_ITEMS: NavItem[] = [
   { name: 'Customers', href: '/admin/customers', icon: Users },
   { name: 'Reviews', href: '/admin/reviews', icon: Star },
   { name: 'Promotions', href: '/admin/promotions', icon: Tag },
+  { name: 'Announcements', href: '/admin/announcements', icon: Megaphone },
   { name: 'Homepage Builder', href: '/admin/homepage', icon: LayoutTemplate },
   { name: 'Media Library', href: '/admin/media', icon: ImageIcon },
   { name: 'Audit Log', href: '/admin/audit-log', icon: ScrollText },

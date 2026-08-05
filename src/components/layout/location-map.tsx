@@ -139,6 +139,7 @@ export default function LocationMap({ settings }: LocationMapProps) {
               <div className="absolute -inset-[2px] rounded-[18px] bg-gradient-to-r from-blue-500/30 via-indigo-500/20 to-cyan-500/20 group-hover:from-blue-500/50 group-hover:to-cyan-500/40 transition-all duration-700 pointer-events-none z-20" />
               <div className="absolute inset-0 rounded-2xl border border-white/5 z-20 pointer-events-none" />
               <iframe
+                title="Store Location Map"
                 src={iframeSrc}
                 width="100%"
                 height="100%"
@@ -146,6 +147,7 @@ export default function LocationMap({ settings }: LocationMapProps) {
                 allowFullScreen={true}
                 loading="lazy"
                 referrerPolicy="no-referrer-when-downgrade"
+                sandbox="allow-scripts allow-popups"
                 className="w-full h-full relative z-10 invert-[90%] hue-rotate-180 brightness-[85%] contrast-[100%]"
               />
             </div>

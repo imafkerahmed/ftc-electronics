@@ -6,6 +6,10 @@ interface ProductJsonLdProps {
   url: string;
 }
 
+function safeJsonLd(obj: any): string {
+  return JSON.stringify(obj).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+}
+
 export function ProductJsonLd({ product, url }: ProductJsonLdProps) {
   const activePrice = product.discountPrice || product.price;
   const inStock = product.countInStock > 0;
@@ -50,7 +54,7 @@ export function ProductJsonLd({ product, url }: ProductJsonLdProps) {
   return (
     <script
       type="application/ld+json"
-      dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }}
+      dangerouslySetInnerHTML={{ __html: safeJsonLd(schema) }}
     />
   );
 }
@@ -79,7 +83,7 @@ export function BreadcrumbJsonLd({ items }: BreadcrumbJsonLdProps) {
   return (
     <script
       type="application/ld+json"
-      dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }}
+      dangerouslySetInnerHTML={{ __html: safeJsonLd(schema) }}
     />
   );
 }
@@ -109,7 +113,7 @@ export function OrganizationJsonLd() {
   return (
     <script
       type="application/ld+json"
-      dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }}
+      dangerouslySetInnerHTML={{ __html: safeJsonLd(schema) }}
     />
   );
 }

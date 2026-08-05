@@ -142,13 +142,8 @@ export default async function StoreHomePage() {
     .map((b: any) => ({
       name: b.name,
       src: `${pbUrl}/api/files/${b.collectionId}/${b.id}/${b.logo}`,
-      width:
-        b.name === "Samsung" || b.name === "Anker" || b.name === "Ugreen"
-          ? 95
-          : b.name === "Wiwu"
-            ? 85
-            : 32,
-      height: 32,
+      width: 110,
+      height: 44,
     }));
 
   return (
@@ -168,7 +163,8 @@ export default async function StoreHomePage() {
             let products: any[] = [];
             if (block.type === "product-carousel") {
               const source = block.config?.source || "newest";
-              const limit = parseInt(block.config?.limit) || 8;
+              const configuredRows = block.config?.rows ? Number(block.config.rows) : undefined;
+              const limit = configuredRows ? configuredRows * 5 : (parseInt(block.config?.limit) || 8);
 
               try {
                 if (source === "on-sale") {
@@ -226,12 +222,16 @@ export default async function StoreHomePage() {
                   }
                 }
 
-                // Global fallback if specific query returned no items
-                if (!products || products.length === 0) {
+                // If specific query returned fewer items than requested limit, supplement with all products
+                if (!products || products.length < limit) {
                   const fallbackRes = await pbProducts
                     .getAll({ perPage: limit })
                     .catch(() => ({ items: [] }));
-                  products = fallbackRes.items || [];
+                  const existingIds = new Set((products || []).map((p: any) => p.id));
+                  const extraItems = (fallbackRes.items || []).filter(
+                    (p: any) => !existingIds.has(p.id),
+                  );
+                  products = [...(products || []), ...extraItems].slice(0, limit);
                 }
               } catch (err) {
                 console.error(
@@ -280,6 +280,7 @@ export default async function StoreHomePage() {
                          products={products}
                          seeAllLink={seeAllLink}
                          rows={block.config?.rows}
+                         mobileRows={block.config?.mobileRows ?? 2}
                          limit={block.config?.limit}
                          description={block.config?.description}
                          brandLogo={brandLogoUrl}

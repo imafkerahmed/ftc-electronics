@@ -74,7 +74,13 @@ const ACTION_RATE_LIMITS: Record<string, RateLimitConfig> = {
 
 const DEFAULT_RATE_LIMIT: RateLimitConfig = { maxAttempts: 5, windowMs: 15 * 60 * 1000 };
 
-const rateLimitStore = new Map<string, { count: number; lastAttempt: number; action: string }>();
+const globalForAuthStores = globalThis as unknown as {
+  __rateLimitStore?: Map<string, { count: number; lastAttempt: number; action: string }>;
+  __memoryTokenStore?: Map<string, ResetTokenRecord>;
+};
+
+const rateLimitStore = globalForAuthStores.__rateLimitStore ??= new Map<string, { count: number; lastAttempt: number; action: string }>();
+const memoryTokenStore = globalForAuthStores.__memoryTokenStore ??= new Map<string, ResetTokenRecord>();
 
 function cleanupExpiredRateLimits(): void {
   const now = Date.now();
@@ -196,8 +202,6 @@ interface ResetTokenRecord {
   expiresAt: number;
   used: boolean;
 }
-
-const memoryTokenStore = new Map<string, ResetTokenRecord>();
 
 function cleanupExpiredTokens(): void {
   const now = Date.now();
@@ -437,10 +441,16 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
   return { success: false, error: 'Invalid email or password.' };
 }
 
+async function checkUserAuth() {
+  const cookieStore = await cookies();
+  return cookieStore.get('pb_auth_token')?.value;
+}
+
 /**
  * Establishes a server session cookie after a successful client OAuth2 authentication flow.
  */
 export async function setOAuthSessionAction(token: string): Promise<AuthActionResult> {
+  await checkUserAuth();
   if (!token) {
     return { success: false, error: 'OAuth token is required.' };
   }
@@ -987,6 +997,7 @@ export async function resetPasswordAction(formData: FormData): Promise<AuthActio
  * Clears all auth cookies and writes audit log.
  */
 export async function logoutAction(): Promise<{ success: boolean }> {
+  await checkUserAuth();
   const cookieStore = await cookies();
   const headersList = await headers();
 
@@ -1092,6 +1103,7 @@ export async function updateUserProfilePageAction(data: {
   phone?: string;
   address?: string;
 }): Promise<{ success: boolean; error?: string }> {
+  await checkUserAuth();
   try {
     const cookieStore = await cookies();
     const token = cookieStore.get('pb_auth_token')?.value;

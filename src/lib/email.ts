@@ -219,3 +219,347 @@ export async function sendOtpEmail({ to, code, expiresMinutes = 10 }: SendOtpEma
     prodErrorMessage: 'Failed to send OTP email.',
   });
 }
+
+interface SendQuotationEmailParams {
+  to: string;
+  quoteNumber: string;
+  customerName: string;
+  customerCompany?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  items: Array<{ name: string; qty: number; unitPrice: number; discount: number }>;
+  subtotal: number;
+  discountAmount?: number;
+  taxAmount?: number;
+  totalAmount: number;
+  validUntil: string;
+  notes?: string;
+  storeName?: string;
+  storePhone?: string;
+  storeEmail?: string;
+  storeAddress?: string;
+}
+
+export async function sendQuotationEmail(params: SendQuotationEmailParams): Promise<{ success: boolean; error?: string }> {
+  const safeTo = escapeHtml(params.to);
+  const safeQuoteNumber = escapeHtml(params.quoteNumber);
+  const safeCustomerName = escapeHtml(params.customerName);
+  const safeCustomerCompany = params.customerCompany ? escapeHtml(params.customerCompany) : '';
+  const safeCustomerPhone = params.customerPhone ? escapeHtml(params.customerPhone) : '';
+  const safeCustomerAddress = params.customerAddress ? escapeHtml(params.customerAddress) : '';
+  const safeValidUntil = escapeHtml(params.validUntil);
+  const safeNotes = params.notes ? escapeHtml(params.notes) : '';
+
+  const safeStoreName = escapeHtml(params.storeName || 'FTC Electronics');
+  const safeStorePhone = params.storePhone ? escapeHtml(params.storePhone) : '';
+  const safeStoreEmail = params.storeEmail ? escapeHtml(params.storeEmail) : '';
+  const safeStoreAddress = params.storeAddress ? escapeHtml(params.storeAddress) : '';
+
+  const currency = 'Rs.';
+
+  const itemsHtml = params.items.map((item) => {
+    const unitPrice = item.unitPrice || 0;
+    const qty = item.qty || 1;
+    const discount = item.discount || 0;
+    const total = (unitPrice * qty) - discount;
+    return `
+      <tr>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: left; font-size: 14px; color: #18181b;">${escapeHtml(item.name || 'Item')}</td>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: center; font-size: 14px; color: #52525b;">${qty}</td>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; color: #52525b;">${currency} ${unitPrice.toLocaleString()}</td>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; color: #52525b;">-${currency} ${discount.toLocaleString()}</td>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; font-weight: 600; color: #18181b;">${currency} ${total.toLocaleString()}</td>
+      </tr>
+    `;
+  }).join('');
+
+  return sendEmail({
+    to: params.to,
+    subject: `Quotation #${params.quoteNumber} from ${safeStoreName}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 40px 20px; }
+            .card { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e4e4e7; padding: 40px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+            .header-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+            .brand { font-size: 22px; font-weight: 900; color: #09090b; letter-spacing: -0.5px; }
+            .brand-sub { font-size: 13px; color: #71717a; margin-top: 4px; line-height: 1.4; }
+            .doc-type { font-size: 20px; font-weight: 800; color: #d97706; text-align: right; text-transform: uppercase; letter-spacing: 0.5px; }
+            .doc-meta { font-size: 13px; color: #71717a; text-align: right; margin-top: 4px; font-family: monospace; }
+            .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #a1a1aa; letter-spacing: 1px; margin-bottom: 8px; border-bottom: 1px solid #f4f4f5; padding-bottom: 6px; }
+            .client-info { font-size: 14px; color: #18181b; line-height: 1.5; margin-bottom: 30px; }
+            .client-name { font-weight: 700; }
+            .items-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+            .items-table th { padding: 10px 0; border-bottom: 2px solid #e4e4e7; color: #71717a; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+            .totals-table { width: 240px; float: right; border-collapse: collapse; margin-bottom: 30px; }
+            .totals-table td { padding: 6px 0; font-size: 14px; color: #52525b; }
+            .grand-row td { font-size: 16px; font-weight: 900; color: #09090b; padding-top: 12px; border-top: 2px solid #e4e4e7; }
+            .notes-section { clear: both; background-color: #fafafa; border-radius: 8px; border: 1px solid #f4f4f5; padding: 16px; margin-top: 30px; }
+            .notes-title { font-size: 12px; font-weight: 700; color: #71717a; margin-bottom: 6px; }
+            .notes-text { font-size: 13px; color: #52525b; line-height: 1.5; }
+            .footer { margin-top: 40px; font-size: 12px; color: #a1a1aa; text-align: center; border-top: 1px solid #f4f4f5; padding-top: 20px; line-height: 1.5; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <!-- Header Table -->
+            <table class="header-table">
+              <tr>
+                <td style="vertical-align: top;">
+                  <div class="brand">${safeStoreName}</div>
+                  ${safeStoreAddress ? `<div class="brand-sub">${safeStoreAddress}</div>` : ''}
+                  ${safeStorePhone ? `<div class="brand-sub">Tel: ${safeStorePhone}</div>` : ''}
+                  ${safeStoreEmail ? `<div class="brand-sub">Email: ${safeStoreEmail}</div>` : ''}
+                </td>
+                <td style="vertical-align: top; text-align: right;">
+                  <div class="doc-type">Quotation</div>
+                  <div class="doc-meta">#${safeQuoteNumber}</div>
+                  <div class="doc-meta" style="margin-top: 2px;">Valid Until: ${safeValidUntil}</div>
+                </td>
+              </tr>
+            </table>
+
+            <!-- Customer Details -->
+            <div class="section-title">Billed To</div>
+            <div class="client-info">
+              <div class="client-name">${safeCustomerName}</div>
+              ${safeCustomerCompany ? `<div>${safeCustomerCompany}</div>` : ''}
+              ${safeCustomerPhone ? `<div style="font-family: monospace; font-size: 13px; margin-top: 2px;">${safeCustomerPhone}</div>` : ''}
+              ${safeCustomerAddress ? `<div style="margin-top: 4px;">${safeCustomerAddress}</div>` : ''}
+            </div>
+
+            <!-- Items Table -->
+            <div class="section-title">Quotation Details</div>
+            <table class="items-table">
+              <thead>
+                <tr>
+                  <th style="text-align: left;">Item Description</th>
+                  <th style="text-align: center; width: 60px;">Qty</th>
+                  <th style="text-align: right; width: 100px;">Price</th>
+                  <th style="text-align: right; width: 80px;">Disc</th>
+                  <th style="text-align: right; width: 110px;">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itemsHtml}
+              </tbody>
+            </table>
+
+            <!-- Totals -->
+            <table class="totals-table">
+              <tr>
+                <td>Subtotal</td>
+                <td style="text-align: right; font-weight: 600;">${currency} ${params.subtotal.toLocaleString()}</td>
+              </tr>
+              ${params.discountAmount ? `
+              <tr>
+                <td>Discount</td>
+                <td style="text-align: right; font-weight: 600; color: #dc2626;">-${currency} ${params.discountAmount.toLocaleString()}</td>
+              </tr>` : ''}
+              ${params.taxAmount ? `
+              <tr>
+                <td>Tax</td>
+                <td style="text-align: right; font-weight: 600;">${currency} ${params.taxAmount.toLocaleString()}</td>
+              </tr>` : ''}
+              <tr class="grand-row">
+                <td>Total</td>
+                <td style="text-align: right;">${currency} ${params.totalAmount.toLocaleString()}</td>
+              </tr>
+            </table>
+
+            <div style="clear: both;"></div>
+
+            <!-- Notes -->
+            ${safeNotes ? `
+            <div class="notes-section">
+              <div class="notes-title">Notes / Terms & Conditions</div>
+              <div class="notes-text">${safeNotes}</div>
+            </div>` : ''}
+
+            <!-- Footer -->
+            <div class="footer">
+              <p>Thank you for your business. If you have any questions about this quotation, please contact us.</p>
+              <p>© ${new Date().getFullYear()} ${safeStoreName}. All rights reserved.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `,
+    devLog: () => {
+      console.log('\n==================================================');
+      console.log(`[DEV MAIL SENDER] Quotation Email sent for: ${params.to}`);
+      console.log(`[DEV MAIL SENDER] Quote: #${params.quoteNumber} | Total: ${currency} ${params.totalAmount.toLocaleString()}`);
+      console.log('==================================================\n');
+    },
+    devFallbackMessage: `Quotation #${params.quoteNumber} to ${params.to} for amount ${currency} ${params.totalAmount.toLocaleString()}`,
+    prodErrorMessage: 'Failed to send quotation email.',
+  });
+}
+
+interface SendOrderInvoiceEmailParams {
+  to: string;
+  orderNumber: string;
+  customerName: string;
+  shippingAddress: any;
+  items: Array<{ name: string; qty: number; unitPrice: number; discount?: number }>;
+  totalAmount: number;
+  paymentMethod?: string;
+  storeName?: string;
+  storePhone?: string;
+  storeEmail?: string;
+  storeAddress?: string;
+}
+
+export async function sendOrderInvoiceEmail(params: SendOrderInvoiceEmailParams): Promise<{ success: boolean; error?: string }> {
+  const safeTo = escapeHtml(params.to);
+  const safeOrderNumber = escapeHtml(params.orderNumber);
+  const safeCustomerName = escapeHtml(params.customerName);
+  
+  let formattedAddress = '';
+  if (typeof params.shippingAddress === 'string') {
+    formattedAddress = escapeHtml(params.shippingAddress);
+  } else if (params.shippingAddress && typeof params.shippingAddress === 'object') {
+    const addr = params.shippingAddress;
+    const parts = [];
+    if (addr.addressLine1) parts.push(addr.addressLine1);
+    if (addr.addressLine2) parts.push(addr.addressLine2);
+    if (addr.address) parts.push(addr.address);
+    if (addr.city) parts.push(addr.city);
+    if (addr.state) parts.push(addr.state);
+    if (addr.postalCode) parts.push(addr.postalCode);
+    if (addr.country) parts.push(addr.country);
+    
+    formattedAddress = parts.filter(Boolean).map(escapeHtml).join(', ');
+  }
+
+  const safeStoreName = escapeHtml(params.storeName || 'FTC Electronics');
+  const safeStorePhone = params.storePhone ? escapeHtml(params.storePhone) : '';
+  const safeStoreEmail = params.storeEmail ? escapeHtml(params.storeEmail) : '';
+  const safeStoreAddress = params.storeAddress ? escapeHtml(params.storeAddress) : '';
+  const safePaymentMethod = escapeHtml(params.paymentMethod || 'Paid');
+
+  const currency = 'Rs.';
+
+  const itemsHtml = params.items.map((item) => {
+    const unitPrice = item.unitPrice || 0;
+    const qty = item.qty || 1;
+    const discount = item.discount || 0;
+    const total = (unitPrice * qty) - discount;
+    return `
+      <tr>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: left; font-size: 14px; color: #18181b;">${escapeHtml(item.name || 'Item')}</td>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: center; font-size: 14px; color: #52525b;">${qty}</td>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; color: #52525b;">${currency} ${unitPrice.toLocaleString()}</td>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; font-weight: 600; color: #18181b;">${currency} ${total.toLocaleString()}</td>
+      </tr>
+    `;
+  }).join('');
+
+  return sendEmail({
+    to: params.to,
+    subject: `Tax Invoice #${params.orderNumber} from ${safeStoreName}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 40px 20px; }
+            .card { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e4e4e7; padding: 40px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+            .header-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+            .brand { font-size: 22px; font-weight: 900; color: #09090b; letter-spacing: -0.5px; }
+            .brand-sub { font-size: 13px; color: #71717a; margin-top: 4px; line-height: 1.4; }
+            .doc-type { font-size: 20px; font-weight: 800; color: #16a34a; text-align: right; text-transform: uppercase; letter-spacing: 0.5px; }
+            .doc-meta { font-size: 13px; color: #71717a; text-align: right; margin-top: 4px; font-family: monospace; }
+            .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #a1a1aa; letter-spacing: 1px; margin-bottom: 8px; border-bottom: 1px solid #f4f4f5; padding-bottom: 6px; }
+            .client-info { font-size: 14px; color: #18181b; line-height: 1.5; margin-bottom: 30px; }
+            .client-name { font-weight: 700; }
+            .items-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+            .items-table th { padding: 10px 0; border-bottom: 2px solid #e4e4e7; color: #71717a; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+            .totals-table { width: 240px; float: right; border-collapse: collapse; margin-bottom: 30px; }
+            .totals-table td { padding: 6px 0; font-size: 14px; color: #52525b; }
+            .grand-row td { font-size: 16px; font-weight: 900; color: #09090b; padding-top: 12px; border-top: 2px solid #e4e4e7; }
+            .notes-section { clear: both; background-color: #fafafa; border-radius: 8px; border: 1px solid #f4f4f5; padding: 16px; margin-top: 30px; }
+            .notes-title { font-size: 12px; font-weight: 700; color: #71717a; margin-bottom: 6px; }
+            .notes-text { font-size: 13px; color: #52525b; line-height: 1.5; }
+            .footer { margin-top: 40px; font-size: 12px; color: #a1a1aa; text-align: center; border-top: 1px solid #f4f4f5; padding-top: 20px; line-height: 1.5; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <!-- Header Table -->
+            <table class="header-table">
+              <tr>
+                <td style="vertical-align: top;">
+                  <div class="brand">${safeStoreName}</div>
+                  ${safeStoreAddress ? `<div class="brand-sub">${safeStoreAddress}</div>` : ''}
+                  ${safeStorePhone ? `<div class="brand-sub">Tel: ${safeStorePhone}</div>` : ''}
+                  ${safeStoreEmail ? `<div class="brand-sub">Email: ${safeStoreEmail}</div>` : ''}
+                </td>
+                <td style="vertical-align: top; text-align: right;">
+                  <div class="doc-type">Tax Invoice</div>
+                  <div class="doc-meta">#${safeOrderNumber}</div>
+                  <div class="doc-meta" style="margin-top: 2px;">Date: ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                </td>
+              </tr>
+            </table>
+
+            <!-- Customer Details -->
+            <div class="section-title">Billed To</div>
+            <div class="client-info">
+              <div class="client-name">${safeCustomerName}</div>
+              ${formattedAddress ? `<div style="margin-top: 4px;">${formattedAddress}</div>` : ''}
+            </div>
+
+            <!-- Items Table -->
+            <div class="section-title">Invoice Details</div>
+            <table class="items-table">
+              <thead>
+                <tr>
+                  <th style="text-align: left;">Item Description</th>
+                  <th style="text-align: center; width: 60px;">Qty</th>
+                  <th style="text-align: right; width: 100px;">Price</th>
+                  <th style="text-align: right; width: 110px;">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itemsHtml}
+              </tbody>
+            </table>
+
+            <!-- Totals -->
+            <table class="totals-table">
+              <tr class="grand-row">
+                <td>Total Paid</td>
+                <td style="text-align: right;">${currency} ${params.totalAmount.toLocaleString()}</td>
+              </tr>
+              <tr>
+                <td style="font-size: 12px; color: #a1a1aa; padding-top: 6px;">Payment Method</td>
+                <td style="text-align: right; font-size: 12px; color: #16a34a; font-weight: bold; padding-top: 6px;">${safePaymentMethod}</td>
+              </tr>
+            </table>
+
+            <div style="clear: both;"></div>
+
+            <!-- Footer -->
+            <div class="footer">
+              <p>This is an official payment receipt for your online purchase. Thank you for shopping with ${safeStoreName}!</p>
+              <p>© ${new Date().getFullYear()} ${safeStoreName}. All rights reserved.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `,
+    devLog: () => {
+      console.log('\n==================================================');
+      console.log(`[DEV MAIL SENDER] Order Invoice Email sent for: ${params.to}`);
+      console.log(`[DEV MAIL SENDER] Order: #${params.orderNumber} | Total: ${currency} ${params.totalAmount.toLocaleString()}`);
+      console.log('==================================================\n');
+    },
+    devFallbackMessage: `Order Invoice #${params.orderNumber} to ${params.to} for amount ${currency} ${params.totalAmount.toLocaleString()}`,
+    prodErrorMessage: 'Failed to send order invoice email.',
+  });
+}

@@ -11,17 +11,13 @@ export interface BarcodePrintItem {
   currency?: string;
 }
 
-export function printBarcodeLabels(
+export function getBarcodeHtml(
   rawCfg: BarcodePrintConfig,
   items: BarcodePrintItem[],
+  isPreview = false,
   title = 'Print Barcodes'
-) {
-  if (items.length === 0) return;
+): string {
   const cfg = normalizeBarcodeConfig(rawCfg);
-
-  const printWindow = window.open('', '_blank');
-  if (!printWindow) return;
-
   const barWidthPx = Math.max(0.5, Math.round(cfg.barWidthMm * 3.78 * 10) / 10);
   const barHeightPx = Math.max(4, Math.round(cfg.barHeightMm * 3.78));
   const fontSizePx = Math.max(8, Math.round(cfg.fontSizeMm * 3));
@@ -53,7 +49,7 @@ export function printBarcodeLabels(
     })
     .join('');
 
-  printWindow.document.write(`
+  return `
     <!DOCTYPE html>
     <html>
       <head>
@@ -63,8 +59,14 @@ export function printBarcodeLabels(
         <style>
           @page { size: ${cfg.rollWidthMm}mm auto; margin: 0; }
           * { box-sizing: border-box; margin: 0; padding: 0; }
-          body { font-family: system-ui, -apple-system, sans-serif; background: #fff; width: ${cfg.rollWidthMm}mm; margin: 0 auto; padding: 2mm 0; }
-          h1 { font-size: 10px; margin-bottom: 6px; color: #555; text-align: center; }
+          body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: ${isPreview ? 'transparent' : '#fff'};
+            width: ${cfg.rollWidthMm}mm;
+            margin: 0 auto;
+            padding: ${isPreview ? '0' : '2mm 0'};
+          }
+          h1 { font-size: 10px; margin-bottom: 6px; color: #555; text-align: center; ${isPreview ? 'display: none !important;' : ''} }
           .grid {
             display: grid;
             grid-template-columns: repeat(${cfg.columns}, ${cfg.labelWidthMm}mm);
@@ -77,7 +79,7 @@ export function printBarcodeLabels(
           .label {
             width: ${cfg.labelWidthMm}mm;
             min-height: ${cfg.labelHeightMm}mm;
-            border: 1px solid #ccc;
+            border: 1px dashed #ccc;
             border-radius: 4px;
             padding: 3mm;
             display: flex;
@@ -136,12 +138,27 @@ export function printBarcodeLabels(
                 QRCode.toCanvas(el, el.getAttribute('data-qr'), { width: ${qrSizePx}, margin: 1 });
               } catch(e) {}
             });
-            setTimeout(function() { window.print(); }, 700);
+            ${isPreview ? '' : 'setTimeout(function() { window.print(); }, 700);'}
           };
         <\/script>
       </body>
     </html>
-  `);
+  `;
+}
+
+export function printBarcodeLabels(
+  rawCfg: BarcodePrintConfig,
+  items: BarcodePrintItem[],
+  title = 'Print Barcodes'
+) {
+  if (items.length === 0) return;
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) return;
+
+  const html = getBarcodeHtml(rawCfg, items, false, title);
+  const parser = new DOMParser();
+  const parsedDoc = parser.parseFromString(html, 'text/html');
+  printWindow.document.replaceChild(parsedDoc.documentElement, printWindow.document.documentElement);
   printWindow.document.close();
 }
 
@@ -158,3 +175,4 @@ export function generateTestBarcodeItems(count = 6): BarcodePrintItem[] {
     currency: 'LKR',
   }));
 }
+

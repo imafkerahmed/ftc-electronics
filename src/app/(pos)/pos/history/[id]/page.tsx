@@ -4,13 +4,14 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { Ban, ArrowLeft, Printer, Receipt, CheckCircle2, XCircle, FileText } from 'lucide-react';
-import { getSaleByIdAction, getReceiptPrintPresetsAction, getInvoicePrintPresetsAction, voidSaleAction } from '@/app/actions/admin';
+import { getSaleByIdAction, getReceiptPrintPresetsAction, getInvoicePrintPresetsAction, voidSaleAction, sendPosSaleEmailAction } from '@/app/actions/admin';
 import type { PBSale, PBSaleItem } from '@/types/pos';
 import { printReceipt, resolveReceiptConfig } from '@/lib/receipt-print';
 import { printInvoice, resolveInvoiceConfig, type InvoiceData } from '@/lib/invoice-print';
 import { DEFAULT_RECEIPT_CONFIG, normalizeReceiptConfig } from '@/types/receipt-config';
 import { DEFAULT_INVOICE_CONFIG, normalizeInvoiceConfig } from '@/types/invoice-config';
 import { Button } from '@/components/ui/button';
+import { Mail, Loader2 } from 'lucide-react';
 import ManagerPinModal from '@/components/pos/manager-pin-modal';
 
 function fmt(amount: number) {
@@ -27,6 +28,7 @@ export default function SaleDetailPage() {
   const [error, setError] = useState('');
   const [showVoidPinModal, setShowVoidPinModal] = useState(false);
   const [voiding, setVoiding] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
 
   const load = useCallback(async () => {
     if (!saleId) return;
@@ -133,6 +135,26 @@ export default function SaleDetailPage() {
     }
   };
 
+  const handleSendEmail = async () => {
+    if (!sale) return;
+    const email = prompt("Enter customer email address:", sale.customer_email || "");
+    if (!email) return;
+
+    setSendingEmail(true);
+    try {
+      const res = await sendPosSaleEmailAction(sale.id, email);
+      if (res.success) {
+        alert(`Invoice emailed to ${email} successfully!`);
+      } else {
+        alert(res.error || 'Failed to send email.');
+      }
+    } catch (err) {
+      alert('An error occurred while sending the email.');
+    } finally {
+      setSendingEmail(false);
+    }
+  };
+
   if (loading) return <div className="p-8 text-xs text-muted-foreground">Loading sale…</div>;
   if (error || !sale) return <div className="p-8 text-xs text-red-500">{error || 'Sale not found.'}</div>;
 
@@ -182,12 +204,25 @@ export default function SaleDetailPage() {
                 <Ban className="h-3.5 w-3.5" /> Void Sale
               </Button>
             )}
-            <Button
+             <Button
               variant="outline"
               onClick={handlePrintInvoice}
               className="text-xs border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10 hover:text-indigo-300 font-bold"
             >
               <FileText className="h-3.5 w-3.5" /> Print Invoice
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleSendEmail}
+              disabled={sendingEmail || voiding}
+              className="text-xs border-blue-500/30 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300 font-bold"
+            >
+              {sendingEmail ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Mail className="h-3.5 w-3.5" />
+              )}
+              Email Invoice
             </Button>
             <Button
               onClick={handleReprint}

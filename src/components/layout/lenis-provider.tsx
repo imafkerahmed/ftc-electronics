@@ -16,7 +16,7 @@ export function LenisProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <ReactLenis root options={{ lerp: 0.1, duration: 1.2, smoothWheel: true }}>
+    <ReactLenis root options={{ lerp: 0.12, duration: 0.8, smoothWheel: true, touchMultiplier: 1.5 }}>
       {children}
     </ReactLenis>
   );

@@ -15,6 +15,7 @@ interface CollectionSectionProps {
   layout: "carousel" | "grid" | "flash-sale" | "featured-grid";
   products: Product[];
   rows?: number;
+  mobileRows?: number;
   limit?: number;
   description?: string;
   titleColor?: string;
@@ -27,6 +28,7 @@ export default function CollectionSection({
   layout,
   products,
   rows,
+  mobileRows,
   limit,
   description,
   titleColor,
@@ -37,6 +39,10 @@ export default function CollectionSection({
   const isInView = useInView(containerRef, { once: true, amount: 0.1 });
 
   const [extractedColor, setExtractedColor] = useState<string | null>(null);
+  const [isMobileExpanded, setIsMobileExpanded] = useState(false);
+
+  // Calculate mobile products display limit based on mobileRows setting (2 products per grid row on mobile)
+  const mobileMaxCount = mobileRows && mobileRows > 0 ? mobileRows * 2 : undefined;
 
   useEffect(() => {
     if (!brandLogo) {
@@ -277,13 +283,11 @@ export default function CollectionSection({
 
   if (products.length === 0) return null;
 
-  const isCarouselMode = layout === "carousel" || layout === "flash-sale";
+  const isCarouselMode =
+    (layout === "carousel" || layout === "flash-sale") && (!rows || rows <= 1);
 
   const getSectionBgClass = () => {
-    if (layout !== "featured-grid") {
-      return "relative bg-white dark:bg-neutral-950 border-b border-neutral-200/80 dark:border-neutral-800/80 py-4 sm:py-6";
-    }
-    return "relative bg-slate-50/60 dark:bg-neutral-900/40 border-y border-neutral-200/80 dark:border-neutral-800/80 py-6 sm:py-10";
+    return "relative bg-transparent border-b border-neutral-200/60 dark:border-neutral-800/60 py-6 sm:py-10";
   };
 
   return (
@@ -306,24 +310,26 @@ export default function CollectionSection({
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.5, delay: 0.1 }}
         >
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-current/8 pb-5 relative z-10 w-full">
-            <div className="flex flex-col gap-2">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 sm:gap-4 border-b border-current/8 pb-3.5 sm:pb-5 relative z-10 w-full">
+            <div className="flex flex-col gap-1 sm:gap-2">
               {/* Title */}
-              <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight uppercase leading-none">
+              <h2 className="text-xl sm:text-3xl lg:text-4xl font-black tracking-tight uppercase leading-none">
                 {renderTitle(title)}
               </h2>
-              <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 font-medium leading-relaxed max-w-lg">
-                {description || "Discover premium hardware with guaranteed performance, curated details, and exclusive checkout options."}
-              </p>
+              {description && (
+                <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 font-medium leading-relaxed max-w-lg line-clamp-2">
+                  {description}
+                </p>
+              )}
             </div>
-            <div className="flex items-center gap-4 shrink-0 justify-between md:justify-end w-full md:w-auto">
+            <div className="flex items-center gap-3 shrink-0 justify-between md:justify-end w-full md:w-auto mt-0.5 sm:mt-0">
               <Link href={seeAllLink} className="shrink-0">
                 <button
-                  className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 text-[11px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98] bg-neutral-900 dark:bg-neutral-50 text-white dark:text-neutral-950 hover:bg-neutral-800 dark:hover:bg-neutral-200"
+                  className="inline-flex items-center justify-center gap-1 px-4 py-2 sm:px-5 sm:py-2.5 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98] bg-neutral-900 dark:bg-neutral-50 text-white dark:text-neutral-950 hover:bg-neutral-800 dark:hover:bg-neutral-200"
                   aria-label="Explore Collection"
                 >
                   <span>Explore All</span>
-                  <ChevronRight className="h-3.5 w-3.5 stroke-[2.5]" />
+                  <ChevronRight className="h-3 w-3 sm:h-3.5 sm:w-3.5 stroke-[2.5]" />
                 </button>
               </Link>
 
@@ -380,36 +386,62 @@ export default function CollectionSection({
                 />
               ))}
             </motion.div>
-          ) : layout === "featured-grid" ? (
+          ) : (layout === "featured-grid" || (rows && rows > 1)) ? (
             /* Integrated Bento Grid Layout simplified to pure grid */
-            <motion.div
-              className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 sm:gap-4 items-stretch"
-              initial={{ opacity: 0, y: 20 }}
-              animate={isInView ? { opacity: 1, y: 0 } : {}}
-              transition={{ duration: 0.6, delay: 0.2 }}
-            >
-              {/* Grid of Product Cards */}
-              {products.slice(0, displayLimit).map((product, idx) => (
-                <CollectionProductCard
-                  key={product.id || idx}
-                  product={product}
-                  themeColor={config.themeColor}
-                />
-              ))}
-            </motion.div>
+            <>
+              <motion.div
+                className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 sm:gap-4 items-stretch"
+                initial={{ opacity: 0, y: 20 }}
+                animate={isInView ? { opacity: 1, y: 0 } : {}}
+                transition={{ duration: 0.6, delay: 0.2 }}
+              >
+                {/* Grid of Product Cards */}
+                {products.slice(0, displayLimit).map((product, idx) => {
+                  const isHiddenOnMobile =
+                    mobileMaxCount && idx >= mobileMaxCount && !isMobileExpanded;
+                  return (
+                    <div
+                      key={product.id || idx}
+                      className={
+                        isHiddenOnMobile ? "hidden sm:block h-full" : "block h-full"
+                      }
+                    >
+                      <CollectionProductCard
+                        product={product}
+                        themeColor={config.themeColor}
+                      />
+                    </div>
+                  );
+                })}
+              </motion.div>
+
+              {mobileMaxCount &&
+                products.length > mobileMaxCount &&
+                !isMobileExpanded && (
+                  <div className="mt-4 flex justify-center sm:hidden">
+                    <button
+                      type="button"
+                      onClick={() => setIsMobileExpanded(true)}
+                      className="inline-flex items-center gap-2 rounded-full border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-5 py-2.5 text-xs font-bold text-neutral-800 dark:text-neutral-200 shadow-xs transition-transform active:scale-95 cursor-pointer"
+                    >
+                      Show More Products ({products.length - mobileMaxCount} more)
+                    </button>
+                  </div>
+                )}
+            </>
           ) : (
             /* Carousel Display with 1 row scrolling horizontally (Supports flash-sale promo card injections) */
             <div className="relative w-full">
               <motion.div
                 ref={scrollContainerRef}
-                className="flex gap-6 lg:gap-8 overflow-x-auto scrollbar-none snap-x snap-mandatory pb-4 pt-1 touch-pan-x"
+                className="flex gap-3.5 sm:gap-4 overflow-x-auto scrollbar-none snap-x snap-mandatory pb-4 pt-1 touch-pan-x"
                 initial={{ opacity: 0, y: 20 }}
                 animate={isInView ? { opacity: 1, y: 0 } : {}}
                 transition={{ duration: 0.6, delay: 0.2 }}
               >
                 {/* Countdown Timer Promo Card for Flash Sale */}
                 {layout === "flash-sale" && (
-                  <div className="w-[260px] sm:w-[290px] lg:w-[300px] shrink-0 snap-start flex flex-col justify-between p-6 rounded-2xl bg-gradient-to-br from-red-600 via-pink-600 to-red-700 text-white shadow-lg relative overflow-hidden group select-none border border-red-500/20">
+                  <div className="w-[200px] sm:w-[260px] lg:w-[300px] shrink-0 snap-start flex flex-col justify-between p-4 sm:p-6 rounded-2xl bg-gradient-to-br from-red-600 via-pink-600 to-red-700 text-white shadow-lg relative overflow-hidden group select-none border border-red-500/20">
                     {/* Floating ambient blobs */}
                     <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-white/10 blur-xl group-hover:scale-125 transition-transform duration-500" />
 
@@ -473,7 +505,7 @@ export default function CollectionSection({
                 {products.map((product, idx) => (
                   <div
                     key={product.id || idx}
-                    className="w-[260px] sm:w-[290px] lg:w-[calc((100%-96px)/4)] shrink-0 snap-start"
+                    className="w-[180px] sm:w-[calc((100%-32px)/3)] md:w-[calc((100%-48px)/4)] lg:w-[calc((100%-64px)/5)] shrink-0 snap-start h-full"
                   >
                     <CollectionProductCard
                       product={product}

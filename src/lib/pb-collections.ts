@@ -23,6 +23,7 @@ import type {
   PBHomepageBlock,
   PBHeroBanner,
   PBPromotion,
+  PBAnnouncement,
   PBAuditLog,
   PBSiteSetting,
   PBCustomer,
@@ -821,8 +822,9 @@ export const pbPromotions = {
     perPage?: number;
   }): Promise<{ items: PBPromotion[]; totalItems: number }> {
     try {
-      const adminPb = await getAdminPb();
-      const result = await adminPb
+      const isClient = typeof window !== 'undefined';
+      const pbClient = isClient ? getPublicPb() : await getAdminPb();
+      const result = await pbClient
         .collection("promotions")
         .getList<PBPromotion>(options?.page || 1, options?.perPage || 25, {
           sort: "-created",
@@ -864,6 +866,81 @@ export const pbPromotions = {
     } catch (err) {
       handleError(err, "pbPromotions.delete");
     }
+  },
+};
+
+// ─── Announcements ────────────────────────────────────────────────────────────
+
+export const pbAnnouncements = {
+  async getActive(): Promise<PBAnnouncement[]> {
+    try {
+      const pbClient = getPublicPb();
+      const now = new Date().toISOString();
+
+      return await pbClient.collection("announcements").getFullList<PBAnnouncement>({
+        filter: `isActive = true && (endsAt = "" || endsAt >= "${now}")`,
+        sort: "-id",
+      });
+    } catch (err) {
+      handleError(err, "pbAnnouncements.getActive");
+    }
+  },
+
+  async getAll(options?: {
+    page?: number;
+    perPage?: number;
+  }): Promise<{ items: PBAnnouncement[]; totalItems: number }> {
+    try {
+      const isClient = typeof window !== 'undefined';
+      const pbClient = isClient ? getPublicPb() : await getAdminPb();
+      const result = await pbClient
+        .collection("announcements")
+        .getList<PBAnnouncement>(options?.page || 1, options?.perPage || 25, {
+          sort: "-id",
+        });
+      return { items: result.items, totalItems: result.totalItems };
+    } catch (err) {
+      handleError(err, "pbAnnouncements.getAll");
+    }
+  },
+
+  async create(data: FormData | Record<string, unknown>): Promise<PBAnnouncement> {
+    try {
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("announcements").create<PBAnnouncement>(data);
+    } catch (err) {
+      handleError(err, "pbAnnouncements.create");
+    }
+  },
+
+  async update(
+    id: string,
+    data: FormData | Record<string, unknown>,
+  ): Promise<PBAnnouncement> {
+    try {
+      const adminPb = await getAdminPb();
+      return await adminPb
+        .collection("announcements")
+        .update<PBAnnouncement>(id, data);
+    } catch (err) {
+      handleError(err, "pbAnnouncements.update");
+    }
+  },
+
+  async delete(id: string): Promise<boolean> {
+    try {
+      const adminPb = await getAdminPb();
+      await adminPb.collection("announcements").delete(id);
+      return true;
+    } catch (err) {
+      handleError(err, "pbAnnouncements.delete");
+    }
+  },
+
+  getFileUrl(record: PBAnnouncement): string {
+    const pbUrl = getPbUrl();
+    if (!record.image) return "";
+    return `${pbUrl}/api/files/${record.collectionId || record.collectionName || "announcements"}/${record.id}/${record.image}`;
   },
 };
 

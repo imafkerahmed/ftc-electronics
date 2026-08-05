@@ -9,6 +9,7 @@ import type { AdminRole, AuditAction, DealerSaleRecord } from '@/types/admin';
 import type { BarcodePrintConfig } from '@/types/barcode-config';
 import type { ReceiptPrintConfig, ReceiptPrintPreset } from '@/types/receipt-config';
 import type { InvoicePrintConfig, InvoicePrintPreset } from '@/types/invoice-config';
+import { sendQuotationEmail, sendOrderInvoiceEmail } from '@/lib/email';
 import {
   pbProducts,
   pbCategories,
@@ -17,6 +18,7 @@ import {
   pbHomepageBlocks,
   pbSiteSettings,
   pbPromotions,
+  pbAnnouncements,
   pbOrders,
   pbEmployees,
   pbSales,
@@ -287,7 +289,7 @@ export async function getStockPurchasesAction(productId: string) {
       filter: `product = "${productId}"`,
       sort: '-id',
     });
-    return { success: true, data: JSON.parse(JSON.stringify(records)) };
+    return { success: true, data: structuredClone(records) };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to fetch stock purchases.', data: [] };
   }
@@ -303,7 +305,7 @@ export async function getStockManagementUnitsAction(productId: string) {
       filter: `product = "${productId}"`,
       sort: '-id',
     });
-    return { success: true, data: JSON.parse(JSON.stringify(records)) };
+    return { success: true, data: structuredClone(records) };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to fetch stock units.', data: [] };
   }
@@ -690,6 +692,8 @@ export async function createPromotionAction(data: {
   startDate: string;
   endDate: string;
   isActive: boolean;
+  minOrderValue?: number;
+  usageLimit?: number;
 }) {
   const check = await checkPermission('promotions', 'write');
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
@@ -766,6 +770,118 @@ export async function deletePromotionAction(id: string) {
   }
 }
 
+function generatePbId(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let result = '';
+  for (let i = 0; i < 15; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+export async function createAnnouncementAction(formData: FormData) {
+  const check = await checkPermission('settings', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
+
+  try {
+    if (!formData.has('id')) {
+      formData.append('id', generatePbId());
+    }
+    const record = await pbAnnouncements.create(formData);
+
+    await writeAuditLog(
+      check.actorEmail!,
+      'create',
+      'announcements',
+      record.id,
+      undefined,
+      toRecord(record),
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/admin/announcements');
+    revalidatePath('/', 'layout');
+    return { success: true, data: record };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to create announcement.' };
+  }
+}
+
+export async function updateAnnouncementAction(id: string, formData: FormData) {
+  const check = await checkPermission('settings', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
+
+  try {
+    const record = await pbAnnouncements.update(id, formData);
+
+    await writeAuditLog(
+      check.actorEmail!,
+      'update',
+      'announcements',
+      id,
+      undefined,
+      toRecord(record),
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/admin/announcements');
+    revalidatePath('/', 'layout');
+    return { success: true, data: record };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to update announcement.' };
+  }
+}
+
+export async function deleteAnnouncementAction(id: string) {
+  const check = await checkPermission('settings', 'delete');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
+
+  try {
+    await pbAnnouncements.delete(id);
+
+    await writeAuditLog(
+      check.actorEmail!,
+      'delete',
+      'announcements',
+      id,
+      undefined,
+      undefined,
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/admin/announcements');
+    revalidatePath('/', 'layout');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to delete announcement.' };
+  }
+}
+
+export async function toggleAnnouncementActiveAction(id: string, isActive: boolean) {
+  const check = await checkPermission('settings', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
+
+  try {
+    const record = await pbAnnouncements.update(id, { isActive });
+
+    await writeAuditLog(
+      check.actorEmail!,
+      'update',
+      'announcements',
+      id,
+      undefined,
+      toRecord(record),
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/admin/announcements');
+    revalidatePath('/', 'layout');
+    return { success: true, data: record };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to toggle status.' };
+  }
+}
+
 // ─── Site Settings Actions ────────────────────────────────────────────────────
 
 export async function updateSiteSettingsAction(key: string, value: Record<string, unknown>) {
@@ -787,7 +903,12 @@ export async function updateSiteSettingsAction(key: string, value: Record<string
     );
 
     revalidatePath('/');
+    revalidatePath('/contact');
+    revalidatePath('/connect');
+    revalidatePath('/links');
+    revalidatePath('/socials');
     revalidatePath('/admin/settings');
+    revalidatePath('/admin/system-config/general');
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to update site settings.' };
@@ -1160,7 +1281,7 @@ export async function getBarcodePrintPresetsAction() {
       filter: 'category = "barcode_print"',
       sort: '-isDefault',
     });
-    return { success: true, data: JSON.parse(JSON.stringify(records)) };
+    return { success: true, data: structuredClone(records) };
   } catch {
     return { success: false, error: 'Failed to load barcode presets.', data: [] };
   }
@@ -1201,7 +1322,7 @@ export async function saveBarcodePrintPresetAction(
     }
 
     revalidatePath('/admin/system-config');
-    return { success: true, data: JSON.parse(JSON.stringify(record)) };
+    return { success: true, data: structuredClone(record) };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to save preset.' };
   }
@@ -1332,7 +1453,7 @@ export async function saveReceiptPrintPresetAction(
     }
 
     revalidatePath('/admin/system-config');
-    return { success: true, data: JSON.parse(JSON.stringify(record)) };
+    return { success: true, data: structuredClone(record) };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to save receipt preset.' };
   }
@@ -1461,7 +1582,7 @@ export async function saveInvoicePrintPresetAction(
     }
 
     revalidatePath('/admin/system-config');
-    return { success: true, data: JSON.parse(JSON.stringify(record)) };
+    return { success: true, data: structuredClone(record) };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to save invoice preset.' };
   }
@@ -1513,6 +1634,10 @@ export async function getPosEmployeesAction() {
 }
 
 export async function getPosEmployeesAdminAction() {
+  const perm = await checkPermission('systemConfig', 'read');
+  if (!perm.allowed) {
+    return { success: false, error: 'Unauthorized: Read employees permission required.' };
+  }
   try {
     const employees = await pbEmployees.getAllAdmin();
     return { success: true, data: employees };
@@ -1527,6 +1652,10 @@ export async function createPosEmployeeAction(data: {
   role: string;
   isActive: boolean;
 }) {
+  const perm = await checkPermission('systemConfig', 'write');
+  if (!perm.allowed) {
+    return { success: false, error: 'Unauthorized: Employee write permission required.' };
+  }
   try {
     const emp = await pbEmployees.create(data);
     revalidatePath('/admin/system-config/employees');
@@ -1540,6 +1669,10 @@ export async function updatePosEmployeeAction(
   id: string,
   data: Partial<{ name: string; pin: string; role: string; isActive: boolean }>
 ) {
+  const perm = await checkPermission('systemConfig', 'write');
+  if (!perm.allowed) {
+    return { success: false, error: 'Unauthorized: Employee write permission required.' };
+  }
   try {
     const emp = await pbEmployees.update(id, data);
     revalidatePath('/admin/system-config/employees');
@@ -1550,6 +1683,10 @@ export async function updatePosEmployeeAction(
 }
 
 export async function deletePosEmployeeAction(id: string) {
+  const perm = await checkPermission('systemConfig', 'delete');
+  if (!perm.allowed) {
+    return { success: false, error: 'Unauthorized: Employee delete permission required.' };
+  }
   try {
     await pbEmployees.delete(id);
     revalidatePath('/admin/system-config/employees');
@@ -1571,6 +1708,68 @@ export async function createSaleAction(payload: SalePayload) {
   }
 }
 
+export async function sendPosSaleEmailAction(saleId: string, emailAddress?: string) {
+  try {
+    const sale = await pbSales.getById(saleId);
+    if (!sale) return { success: false, error: 'Sale record not found.' };
+
+    const targetEmail = emailAddress?.trim() || sale.customer_email?.trim();
+    if (!targetEmail) {
+      return { success: false, error: 'Customer email address is required.' };
+    }
+
+    let storeName = 'FTC Electronics';
+    let storePhone = '';
+    let storeEmail = '';
+    let storeAddress = '';
+
+    try {
+      const presetsRes = await getInvoicePrintPresetsAction();
+      if (presetsRes.success && presetsRes.data && presetsRes.data.length > 0) {
+        const defaultPreset = presetsRes.data.find((p) => p.isDefault) || presetsRes.data[0];
+        const config = JSON.parse(defaultPreset.config);
+        storeName = config.storeName || storeName;
+        storePhone = config.headerPhone || storePhone;
+        storeEmail = config.headerEmail || storeEmail;
+        storeAddress = config.headerAddress || storeAddress;
+      }
+    } catch (presetErr) {
+      console.warn('[sendPosSaleEmailAction] Warning: Failed to load invoice config:', presetErr);
+    }
+
+    const saleItems = await pbSales.getItemsBySale(saleId);
+    const items = (saleItems || []).map((i) => ({
+      name: i.product_name,
+      qty: i.quantity,
+      unitPrice: i.unit_price,
+      discount: i.item_discount || 0,
+    }));
+
+    const emailResult = await sendOrderInvoiceEmail({
+      to: targetEmail,
+      orderNumber: sale.receipt_number || `FTC-POS-${sale.id.slice(-6).toUpperCase()}`,
+      customerName: sale.customer_name || 'Walk-in Customer',
+      shippingAddress: '',
+      items,
+      totalAmount: sale.total,
+      paymentMethod: `Paid via ${sale.payment_method?.toUpperCase() || 'POS'}`,
+      storeName,
+      storePhone,
+      storeEmail,
+      storeAddress,
+    });
+
+    if (!emailResult.success) {
+      return { success: false, error: emailResult.error || 'Failed to send email.' };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('[sendPosSaleEmailAction] Error:', err);
+    return { success: false, error: err.message || 'An error occurred while sending the email.' };
+  }
+}
+
 export async function getRecentSalesAction(limit = 50) {
   try {
     const sales = await pbSales.getRecent(limit);
@@ -1587,6 +1786,25 @@ export async function getSaleByIdAction(
     const sale = await pbSales.getById(id);
     if (!sale) return { success: false, error: 'Sale not found.' };
     const items = await pbSales.getItemsBySale(id);
+
+    if (sale.customer_phone && (!sale.customer_email || sale.customer_email.endsWith('@customer.local') || sale.customer_email === 'customer@ftc.lk')) {
+      try {
+        const adminPb = await getAdminPb();
+        const list = await adminPb.collection('customers').getFullList({
+          filter: `phone = "${sale.customer_phone.replace(/"/g, '\\"')}"`,
+          limit: 1
+        });
+        if (list.length > 0) {
+          const cust = list[0];
+          if (cust.email && !cust.email.endsWith('@customer.local') && cust.email !== 'customer@ftc.lk') {
+            sale.customer_email = cust.email;
+          }
+        }
+      } catch (custErr) {
+        console.warn('[getSaleByIdAction] Warning: Failed to query customer by phone:', custErr);
+      }
+    }
+
     return { success: true, data: { sale, items } };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to load sale.' };
@@ -1789,7 +2007,7 @@ export async function getWholesaleDealersAction() {
 
   try {
     const list = await pbWholesaleDealers.getAll();
-    return { success: true, data: JSON.parse(JSON.stringify(list || [])) };
+    return { success: true, data: structuredClone(list || []) };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to fetch wholesale dealers.', data: [] };
   }
@@ -1821,7 +2039,7 @@ export async function saveWholesaleDealerAction(
       record = await pbWholesaleDealers.create(data);
     }
     revalidatePath('/admin/wholesale-dealers');
-    return { success: true, data: JSON.parse(JSON.stringify(record)) };
+    return { success: true, data: structuredClone(record) };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to save wholesale dealer.' };
   }
@@ -1867,7 +2085,7 @@ export async function getDealerPurchaseHistoryAction(
       sort: '-created',
     });
 
-    return { success: true, data: JSON.parse(JSON.stringify(sales)) };
+    return { success: true, data: structuredClone(sales) };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to fetch dealer purchase history.', data: [] };
   }
@@ -1881,7 +2099,7 @@ export async function getQuotationsAction() {
 
   try {
     const list = await pbQuotations.getAll();
-    return { success: true, data: JSON.parse(JSON.stringify(list || [])) };
+    return { success: true, data: structuredClone(list || []) };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to fetch quotations.', data: [] };
   }
@@ -1970,7 +2188,7 @@ export async function saveQuotationAction(
       record = await pbQuotations.create(payload);
     }
     revalidatePath('/admin/quotations');
-    return { success: true, data: JSON.parse(JSON.stringify(record)) };
+    return { success: true, data: structuredClone(record) };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to save quotation.' };
   }
@@ -2035,4 +2253,316 @@ export async function convertQuotationToSaleAction(quoteId: string, paymentMetho
     return { success: false, error: err.message || 'Failed to convert quotation to sale.' };
   }
 }
+
+export async function sendQuotationEmailAction(id: string) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const quote = await pbQuotations.getById(id);
+    if (!quote) return { success: false, error: 'Quotation not found.' };
+    if (!quote.customer_email) {
+      return { success: false, error: 'Quotation does not have a customer email address.' };
+    }
+
+    let storeName = 'FTC Electronics';
+    let storePhone = '';
+    let storeEmail = '';
+    let storeAddress = '';
+
+    try {
+      const presetsRes = await getInvoicePrintPresetsAction();
+      if (presetsRes.success && presetsRes.data && presetsRes.data.length > 0) {
+        const defaultPreset = presetsRes.data.find((p) => p.isDefault) || presetsRes.data[0];
+        const config = JSON.parse(defaultPreset.config);
+        storeName = config.storeName || storeName;
+        storePhone = config.headerPhone || storePhone;
+        storeEmail = config.headerEmail || storeEmail;
+        storeAddress = config.headerAddress || storeAddress;
+      }
+    } catch (presetErr) {
+      console.warn('[sendQuotationEmailAction] Warning: Failed to load invoice config:', presetErr);
+    }
+
+    const items = (quote.items || []).map((item: any) => ({
+      name: item.name || '',
+      qty: item.qty || 1,
+      unitPrice: item.unitPrice || 0,
+      discount: item.discount || 0,
+    }));
+
+    const emailResult = await sendQuotationEmail({
+      to: quote.customer_email,
+      quoteNumber: quote.quote_number,
+      customerName: quote.customer_name,
+      customerCompany: quote.customer_company,
+      customerPhone: quote.customer_phone,
+      customerAddress: quote.customer_address,
+      items,
+      subtotal: quote.subtotal,
+      discountAmount: quote.discount_amount,
+      taxAmount: quote.tax_amount,
+      totalAmount: quote.total_amount,
+      validUntil: quote.valid_until ? new Date(quote.valid_until).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
+      notes: quote.notes,
+      storeName,
+      storePhone,
+      storeEmail,
+      storeAddress,
+    });
+
+    if (!emailResult.success) {
+      return { success: false, error: emailResult.error || 'Failed to send email.' };
+    }
+
+    await pbQuotations.update(id, { status: 'sent' });
+
+    revalidatePath('/admin/quotations');
+
+    await writeAuditLog(
+      check.actorEmail || 'admin',
+      'update',
+      'quotations',
+      id,
+      { status: quote.status },
+      { status: 'sent' },
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('[sendQuotationEmailAction] Error:', err);
+    return { success: false, error: err.message || 'An error occurred while sending the email.' };
+  }
+}
+
+export async function sendOrderInvoiceEmailAction(id: string) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const order = await pbOrders.getById(id);
+    if (!order) return { success: false, error: 'Order not found.' };
+
+    const customerEmail = order.customer?.email || (order as any).customerEmail || (order as any).email;
+    if (!customerEmail) {
+      return { success: false, error: 'Order does not have a customer email address.' };
+    }
+
+    const customerName = order.customer?.name || (order as any).customerName || 'Customer';
+
+    let storeName = 'FTC Electronics';
+    let storePhone = '';
+    let storeEmail = '';
+    let storeAddress = '';
+
+    try {
+      const presetsRes = await getInvoicePrintPresetsAction();
+      if (presetsRes.success && presetsRes.data && presetsRes.data.length > 0) {
+        const defaultPreset = presetsRes.data.find((p) => p.isDefault) || presetsRes.data[0];
+        const config = JSON.parse(defaultPreset.config);
+        storeName = config.storeName || storeName;
+        storePhone = config.headerPhone || storePhone;
+        storeEmail = config.headerEmail || storeEmail;
+        storeAddress = config.headerAddress || storeAddress;
+      }
+    } catch (presetErr) {
+      console.warn('[sendOrderInvoiceEmailAction] Warning: Failed to load invoice config:', presetErr);
+    }
+
+    let items = [];
+    if (Array.isArray(order.items)) {
+      items = order.items.map((item: any) => ({
+        name: item.name || `Order Item`,
+        qty: item.quantity || 1,
+        unitPrice: item.price || 0,
+      }));
+    } else {
+      items = [{ name: `Order ${order.orderId || order.id}`, qty: 1, unitPrice: order.total }];
+    }
+
+    const emailResult = await sendOrderInvoiceEmail({
+      to: customerEmail,
+      orderNumber: order.orderId || order.id,
+      customerName,
+      shippingAddress: order.shippingAddress || '',
+      items,
+      totalAmount: order.total,
+      paymentMethod: order.paymentDetails?.method ? `${order.paymentDetails.method.toUpperCase()} (${order.paymentDetails.status || 'paid'})` : 'Paid',
+      storeName,
+      storePhone,
+      storeEmail,
+      storeAddress,
+    });
+
+    if (!emailResult.success) {
+      return { success: false, error: emailResult.error || 'Failed to send email.' };
+    }
+
+    await writeAuditLog(
+      check.actorEmail || 'admin',
+      'update',
+      'orders',
+      id,
+      { emailSent: false },
+      { emailSent: true },
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('[sendOrderInvoiceEmailAction] Error:', err);
+    return { success: false, error: err.message || 'An error occurred while sending the email.' };
+  }
+}
+
+interface SendInvoiceWorkflowParams {
+  saleId: string;
+  email?: string;
+  customerName?: string;
+  customerPhone?: string;
+}
+
+export async function sendInvoiceViaWorkflowAction(params: SendInvoiceWorkflowParams) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const adminPb = await getAdminPb();
+    
+    const sale = await pbSales.getById(params.saleId);
+    if (!sale) return { success: false, error: 'Sale record not found.' };
+
+    const saleItems = await pbSales.getItemsBySale(params.saleId);
+    if (!saleItems) return { success: false, error: 'Sale items not found.' };
+
+    let resolvedEmail = params.email?.trim() || sale.customer_email?.trim();
+    const resolvedName = params.customerName?.trim() || sale.customer_name?.trim() || 'Walk-in Customer';
+    const resolvedPhone = params.customerPhone?.trim() || sale.customer_phone?.trim() || '';
+
+    if (resolvedEmail && (resolvedEmail.endsWith('@customer.local') || resolvedEmail === 'customer@ftc.lk')) {
+      resolvedEmail = '';
+    }
+
+    let customerRecord: any = null;
+
+    if (resolvedPhone) {
+      const list = await adminPb.collection('customers').getFullList({
+        filter: `phone = "${resolvedPhone.replace(/"/g, '\\"')}"`,
+        limit: 1
+      });
+      if (list.length > 0) {
+        customerRecord = list[0];
+      }
+    }
+
+    if (!resolvedEmail) {
+      if (customerRecord) {
+        const custEmail = customerRecord.email;
+        if (custEmail && !custEmail.endsWith('@customer.local') && custEmail !== 'customer@ftc.lk') {
+          resolvedEmail = custEmail;
+        }
+      }
+      
+      if (!resolvedEmail) {
+        return {
+          success: true,
+          requireEmailPrompt: true,
+          customerFound: !!customerRecord,
+          defaultName: resolvedName,
+          defaultPhone: resolvedPhone,
+        };
+      }
+    }
+
+    if (customerRecord) {
+      const currentEmail = customerRecord.email;
+      if (!currentEmail || currentEmail.endsWith('@customer.local') || currentEmail === 'customer@ftc.lk' || currentEmail !== resolvedEmail) {
+        await adminPb.collection('customers').update(customerRecord.id, {
+          email: resolvedEmail
+        });
+      }
+    } else {
+      customerRecord = await adminPb.collection('customers').create({
+        name: resolvedName,
+        email: resolvedEmail,
+        phone: resolvedPhone,
+        ordersCount: 1,
+        totalSpent: sale.total,
+        status: 'active',
+        notes: `Created via Send Invoice Workflow for Sale #${sale.receipt_number || sale.id}`,
+      });
+    }
+
+    const saleUpdate: Record<string, any> = {
+      customer_email: resolvedEmail
+    };
+    if (resolvedName !== sale.customer_name) saleUpdate.customer_name = resolvedName;
+    if (resolvedPhone !== sale.customer_phone) saleUpdate.customer_phone = resolvedPhone;
+    
+    await adminPb.collection('sales').update(sale.id, saleUpdate);
+
+    let storeName = 'FTC Electronics';
+    let storePhone = '';
+    let storeEmail = '';
+    let storeAddress = '';
+
+    try {
+      const presetsRes = await getInvoicePrintPresetsAction();
+      if (presetsRes.success && presetsRes.data && presetsRes.data.length > 0) {
+        const defaultPreset = presetsRes.data.find((p) => p.isDefault) || presetsRes.data[0];
+        const config = JSON.parse(defaultPreset.config);
+        storeName = config.storeName || storeName;
+        storePhone = config.headerPhone || storePhone;
+        storeEmail = config.headerEmail || storeEmail;
+        storeAddress = config.headerAddress || storeAddress;
+      }
+    } catch (presetErr) {
+      console.warn('[sendInvoiceViaWorkflowAction] Warning: Failed to load invoice config:', presetErr);
+    }
+
+    const items = saleItems.map((i) => ({
+      name: i.product_name,
+      qty: i.quantity,
+      unitPrice: i.unit_price,
+      discount: i.item_discount || 0,
+    }));
+
+    const emailResult = await sendOrderInvoiceEmail({
+      to: resolvedEmail,
+      orderNumber: sale.receipt_number || `FTC-POS-${sale.id.slice(-6).toUpperCase()}`,
+      customerName: resolvedName,
+      shippingAddress: '',
+      items,
+      totalAmount: sale.total,
+      paymentMethod: `Paid via ${sale.payment_method?.toUpperCase() || 'POS'}`,
+      storeName,
+      storePhone,
+      storeEmail,
+      storeAddress,
+    });
+
+    if (!emailResult.success) {
+      return { success: false, error: emailResult.error || 'Failed to send email.' };
+    }
+
+    await writeAuditLog(
+      check.actorEmail || 'admin',
+      'update',
+      'sales',
+      sale.id,
+      { customer_email: sale.customer_email },
+      { customer_email: resolvedEmail },
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/admin/sales');
+    return { success: true, emailedTo: resolvedEmail };
+  } catch (err: any) {
+    console.error('[sendInvoiceViaWorkflowAction] Error:', err);
+    return { success: false, error: err.message || 'An error occurred.' };
+  }
+}
+
+
 

@@ -20,6 +20,8 @@ export interface PBProduct extends PBRecord {
   description: string;
   price: number;
   discountPrice?: number;
+  wholesalePrice?: number;
+  wholesale_price?: number;
   images: string[]; // PocketBase file field names
   category: string; // relation ID → categories
   brand: string; // relation ID → brands
@@ -361,6 +363,15 @@ export interface PBPromotion extends PBRecord {
   isActive: boolean;
 }
 
+// ─── Announcements Collection ──────────────────────────────────────────────────
+export interface PBAnnouncement extends PBRecord {
+  title: string;
+  image: string;
+  link?: string;
+  isActive: boolean;
+  endsAt?: string;
+}
+
 // ─── Audit Log Collection ─────────────────────────────────────────────────────
 export type AuditAction =
   | "create"
@@ -533,6 +544,7 @@ export function pbProductToProduct(record: PBProduct, pbUrl: string): Product {
     description: record.description,
     price: record.price,
     discountPrice: record.discountPrice || undefined,
+    wholesalePrice: record.wholesalePrice || record.wholesale_price || undefined,
     images:
       imageUrls.length > 0
         ? imageUrls

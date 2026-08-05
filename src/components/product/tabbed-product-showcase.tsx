@@ -88,9 +88,10 @@ export default function TabbedProductShowcase({
       scrollContainerRef.current.scrollLeft = 0;
     }
     // Give Next.js time to update render before checking size
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       checkScroll();
     }, 100);
+    return () => clearTimeout(timer);
   }, [activeTab]);
 
   useEffect(() => {

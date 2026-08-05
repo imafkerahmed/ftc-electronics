@@ -116,7 +116,7 @@ export default function WidescreenHeroSlider() {
   };
 
   return (
-    <div className="w-full max-w-7xl mx-auto px-4 py-6 z-10 relative">
+    <div className="w-full max-w-7xl mx-auto px-4 py-6 z-10 relative pt-16 sm:pt-20 lg:pt-24">
       <Card
         size="default"
         className="relative w-full aspect-[4/3] sm:aspect-[16/10] md:aspect-video overflow-hidden border border-border bg-card rounded-2xl shadow-xs"

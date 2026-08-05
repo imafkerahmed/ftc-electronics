@@ -17,6 +17,9 @@ interface Promotion {
   endDate: string;
   status: 'active' | 'scheduled' | 'expired';
   isActive: boolean;
+  minOrderValue?: number;
+  usageLimit?: number;
+  usageCount?: number;
 }
 
 export default function AdminPromotionsPage() {
@@ -34,6 +37,8 @@ export default function AdminPromotionsPage() {
   const [value, setValue] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [minOrderValue, setMinOrderValue] = useState('');
+  const [usageLimit, setUsageLimit] = useState('');
 
   // Feedback states
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +68,9 @@ export default function AdminPromotionsPage() {
           endDate: (p.endDate || p.ends_at || '').split('T')[0],
           status,
           isActive: p.isActive || false,
+          minOrderValue: p.minOrderValue || 0,
+          usageLimit: p.usageLimit || 0,
+          usageCount: p.usageCount || 0,
         };
       }));
     } catch (err: any) {
@@ -84,6 +92,8 @@ export default function AdminPromotionsPage() {
     setValue('');
     setStartDate(new Date().toISOString().split('T')[0]);
     setEndDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+    setMinOrderValue('');
+    setUsageLimit('');
     setError(null);
     setSuccess(null);
     setIsModalOpen(true);
@@ -97,6 +107,8 @@ export default function AdminPromotionsPage() {
     setValue(promo.value.toString());
     setStartDate(promo.startDate);
     setEndDate(promo.endDate);
+    setMinOrderValue(promo.minOrderValue ? promo.minOrderValue.toString() : '');
+    setUsageLimit(promo.usageLimit ? promo.usageLimit.toString() : '');
     setError(null);
     setSuccess(null);
     setIsModalOpen(true);
@@ -132,24 +144,25 @@ export default function AdminPromotionsPage() {
 
     startTransition(async () => {
       let res;
+      const payload = {
+        name,
+        couponCode: code,
+        type,
+        discountValue: parseFloat(value) || 0,
+        startDate: new Date(startDate).toISOString(),
+        endDate: new Date(endDate).toISOString(),
+        minOrderValue: parseFloat(minOrderValue) || 0,
+        usageLimit: parseInt(usageLimit) || 0,
+      };
+
       if (editingPromotion) {
         res = await updatePromotionAction(editingPromotion.id, {
-          name,
-          couponCode: code,
-          type,
-          discountValue: parseFloat(value) || 0,
-          startDate: new Date(startDate).toISOString(),
-          endDate: new Date(endDate).toISOString(),
+          ...payload,
           isActive: editingPromotion.isActive,
         });
       } else {
         res = await createPromotionAction({
-          name,
-          couponCode: code,
-          type,
-          discountValue: parseFloat(value) || 0,
-          startDate: new Date(startDate).toISOString(),
-          endDate: new Date(endDate).toISOString(),
+          ...payload,
           isActive: true,
         });
       }
@@ -232,8 +245,12 @@ export default function AdminPromotionsPage() {
             promotions.map((promo) => (
               <div
                 key={promo.id}
-                className="bg-card border border-border rounded-xl p-5 hover:border-blue-500/25 transition-all group relative flex flex-col justify-between min-h-[170px]"
+                className="bg-card border border-border rounded-xl p-5 hover:border-blue-500/25 transition-all group relative flex flex-col justify-between min-h-[210px] overflow-hidden"
               >
+                {/* Dotted coupon line divider & ticket cutout indicators */}
+                <div className="absolute top-1/2 left-0 w-3 h-6 bg-background border-r border-border -mt-3 rounded-r-full -translate-x-[1px] z-10" />
+                <div className="absolute top-1/2 right-0 w-3 h-6 bg-background border-l border-border -mt-3 rounded-l-full translate-x-[1px] z-10" />
+
                 <div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="px-2.5 py-1 rounded bg-secondary/85 border border-border/80 text-xs font-mono font-bold uppercase tracking-wider text-foreground">
@@ -263,19 +280,42 @@ export default function AdminPromotionsPage() {
                   <h3 className="font-bold text-foreground text-sm mt-3.5 leading-snug">
                     {promo.name}
                   </h3>
+                  
+                  {/* Coupon criteria details */}
+                  <div className="mt-2 space-y-1 text-[10px] text-muted-foreground">
+                    <div>
+                      {promo.minOrderValue && promo.minOrderValue > 0 ? (
+                        <span>🛒 Min. Purchase: <strong className="text-foreground">LKR {promo.minOrderValue.toLocaleString()}</strong></span>
+                      ) : (
+                        <span>🛒 No minimum purchase required</span>
+                      )}
+                    </div>
+                    <div>
+                      {promo.usageLimit && promo.usageLimit > 0 ? (
+                        <span>
+                          🎟️ Usage: <strong className="text-foreground">{promo.usageCount} / {promo.usageLimit}</strong> times
+                          {promo.usageCount !== undefined && promo.usageCount >= promo.usageLimit && (
+                            <span className="ml-1 text-red-400 font-bold">(Fully Used)</span>
+                          )}
+                        </span>
+                      ) : (
+                        <span>🎟️ Unlimited usage times</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
-                <div className="mt-4 pt-4 border-t border-border/60 flex items-center justify-between text-xs">
+                <div className="mt-4 pt-4 border-t border-dashed border-border/80 flex items-center justify-between text-xs">
                   <div className="flex items-center gap-1 text-muted-foreground">
-                    <Percent className="h-3.5 w-3.5" />
-                    <span className="font-semibold text-foreground">
+                    <Percent className="h-3.5 w-3.5 text-emerald-500" />
+                    <span className="font-bold text-foreground">
                       {promo.type === 'percentage'
                         ? `${promo.value}% Off`
                         : `LKR ${promo.value.toLocaleString()} Off`}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-1 text-muted-foreground">
+                  <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
                     <Calendar className="h-3.5 w-3.5" />
                     <span>Ends {promo.endDate}</span>
                   </div>
@@ -350,6 +390,17 @@ export default function AdminPromotionsPage() {
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-foreground/80 block">Discount Value *</label>
                   <Input type="number" value={value} onChange={(e) => setValue(e.target.value)} required />
+                </div>
+              </div>
+
+               <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground/80 block">Min Order Value (LKR)</label>
+                  <Input type="number" value={minOrderValue} onChange={(e) => setMinOrderValue(e.target.value)} placeholder="e.g. 5000" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground/80 block">Usage Limit</label>
+                  <Input type="number" value={usageLimit} onChange={(e) => setUsageLimit(e.target.value)} placeholder="Leave blank if unlimited" />
                 </div>
               </div>
 

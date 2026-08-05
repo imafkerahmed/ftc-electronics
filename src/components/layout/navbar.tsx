@@ -250,11 +250,11 @@ export default function Navbar() {
       <AnimatePresence>
         {showBanner && announcement?.show !== false && !isIntroActive && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            style={{ backgroundColor: announcement?.bgColor || undefined }}
+            initial={{ scaleY: 0, opacity: 0 }}
+            animate={{ scaleY: 1, opacity: 1 }}
+            exit={{ scaleY: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{ backgroundColor: announcement?.bgColor || undefined, transformOrigin: 'top' }}
             className="w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 text-white text-xs font-semibold z-50 relative overflow-hidden"
           >
             <div className="relative flex items-center justify-center h-9 px-10">
@@ -291,7 +291,7 @@ export default function Navbar() {
       {/* ── Main Navigation Header ── */}
       <header
         className={cn(
-          "sticky top-0 z-50 w-full border-b backdrop-blur-md transition-all duration-500",
+          "sticky top-0 z-50 w-full border-b backdrop-blur-sm transition-all duration-200",
           isIntroActive
             ? "border-transparent bg-transparent backdrop-blur-none"
             : isScrolled
@@ -349,25 +349,25 @@ export default function Navbar() {
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
             <Link
               href="/"
-              className="flex items-center gap-2 text-xl font-bold tracking-wider text-foreground group"
+              className="flex items-center gap-1.5 sm:gap-2 text-xl font-bold tracking-wider text-foreground group select-none"
             >
               {!isIntroActive && (
                 <>
                   <motion.span
                     transition={{ type: "spring", stiffness: 80, damping: 20 }}
-                    className="relative text-blue-600"
+                    className="relative text-blue-600 font-black text-xl sm:text-2xl"
                   >
                     FTC
                   </motion.span>
                   <motion.span
                     transition={{ type: "spring", stiffness: 80, damping: 20 }}
-                    className="text-muted-foreground font-light"
+                    className="text-muted-foreground font-light hidden sm:inline-block"
                   >
                     |
                   </motion.span>
                   <motion.span
                     transition={{ type: "spring", stiffness: 80, damping: 20 }}
-                    className="text-xs uppercase tracking-widest text-foreground/80"
+                    className="text-xs uppercase tracking-widest text-foreground/80 hidden sm:inline-block"
                   >
                     Electronics
                   </motion.span>
@@ -417,23 +417,31 @@ export default function Navbar() {
                   </div>
                 )
               ) : (
-                <div aria-hidden="true" className="flex items-center text-xs font-extrabold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-full border border-border bg-secondary/20 gap-0.5 select-none h-8 min-w-[80px] justify-center relative overflow-hidden">
-                  <span>Sign-</span>
-                  <div className="relative h-4 w-6 flex items-center justify-start overflow-hidden">
-                    <AnimatePresence mode="wait">
-                      <motion.span
-                        key={authSuffix}
-                        initial={{ y: 12, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        exit={{ y: -12, opacity: 0 }}
-                        transition={{ duration: 0.25, ease: "easeInOut" }}
-                        className="absolute text-blue-600 dark:text-blue-400 font-extrabold uppercase"
-                      >
-                        {authSuffix}
-                      </motion.span>
-                    </AnimatePresence>
+                <>
+                  {/* Mobile View (< sm): Compact User Icon */}
+                  <div className="sm:hidden flex items-center justify-center h-8 w-8 rounded-full border border-border bg-secondary/20 text-muted-foreground hover:text-foreground">
+                    <User className="h-4 w-4" />
                   </div>
-                </div>
+
+                  {/* Desktop / Tablet View (>= sm): Animated Sign-IN Pill */}
+                  <div aria-hidden="true" className="hidden sm:flex items-center text-xs font-extrabold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-full border border-border bg-secondary/20 gap-0.5 select-none h-8 min-w-[80px] justify-center relative overflow-hidden">
+                    <span>Sign-</span>
+                    <div className="relative h-4 w-6 flex items-center justify-start overflow-hidden">
+                      <AnimatePresence mode="wait">
+                        <motion.span
+                          key={authSuffix}
+                          initial={{ y: 12, opacity: 0 }}
+                          animate={{ y: 0, opacity: 1 }}
+                          exit={{ y: -12, opacity: 0 }}
+                          transition={{ duration: 0.25, ease: "easeInOut" }}
+                          className="absolute text-blue-600 dark:text-blue-400 font-extrabold uppercase"
+                        >
+                          {authSuffix}
+                        </motion.span>
+                      </AnimatePresence>
+                    </div>
+                  </div>
+                </>
               )}
             </button>
 
@@ -448,8 +456,8 @@ export default function Navbar() {
               <ShoppingBag className="h-5 w-5" />
               {cartCount > 0 && (
                 <motion.span
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
+                  initial={{ scale: 0.95, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
                   className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[10px] font-bold text-white ring-2 ring-background"
                 >
                   {/* Pulse ring */}

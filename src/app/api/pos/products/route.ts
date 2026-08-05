@@ -13,7 +13,7 @@ export async function GET() {
         filter: 'status = "published"',
         expand: 'category',
         sort: 'name',
-        fields: 'id,name,slug,price,discountPrice,images,category,collectionId,expand,countInStock',
+        fields: 'id,name,slug,price,discountPrice,wholesalePrice,wholesale_price,images,category,collectionId,expand,countInStock',
       }),
       adminPb.collection('stock_management').getFullList({
         filter: 'status = "available"',
@@ -31,6 +31,7 @@ export async function GET() {
       name: r.name,
       sku: r.slug || r.id,
       price: r.discountPrice || r.price,
+      wholesalePrice: r.wholesalePrice || r.wholesale_price || undefined,
       imageUrl:
         r.images?.[0]
           ? `${pbUrl}/api/files/${r.collectionId}/${r.id}/${r.images[0]}?thumb=200x200`

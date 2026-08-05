@@ -90,8 +90,12 @@ export default function PosProductGrid({ onAddToCart, refreshTrigger }: PosProdu
       setScanError(null);
       try {
         const res = await fetch(`/api/pos/scan?q=${encodeURIComponent(q)}`);
+        if (!res.ok) {
+          setScanError('Product lookup failed.');
+          return;
+        }
         const data = await res.json();
-        if (res.ok && data.success && data.data) {
+        if (data.success && data.data) {
           const item = data.data;
           onAddToCart({
             key: item.unitBarcode ? `${item.productId}-${item.unitBarcode}` : item.productId,

@@ -36,9 +36,13 @@ export async function createCheckoutSession(config: StripeSessionConfig) {
  */
 export async function createPaymentIntent(amount: number) {
   await new Promise((resolve) => setTimeout(resolve, 800));
-  
+
+  const array = new Uint8Array(16);
+  crypto.getRandomValues(array);
+  const randomHex = Array.from(array, (b) => b.toString(16).padStart(2, '0')).join('');
+
   return {
-    clientSecret: `pi_${Math.random().toString(36).substring(2, 15)}_secret_${Math.random().toString(36).substring(2, 15)}`,
+    clientSecret: `pi_${randomHex.substring(0, 12)}_secret_${randomHex.substring(12)}`,
     amount,
     status: 'requires_payment_method',
   };

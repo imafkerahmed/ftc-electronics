@@ -136,7 +136,7 @@ export default function HeroCarousel() {
   return (
     <section
       ref={containerRef}
-      className="relative w-full min-h-[620px] sm:min-h-[700px] lg:h-[calc(100vh-4rem)] lg:min-h-[650px] lg:max-h-[850px] bg-background border-b border-border overflow-hidden select-none"
+      className="relative w-full min-h-[620px] sm:min-h-[700px] lg:h-[calc(100vh-4rem)] lg:min-h-[650px] lg:max-h-[850px] bg-background border-b border-border overflow-hidden select-none pt-16 sm:pt-20 lg:pt-24"
       onMouseEnter={() => setIsPlaying(false)}
       onMouseLeave={() => setIsPlaying(true)}
       aria-label="New Arrivals Products Carousel"

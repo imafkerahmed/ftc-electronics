@@ -123,8 +123,12 @@ export default function PosNewSaleTerminal({
 
     try {
       const res = await fetch(`/api/pos/scan?q=${encodeURIComponent(q)}`);
+      if (!res.ok) {
+        setScanError('Failed to fetch item details.');
+        return;
+      }
       const data = await res.json();
-      if (res.ok && data.success && data.data) {
+      if (data.success && data.data) {
         const item = data.data;
         onAddToCart({
           key: item.unitBarcode ? `${item.productId}-${item.unitBarcode}` : item.productId,

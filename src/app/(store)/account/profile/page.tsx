@@ -16,22 +16,27 @@ export default function ProfilePage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let isMounted = true;
     async function loadUser() {
       setLoading(true);
       try {
         const res = await getCurrentUserSessionAction();
+        if (!isMounted) return;
         if (res.success && res.user) {
           setProfile(res.user);
         } else {
           router.push('/');
         }
       } catch {
-        router.push('/');
+        if (isMounted) router.push('/');
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     }
     void loadUser();
+    return () => {
+      isMounted = false;
+    };
   }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {

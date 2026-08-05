@@ -24,6 +24,8 @@ import {
   Printer,
   Receipt,
   FileText,
+  Mail,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +34,7 @@ import {
   getSaleByIdAction,
   getReceiptPrintPresetsAction,
   getInvoicePrintPresetsAction,
+  sendInvoiceViaWorkflowAction,
 } from "@/app/actions/admin";
 import type { PBSale, PBSaleItem } from "@/types/pos";
 import { printReceipt, resolveReceiptConfig } from "@/lib/receipt-print";
@@ -39,7 +42,13 @@ import {
   DEFAULT_RECEIPT_CONFIG,
   normalizeReceiptConfig,
 } from "@/types/receipt-config";
-import { printInvoice, resolveInvoiceConfig, type InvoiceData } from "@/lib/invoice-print";
+import {
+  printInvoice,
+  resolveInvoiceConfig,
+  generateInvoicePdfBlob,
+  downloadInvoicePdf,
+  type InvoiceData,
+} from "@/lib/invoice-print";
 import {
   DEFAULT_INVOICE_CONFIG,
   normalizeInvoiceConfig,
@@ -77,6 +86,7 @@ function fmt(amount: number) {
 export default function AdminSalesTrackerPage() {
   const [sales, setSales] = useState<UnifiedSale[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterSource, setFilterSource] = useState<
@@ -91,7 +101,18 @@ export default function AdminSalesTrackerPage() {
   } | null>(null);
   const [loadingReceipt, setLoadingReceipt] = useState(false);
 
+  // Send Invoice Workflow States
+  const [showSendWorkflow, setShowSendWorkflow] = useState(false);
+  const [workflowTab, setWorkflowTab] = useState<'email' | 'whatsapp'>('email');
+  const [workflowEmail, setWorkflowEmail] = useState('');
+  const [workflowName, setWorkflowName] = useState('');
+  const [workflowPhone, setWorkflowPhone] = useState('');
+  const [sendingWorkflow, setSendingWorkflow] = useState(false);
+  const [sharingWhatsapp, setSharingWhatsapp] = useState(false);
+  const [workflowMessage, setWorkflowMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+
   useEffect(() => {
+    let isMounted = true;
     async function fetchReceipt() {
       if (!selectedPosSaleId) {
         setPosReceiptDetails(null);
@@ -100,16 +121,19 @@ export default function AdminSalesTrackerPage() {
       setLoadingReceipt(true);
       try {
         const res = await getSaleByIdAction(selectedPosSaleId);
-        if (res.success && res.data) {
+        if (isMounted && res.success && res.data) {
           setPosReceiptDetails(res.data);
         }
       } catch {
-        /* ignore */
+        if (isMounted) setPosReceiptDetails(null);
       } finally {
-        setLoadingReceipt(false);
+        if (isMounted) setLoadingReceipt(false);
       }
     }
-    void fetchReceipt();
+    fetchReceipt();
+    return () => {
+      isMounted = false;
+    };
   }, [selectedPosSaleId]);
 
   const modalRef = useRef<HTMLDivElement | null>(null);
@@ -244,6 +268,99 @@ export default function AdminSalesTrackerPage() {
     printInvoice(cfg, invoiceData, isVoided ? "POS Voided Invoice" : "Paid Invoice");
   };
 
+  const handleShareWhatsappInvoice = async () => {
+    if (!posReceiptDetails) return;
+    setSharingWhatsapp(true);
+    setWorkflowMessage(null);
+
+    try {
+      const { sale, items } = posReceiptDetails;
+      const rawDateStr = sale.date || sale.created || sale.updated;
+      const d = rawDateStr ? new Date(rawDateStr) : new Date();
+      const formattedDate = (isNaN(d.getTime()) ? new Date() : d).toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
+
+      const isVoided = sale.status === 'voided';
+      const docNumber = sale.receipt_number || `INV-POS-${sale.id.slice(-6).toUpperCase()}`;
+
+      const invoiceData: InvoiceData = {
+        docType: "Invoice",
+        docNumber: isVoided ? `${docNumber} (VOIDED)` : docNumber,
+        date: formattedDate,
+        customerName: workflowName.trim() || sale.customer_name || "Walk-in Customer",
+        customerPhone: workflowPhone.trim() || sale.customer_phone || undefined,
+        items: items.map((i) => ({
+          name: i.product_name,
+          qty: i.quantity,
+          unitPrice: i.unit_price,
+          discount: i.item_discount || undefined,
+          serialNumber: i.unit_serial || undefined,
+        })),
+        subtotal: sale.subtotal,
+        taxAmount: sale.tax_amount || 0,
+        discountAmount: sale.discount || 0,
+        totalAmount: sale.total,
+        paymentMethod: isVoided
+          ? 'VOIDED / CANCELLED'
+          : `PAID via ${(sale.payment_method || 'POS').toUpperCase()}`,
+        notes: isVoided
+          ? `*** THIS SALE HAS BEEN VOIDED / CANCELLED *** ${sale.void_reason ? 'Reason: ' + sale.void_reason : ''}`
+          : 'Official Paid Invoice. Thank you for shopping with FTC Electronics! Warranty claims require original invoice copy.',
+      };
+
+      const cfg = await resolveInvoiceConfig();
+      const pdfBlob = await generateInvoicePdfBlob(cfg, invoiceData, isVoided ? "POS Voided Invoice" : "Paid Invoice");
+      const fileName = `${docNumber}.pdf`;
+      const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+      if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+        await navigator.share({
+          files: [pdfFile],
+          title: `Invoice ${docNumber}`,
+          text: `Invoice document for order ${docNumber}`,
+        });
+        setWorkflowMessage({
+          type: 'success',
+          text: `Invoice document (${fileName}) attached successfully via system share.`,
+        });
+        return;
+      }
+
+      // Fallback for desktop browser: download PDF document & open WhatsApp Web
+      const url = URL.createObjectURL(pdfBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      const phone = workflowPhone || '';
+      const cleanPhone = phone.replace(/\D/g, '');
+      const itemsStr = items.map(i => `• ${i.product_name} x${i.quantity} - ${fmt(i.line_total)}`).join('%0A');
+      const text = `*FTC Electronics*%0AInvoice Document: *${docNumber}*%0A*Date:* ${formattedDate}%0A*Total:* ${fmt(sale.total)}%0A%0A*Items:*%0A${itemsStr}%0A%0A📄 *Invoice PDF document (${fileName}) has been downloaded to your device.* Please attach it to this chat!%0AThank you for shopping with us!`;
+
+      window.open(`https://wa.me/${cleanPhone || '94'}?text=${text}`, '_blank');
+
+      setWorkflowMessage({
+        type: 'success',
+        text: `📄 Invoice PDF (${fileName}) downloaded! WhatsApp Web opened — drag & drop or attach the PDF file into the chat.`,
+      });
+    } catch (err: any) {
+      console.error('WhatsApp PDF share error:', err);
+      setWorkflowMessage({
+        type: 'error',
+        text: err.message || 'Failed to generate PDF document for WhatsApp.',
+      });
+    } finally {
+      setSharingWhatsapp(false);
+    }
+  };
+
   const loadData = async () => {
     try {
       setLoading(true);
@@ -262,6 +379,7 @@ export default function AdminSalesTrackerPage() {
   };
 
   useEffect(() => {
+    setMounted(true);
     loadData();
   }, []);
 
@@ -312,7 +430,7 @@ export default function AdminSalesTrackerPage() {
         </div>
         <Button
           onClick={() => startTransition(loadData)}
-          disabled={loading || isPending}
+          disabled={!mounted || loading || isPending}
           variant="outline"
           size="sm"
           className="self-start md:self-auto gap-1.5"
@@ -716,6 +834,23 @@ export default function AdminSalesTrackerPage() {
               {posReceiptDetails && (
                 <>
                   <Button
+                    onClick={() => {
+                      const name = posReceiptDetails.sale.customer_name || '';
+                      const phone = posReceiptDetails.sale.customer_phone || '';
+                      const email = posReceiptDetails.sale.customer_email || '';
+                      
+                      setWorkflowName(name);
+                      setWorkflowPhone(phone);
+                      setWorkflowEmail(email && !email.endsWith('@customer.local') && email !== 'customer@ftc.lk' ? email : '');
+                      setWorkflowMessage(null);
+                      setWorkflowTab('email');
+                      setShowSendWorkflow(true);
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white gap-1 text-xs font-bold cursor-pointer"
+                  >
+                    <Mail className="h-3.5 w-3.5" /> Send Invoice
+                  </Button>
+                  <Button
                     variant="outline"
                     size="sm"
                     onClick={handlePrintInvoice}
@@ -730,6 +865,221 @@ export default function AdminSalesTrackerPage() {
                     <Printer className="h-3.5 w-3.5" /> Thermal Receipt
                   </Button>
                 </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Send Invoice Workflow Modal */}
+      {showSendWorkflow && posReceiptDetails && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setShowSendWorkflow(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20">
+              <div className="flex items-center gap-2">
+                <Mail className="h-5 w-5 text-emerald-500" />
+                <h3 className="text-sm font-black text-foreground">
+                  Send Invoice — {posReceiptDetails.sale.receipt_number || `POS-${posReceiptDetails.sale.id.slice(-6).toUpperCase()}`}
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowSendWorkflow(false)}
+                className="text-muted-foreground hover:text-foreground p-1 rounded-lg hover:bg-muted cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
+              {workflowMessage && (
+                <div className={`p-3.5 rounded-xl border flex gap-2 items-start ${
+                  workflowMessage.type === 'success'
+                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                    : 'bg-red-500/10 border-red-500/20 text-red-400'
+                }`}>
+                  <CheckCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <p className="leading-relaxed font-semibold">{workflowMessage.text}</p>
+                </div>
+              )}
+
+              {/* Tab Selector */}
+              <div className="grid grid-cols-2 gap-2 p-1 bg-muted rounded-xl border border-border">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWorkflowTab('email');
+                    setWorkflowMessage(null);
+                  }}
+                  className={`py-2 text-center font-bold rounded-lg transition-all cursor-pointer ${
+                    workflowTab === 'email'
+                      ? 'bg-card text-foreground border border-border shadow-xs'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Email Invoice
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWorkflowTab('whatsapp');
+                    setWorkflowMessage(null);
+                  }}
+                  className={`py-2 text-center font-bold rounded-lg transition-all cursor-pointer ${
+                    workflowTab === 'whatsapp'
+                      ? 'bg-card text-foreground border border-border shadow-xs'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  WhatsApp Share
+                </button>
+              </div>
+
+              {workflowTab === 'email' ? (
+                /* Email Form */
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                      Customer Name
+                    </label>
+                    <Input
+                      value={workflowName}
+                      onChange={(e) => setWorkflowName(e.target.value)}
+                      placeholder="Enter customer name"
+                      className="h-10 text-xs rounded-xl bg-background border-border text-foreground"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                      Customer Phone
+                    </label>
+                    <Input
+                      value={workflowPhone}
+                      onChange={(e) => setWorkflowPhone(e.target.value)}
+                      placeholder="Enter customer phone number"
+                      className="h-10 text-xs rounded-xl font-mono bg-background border-border text-foreground"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                      Email Address *
+                    </label>
+                    <Input
+                      value={workflowEmail}
+                      onChange={(e) => setWorkflowEmail(e.target.value)}
+                      placeholder="Enter customer email address"
+                      className="h-10 text-xs rounded-xl font-mono bg-background border-border text-foreground"
+                    />
+                  </div>
+
+                  <p className="text-[10px] text-muted-foreground bg-muted/40 border border-border p-3 rounded-xl leading-relaxed">
+                    💡 **Database Auto-Sync**: Submitting this email address will search for an existing customer in your system by their phone number. If found, their email is updated. If both the customer and email are not found, a new customer record is created in the database.
+                  </p>
+                </div>
+              ) : (
+                /* WhatsApp form */
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                      Customer Phone / WhatsApp Number
+                    </label>
+                    <Input
+                      value={workflowPhone}
+                      onChange={(e) => setWorkflowPhone(e.target.value)}
+                      placeholder="Enter WhatsApp number (e.g. 94771234567)"
+                      className="h-10 text-xs rounded-xl font-mono bg-background border-border text-foreground"
+                    />
+                  </div>
+
+                  <p className="text-[10px] text-muted-foreground bg-muted/40 border border-border p-3 rounded-xl leading-relaxed">
+                    💬 **Local Client Share**: Clicking the button below will open WhatsApp Web or your local desktop client to send the receipt details directly via your logged-in WhatsApp session.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-border bg-muted/20 flex justify-end gap-2 shrink-0">
+              <Button variant="outline" size="sm" onClick={() => setShowSendWorkflow(false)} className="cursor-pointer">
+                Cancel
+              </Button>
+              {workflowTab === 'email' ? (
+                <Button
+                  disabled={sendingWorkflow || !workflowEmail.trim()}
+                  onClick={async () => {
+                    setSendingWorkflow(true);
+                    setWorkflowMessage(null);
+                    try {
+                      const res = await sendInvoiceViaWorkflowAction({
+                        saleId: posReceiptDetails.sale.id,
+                        email: workflowEmail.trim(),
+                        customerName: workflowName.trim(),
+                        customerPhone: workflowPhone.trim(),
+                      });
+                      if (res.success) {
+                        setWorkflowMessage({
+                          type: 'success',
+                          text: `Invoice emailed to ${res.emailedTo} successfully! Database customer record updated.`,
+                        });
+                        
+                        setPosReceiptDetails((prev) => {
+                          if (!prev) return null;
+                          return {
+                            ...prev,
+                            sale: {
+                              ...prev.sale,
+                              customer_email: res.emailedTo || '',
+                              customer_name: workflowName.trim(),
+                              customer_phone: workflowPhone.trim(),
+                            },
+                          };
+                        });
+                      } else {
+                        setWorkflowMessage({
+                          type: 'error',
+                          text: res.error || 'Failed to process email workflow.',
+                        });
+                      }
+                    } catch (err: any) {
+                      setWorkflowMessage({
+                        type: 'error',
+                        text: err.message || 'An unexpected error occurred.',
+                      });
+                    } finally {
+                      setSendingWorkflow(false);
+                    }
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold gap-1 cursor-pointer"
+                >
+                  {sendingWorkflow ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Mail className="h-3.5 w-3.5" />
+                  )}
+                  Send Email Invoice
+                </Button>
+              ) : (
+                <Button
+                  disabled={sharingWhatsapp}
+                  onClick={handleShareWhatsappInvoice}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold gap-1 cursor-pointer"
+                >
+                  {sharingWhatsapp ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <FileText className="h-3.5 w-3.5" />
+                  )}
+                  Share via WhatsApp
+                </Button>
               )}
             </div>
           </div>

@@ -127,6 +127,7 @@ export default function AdminProductsPage() {
   const [slug, setSlug] = useState('');
   const [price, setPrice] = useState('');
   const [discountPrice, setDiscountPrice] = useState('');
+  const [wholesalePrice, setWholesalePrice] = useState('');
   const [category, setCategory] = useState(''); // Stores category ID
   const [brand, setBrand] = useState('');       // Stores brand ID
   const [countInStock, setCountInStock] = useState('10');
@@ -216,6 +217,7 @@ export default function AdminProductsPage() {
     setSlug('');
     setPrice('');
     setDiscountPrice('');
+    setWholesalePrice('');
     setCategory(allCategories[0]?.id || '');
     setBrand(allBrands[0]?.id || '');
     setCountInStock('10');
@@ -252,6 +254,7 @@ export default function AdminProductsPage() {
     setSlug(product.slug);
     setPrice(product.price.toString());
     setDiscountPrice(product.discountPrice?.toString() || '');
+    setWholesalePrice(product.wholesalePrice?.toString() || '');
     
     // Resolve relation IDs from names
     const catRecord = allCategories.find(c => c.name === product.category);
@@ -327,6 +330,10 @@ export default function AdminProductsPage() {
       formData.append('slug', slug);
       formData.append('price', price);
       if (discountPrice) formData.append('discountPrice', discountPrice);
+      if (wholesalePrice) {
+        formData.append('wholesalePrice', wholesalePrice);
+        formData.append('wholesale_price', wholesalePrice); // redundancy
+      }
       formData.append('category', category); // category ID
       formData.append('brand', brand);       // brand ID
       formData.append('countInStock', countInStock || '0');
@@ -800,14 +807,18 @@ export default function AdminProductsPage() {
                 {/* TAB 2: PRICING & INVENTORY */}
                 {activeTab === 'pricing' && (
                   <div className="space-y-4 animate-in fade-in duration-150">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-3 gap-4">
                       <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-foreground/80 tracking-wide block">Retail Price ($) *</label>
+                        <label className="text-xs font-semibold text-foreground/80 tracking-wide block">Retail Price ({currency === 'USD' ? '$' : 'Rs.'}) *</label>
                         <Input type="number" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" required />
                       </div>
                       <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-foreground/80 tracking-wide block">Discount Price ($)</label>
+                        <label className="text-xs font-semibold text-foreground/80 tracking-wide block">Discount Price ({currency === 'USD' ? '$' : 'Rs.'})</label>
                         <Input type="number" step="0.01" value={discountPrice} onChange={(e) => setDiscountPrice(e.target.value)} placeholder="Leave blank if none" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-foreground/80 tracking-wide block">Wholesale Price ({currency === 'USD' ? '$' : 'Rs.'})</label>
+                        <Input type="number" step="0.01" value={wholesalePrice} onChange={(e) => setWholesalePrice(e.target.value)} placeholder="Leave blank if none" />
                       </div>
                     </div>
 
