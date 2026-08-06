@@ -32,8 +32,7 @@ export default function AdminMediaLibraryPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'https://ftc-db.codix.site';
-      const pb = new PocketBase(pbUrl);
+      const { pb } = await import('@/lib/pocketbase');
       
       let records: any[] = [];
       try {
@@ -46,7 +45,7 @@ export default function AdminMediaLibraryPage() {
 
       setMedia(records.map((r: any) => ({
         id: r.id,
-        url: `${pbUrl}/api/files/${r.collectionId}/${r.id}/${r.file}`,
+        url: `${getPbUrl()}/api/files/${r.collectionId}/${r.id}/${r.file}`,
         name: r.filename || r.file || 'Unnamed Asset',
         size: r.sizeBytes ? `${Math.round(r.sizeBytes / 1024)} KB` : 'N/A',
         type: r.mimeType || 'image/jpeg',

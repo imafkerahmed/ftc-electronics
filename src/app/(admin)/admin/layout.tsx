@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   LayoutDashboard,
   Package,
@@ -26,9 +26,11 @@ import {
   ShoppingBag,
   FileText,
   Building2,
+  MessageSquare,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { logoutAction } from '@/app/actions/auth';
+import { clearAllClientSessions } from '@/lib/clear-client-storage';
 import { useSiteBranding } from '@/components/providers/site-branding-provider';
 
 interface NavItem {
@@ -43,6 +45,7 @@ const NAV_ITEMS: NavItem[] = [
   { name: 'Sales Tracker', href: '/admin/sales', icon: ScrollText },
   { name: 'Quotations', href: '/admin/quotations', icon: FileText },
   { name: 'Wholesale Dealers', href: '/admin/wholesale-dealers', icon: Building2 },
+  { name: 'Customer Inquiries', href: '/admin/inquiries', icon: MessageSquare },
   {
     name: 'Catalog',
     icon: Package,
@@ -65,18 +68,41 @@ const NAV_ITEMS: NavItem[] = [
   { name: 'System Configurations', href: '/admin/system-config', icon: Settings2 },
 ];
 
+import AdminNotificationBell from '@/components/admin/notification-bell';
+import { getAdminNotificationsAction } from '@/app/actions/admin';
+
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { logoUrl, darkLogoUrl, siteName } = useSiteBranding();
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ Catalog: true });
+  const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
+  const [newInquiriesCount, setNewInquiriesCount] = useState(0);
 
   const activeLogo = darkLogoUrl || logoUrl;
 
+  useEffect(() => {
+    async function loadAlerts() {
+      try {
+        const res = await getAdminNotificationsAction();
+        if (res.success && res.notifications) {
+          setPendingOrdersCount(res.notifications.filter((n) => n.type === 'order').length);
+          setNewInquiriesCount(res.notifications.filter((n) => n.type === 'inquiry').length);
+        }
+      } catch {}
+    }
+    void loadAlerts();
+    const interval = setInterval(() => void loadAlerts(), 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   const handleLogout = async () => {
-    await logoutAction();
-    router.push('/admin/login');
+    try {
+      await logoutAction();
+    } catch { /* ignore */ }
+    clearAllClientSessions();
+    router.push('/auth');
     router.refresh();
   };
 
@@ -175,19 +201,54 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
               // Single link
               const active = isActive(item.href!);
+              const hasOrderAlert = item.name === 'Orders' && pendingOrdersCount > 0;
+              const hasInquiryAlert = item.name === 'Customer Inquiries' && newInquiriesCount > 0;
+              const hasAlert = hasOrderAlert || hasInquiryAlert;
+
               return (
                 <Link
                   key={item.name}
                   href={item.href!}
                   title={collapsed ? item.name : undefined}
-                  className={`flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                  className={`flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-semibold transition-colors relative ${
                     active
                       ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
                   }`}
                 >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  {!collapsed && <span>{item.name}</span>}
+                  <div className="relative flex items-center justify-center">
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {collapsed && hasAlert && (
+                      <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                        <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${hasOrderAlert ? 'bg-amber-400' : 'bg-blue-400'} opacity-75`} />
+                        <span className={`relative inline-flex rounded-full h-2 w-2 ${hasOrderAlert ? 'bg-amber-500' : 'bg-blue-500'}`} />
+                      </span>
+                    )}
+                  </div>
+
+                  {!collapsed && (
+                    <>
+                      <span className="flex-1 truncate">{item.name}</span>
+                      {hasOrderAlert && (
+                        <span className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-[10px] font-bold text-amber-500">
+                          <span className="relative flex h-1.5 w-1.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500" />
+                          </span>
+                          New ({pendingOrdersCount})
+                        </span>
+                      )}
+                      {hasInquiryAlert && (
+                        <span className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/30 text-[10px] font-bold text-blue-500">
+                          <span className="relative flex h-1.5 w-1.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
+                          </span>
+                          New ({newInquiriesCount})
+                        </span>
+                      )}
+                    </>
+                  )}
                 </Link>
               );
             })}
@@ -221,6 +282,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <header className="h-14 border-b border-border bg-card/40 backdrop-blur-md flex items-center px-6 gap-4 sticky top-0 z-20">
           <div className="flex-1" />
           <div className="flex items-center gap-3">
+            <AdminNotificationBell />
+            <div className="h-4 w-px bg-border/60 mx-1" />
             <div className="h-7 w-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-[10px] font-bold">
               A
             </div>

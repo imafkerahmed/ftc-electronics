@@ -1,5 +1,6 @@
 'use client';
 
+import { formatPrice } from '@/lib/utils';
 import Image from 'next/image';
 import { Trash2, Plus, Minus } from 'lucide-react';
 import { CartItem } from '@/types/cart';
@@ -78,7 +79,7 @@ export default function CartItemRow({ item }: CartItemRowProps) {
       {/* Pricing / Delete */}
       <div className="flex flex-col items-end gap-1.5 justify-between self-stretch">
         <span className="text-sm font-bold text-foreground">
-          ${(displayPrice * quantity).toFixed(2)}
+          {formatPrice(displayPrice * quantity)}
         </span>
         <Button
           variant="ghost"

@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { X, ArrowRight, AlertCircle, CheckCircle2, Eye, EyeOff, KeyRound, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { StoreLogoHeader } from '@/components/ui/store-logo-header';
 import { loginAction, signUpAction, setOAuthSessionAction, verifyOtpAction } from '@/app/actions/auth';
 import { pb } from '@/lib/pocketbase';
 import { ClientResponseError } from 'pocketbase';
@@ -391,9 +390,8 @@ export function AuthModal({
           </button>
         )}
 
-        {/* Store Logo & Heading */}
+        {/* Heading */}
         <div className="text-center mb-6">
-          <StoreLogoHeader noLink className="mb-2" />
           <h3 id="auth-modal-title" className="text-lg font-bold text-foreground mt-3">
             {mode === 'signup_otp'
               ? 'Verify Your Email'

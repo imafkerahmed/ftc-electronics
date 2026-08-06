@@ -7,6 +7,7 @@ import Image from "next/image";
 import { Search, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useLenis } from "lenis/react";
+import { formatPrice } from "@/lib/utils";
 import { getProducts } from "@/lib/db";
 import type { Product } from "@/types/product";
 
@@ -224,11 +225,11 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
                                 </div>
                                 <div className="text-right shrink-0">
                                   <span className="text-xs font-mono font-bold text-foreground block">
-                                    ${product.discountPrice || product.price}
+                                    {formatPrice(product.discountPrice || product.price)}
                                   </span>
                                   {product.discountPrice && (
                                     <span className="text-[10px] font-mono text-muted-foreground line-through block">
-                                      ${product.price}
+                                      {formatPrice(product.price)}
                                     </span>
                                   )}
                                 </div>

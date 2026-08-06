@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Announcement } from './types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,6 +26,7 @@ interface AnnouncementModalProps {
   onClose: () => void;
   onSubmit: (e: React.FormEvent) => void;
   handleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onClearImage?: () => void;
 }
 
 export function AnnouncementModal({
@@ -47,20 +48,90 @@ export function AnnouncementModal({
   onClose,
   onSubmit,
   handleFileChange,
+  onClearImage,
 }: AnnouncementModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  // Focus management: Trap focus inside modal & handle Escape key
+  useEffect(() => {
+    if (!isOpen) return;
+
+    previousFocusRef.current = document.activeElement as HTMLElement;
+    setTimeout(() => {
+      titleInputRef.current?.focus();
+    }, 50);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (e.key === 'Tab' && dialogRef.current) {
+        const focusables = dialogRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusables.length === 0) return;
+
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      previousFocusRef.current?.focus();
+    };
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
+  const handleClear = () => {
+    if (onClearImage) {
+      onClearImage();
+    } else {
+      setSelectedFile(null);
+      setImagePreview(null);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
-      <div className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full overflow-hidden animate-scale-in">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="announcement-modal-title"
+        className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full overflow-hidden animate-scale-in"
+      >
         {/* Header */}
         <div className="p-5 border-b border-border flex items-center justify-between">
-          <h3 className="text-base font-bold text-foreground">
+          <h3 id="announcement-modal-title" className="text-base font-bold text-foreground">
             {editingAnnouncement ? 'Edit Announcement' : 'Add Popup Announcement'}
           </h3>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1 text-muted-foreground hover:text-foreground rounded-md hover:bg-muted"
+            aria-label="Close dialog"
+            className="p-1 text-muted-foreground hover:text-foreground rounded-md hover:bg-muted cursor-pointer"
           >
             <X className="h-5 w-5" />
           </button>
@@ -69,8 +140,10 @@ export function AnnouncementModal({
         {/* Form */}
         <form onSubmit={onSubmit} className="p-5 space-y-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground/80 block">Ad/Promo Title *</label>
+            <label htmlFor="announcement-title-input" className="text-xs font-semibold text-foreground/80 block">Ad/Promo Title *</label>
             <Input
+              id="announcement-title-input"
+              ref={titleInputRef}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
@@ -79,20 +152,16 @@ export function AnnouncementModal({
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground/80 block">Ad Graphic Image *</label>
+            <label htmlFor="announcement-file-input" className="text-xs font-semibold text-foreground/80 block">Ad Graphic Image *</label>
             <div className="border border-dashed border-border rounded-lg p-4 flex flex-col items-center justify-center gap-2 bg-muted/10 relative">
               {imagePreview ? (
                 <div className="relative w-full h-36 rounded-md overflow-hidden bg-black/10">
-                  { }
                   <img src={imagePreview} alt="Preview" className="w-full h-full object-contain" />
                   <button
                     type="button"
-                    onClick={() => {
-                      setSelectedFile(null);
-                      setImagePreview(null);
-                      if (fileInputRef.current) fileInputRef.current.value = '';
-                    }}
-                    className="absolute top-2 right-2 p-1 bg-red-600 text-white rounded-full hover:bg-red-500 shadow-md"
+                    onClick={handleClear}
+                    aria-label="Clear image"
+                    className="absolute top-2 right-2 z-10 p-1 bg-red-600 text-white rounded-full hover:bg-red-500 shadow-md cursor-pointer"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -106,20 +175,22 @@ export function AnnouncementModal({
                 </>
               )}
               <input
+                id="announcement-file-input"
                 type="file"
                 ref={fileInputRef}
                 accept="image/*"
                 onChange={handleFileChange}
                 className="absolute inset-0 opacity-0 cursor-pointer"
-                required={!editingAnnouncement}
+                required={!editingAnnouncement && !imagePreview}
               />
             </div>
           </div>
 
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground/80 block">Destination Action Link</label>
+              <label htmlFor="announcement-link-type" className="text-xs font-semibold text-foreground/80 block">Destination Action Link</label>
               <select
+                id="announcement-link-type"
                 value={linkType}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -141,8 +212,9 @@ export function AnnouncementModal({
 
             {linkType === 'custom' && (
               <div className="space-y-1.5 animate-fade-in">
-                <label className="text-xs font-semibold text-foreground/80 block">Custom URL Path</label>
+                <label htmlFor="announcement-custom-link" className="text-xs font-semibold text-foreground/80 block">Custom URL Path</label>
                 <Input
+                  id="announcement-custom-link"
                   value={link}
                   onChange={(e) => setLink(e.target.value)}
                   placeholder="e.g. /products/charger-slug or external URL"
@@ -153,8 +225,8 @@ export function AnnouncementModal({
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground/80 block">Auto-Expiration Date (Optional)</label>
-            <Input type="date" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
+            <label htmlFor="announcement-ends-at" className="text-xs font-semibold text-foreground/80 block">Auto-Expiration Date (Optional)</label>
+            <Input id="announcement-ends-at" type="date" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
             <p className="text-[9px] text-muted-foreground">Ad will automatically stop showing after this date.</p>
           </div>
 
@@ -164,14 +236,14 @@ export function AnnouncementModal({
               type="button"
               variant="ghost"
               onClick={onClose}
-              className="text-muted-foreground border border-border"
+              className="text-muted-foreground border border-border cursor-pointer"
               disabled={isPending}
             >
               Cancel
             </Button>
             <Button
               type="submit"
-              className="bg-blue-600 hover:bg-blue-500 text-white font-semibold flex items-center gap-1.5"
+              className="bg-blue-600 hover:bg-blue-500 text-white font-semibold flex items-center gap-1.5 cursor-pointer"
               disabled={isPending}
             >
               {isPending ? (

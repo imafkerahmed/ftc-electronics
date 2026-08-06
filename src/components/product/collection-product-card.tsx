@@ -58,10 +58,10 @@ export default function CollectionProductCard({
   };
 
   return (
-    <div className="group flex flex-col w-full min-w-0 select-none relative">
+    <div className="group flex flex-col w-full min-w-0 select-none relative rounded-2xl border border-neutral-200/90 dark:border-white/10 bg-white dark:bg-neutral-900/90 p-3 sm:p-3.5 shadow-2xs hover:shadow-xl hover:border-blue-500/50 dark:hover:border-blue-500/50 hover:-translate-y-1 transition-all duration-300">
       <Link
         href={`/products/${slug}`}
-        className="flex flex-col w-full min-w-0 cursor-pointer rounded-2xl border border-neutral-200/90 dark:border-white/10 bg-white dark:bg-neutral-900/90 p-3 sm:p-3.5 shadow-2xs hover:shadow-xl hover:border-blue-500/50 dark:hover:border-blue-500/50 hover:-translate-y-1 transition-all duration-300"
+        className="flex flex-col w-full min-w-0 cursor-pointer"
       >
         {/* ── Seamless Image Stage Container ── */}
         <div className="relative aspect-[4/5] w-full overflow-hidden rounded-xl flex items-center justify-center p-2">
@@ -94,33 +94,6 @@ export default function CollectionProductCard({
             />
           )}
 
-          {/* Hover Add to Cart Button */}
-          {!isOutOfStock && (
-            <div className="absolute bottom-2 inset-x-2 z-10 opacity-0 translate-y-3 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 ease-out">
-              <button
-                type="button"
-                onClick={handleAddToCart}
-                className={`w-full py-2 px-3 rounded-xl text-xs font-bold tracking-wide flex items-center justify-center gap-1.5 transition-all duration-200 shadow-md cursor-pointer ${
-                  added
-                    ? "bg-emerald-600 text-white"
-                    : "bg-neutral-900 text-white dark:bg-white dark:text-neutral-950 hover:bg-neutral-800 dark:hover:bg-neutral-100"
-                }`}
-              >
-                {added ? (
-                  <>
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Added to Cart</span>
-                  </>
-                ) : (
-                  <>
-                    <ShoppingBag className="w-3.5 h-3.5" />
-                    <span>Add to Cart</span>
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-
           {/* Sold out overlay */}
           {isOutOfStock && (
             <div className="absolute inset-0 flex items-center justify-center bg-white/70 dark:bg-black/70 backdrop-blur-xs z-10 rounded-xl">
@@ -142,7 +115,7 @@ export default function CollectionProductCard({
             {name}
           </h3>
 
-          <div className="mt-1 flex items-baseline gap-2">
+          <div className="mt-1 flex flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-2">
             <span className="text-sm sm:text-base font-extrabold text-neutral-900 dark:text-white tracking-tight">
               {formatPriceVal(activePrice)}
             </span>
@@ -154,6 +127,33 @@ export default function CollectionProductCard({
           </div>
         </div>
       </Link>
+
+      {/* Hover Add to Cart Button (Positioned over image stage outside Link) */}
+      {!isOutOfStock && (
+        <div className="absolute top-[calc(60%-1.5rem)] inset-x-5 z-20 opacity-0 translate-y-3 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 ease-out pointer-events-auto">
+          <button
+            type="button"
+            onClick={handleAddToCart}
+            className={`w-full py-2 px-3 rounded-xl text-xs font-bold tracking-wide flex items-center justify-center gap-1.5 transition-all duration-200 shadow-md cursor-pointer ${
+              added
+                ? "bg-emerald-600 text-white"
+                : "bg-neutral-900 text-white dark:bg-white dark:text-neutral-950 hover:bg-neutral-800 dark:hover:bg-neutral-100"
+            }`}
+          >
+            {added ? (
+              <>
+                <Check className="w-3.5 h-3.5" />
+                <span>Added to Cart</span>
+              </>
+            ) : (
+              <>
+                <ShoppingBag className="w-3.5 h-3.5" />
+                <span>Add to Cart</span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

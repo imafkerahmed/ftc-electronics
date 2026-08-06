@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ShieldCheck, ChevronRight } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { useSiteBranding } from '@/components/providers/site-branding-provider';
 
 export default function CheckoutLayout({
@@ -33,10 +33,6 @@ export default function CheckoutLayout({
             <span className="text-muted-foreground font-light"> | </span>
             <span className="text-xs uppercase text-foreground/80 tracking-widest">Checkout</span>
           </Link>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold bg-muted/60 border border-border px-3 py-1.5 rounded-full">
-            <ShieldCheck className="h-4 w-4 text-emerald-600" />
-            <span>Secure 256-bit SSL</span>
-          </div>
         </div>
       </header>
 

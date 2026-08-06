@@ -156,9 +156,8 @@ export function printBarcodeLabels(
   if (!printWindow) return;
 
   const html = getBarcodeHtml(rawCfg, items, false, title);
-  const parser = new DOMParser();
-  const parsedDoc = parser.parseFromString(html, 'text/html');
-  printWindow.document.replaceChild(parsedDoc.documentElement, printWindow.document.documentElement);
+  printWindow.document.open();
+  printWindow.document.write(html);
   printWindow.document.close();
 }
 

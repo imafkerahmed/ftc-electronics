@@ -77,21 +77,36 @@ function BarcodePresetEditor({
   const [err, setErr] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
+  const saveReqIdRef = React.useRef(0);
+  const initialRef = React.useRef(initial);
+  useEffect(() => {
+    initialRef.current = initial;
+  }, [initial]);
+
   // Debounced auto-save effect
   useEffect(() => {
     if (!existingId) return;
 
-    const isSame = JSON.stringify(cfg) === JSON.stringify(initial);
+    const isSame = JSON.stringify(cfg) === JSON.stringify(initialRef.current);
     if (isSame) return;
 
     setSaveStatus('saving');
+    setErr(null);
+    const reqId = ++saveReqIdRef.current;
+
     const timer = setTimeout(() => {
       startTransition(async () => {
         const res = await saveBarcodePrintPresetAction(cfg, existingId);
+        if (reqId !== saveReqIdRef.current) return;
+
         if (res.success) {
           setSaveStatus('saved');
           onSave(existingId, true); // silent reload
-          setTimeout(() => setSaveStatus('idle'), 2000);
+          setTimeout(() => {
+            if (reqId === saveReqIdRef.current) {
+              setSaveStatus('idle');
+            }
+          }, 2000);
         } else {
           setSaveStatus('error');
           setErr(res.error || 'Auto-save failed.');
@@ -168,7 +183,17 @@ function BarcodePresetEditor({
 
   const [zoom, setZoom] = useState(0.85);
 
-  const previewHtml = getBarcodeHtml(cfg, generateTestBarcodeItems(6), true);
+  const [debouncedCfg, setDebouncedCfg] = useState(cfg);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedCfg(cfg), 250);
+    return () => clearTimeout(t);
+  }, [cfg]);
+
+  const previewItems = React.useMemo(() => generateTestBarcodeItems(6), []);
+  const previewHtml = React.useMemo(
+    () => getBarcodeHtml(debouncedCfg, previewItems, true),
+    [debouncedCfg, previewItems]
+  );
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
@@ -293,7 +318,7 @@ function BarcodePresetEditor({
               }}
               className="border-none pointer-events-none"
               title="Barcode Preview Frame"
-              sandbox="allow-same-origin"
+              sandbox="allow-scripts"
             />
           </div>
         </div>
@@ -320,21 +345,36 @@ function ReceiptPresetEditor({
   const [err, setErr] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
+  const saveReqIdRef = React.useRef(0);
+  const initialRef = React.useRef(initial);
+  useEffect(() => {
+    initialRef.current = initial;
+  }, [initial]);
+
   // Debounced auto-save effect
   useEffect(() => {
     if (!existingId) return;
 
-    const isSame = JSON.stringify(cfg) === JSON.stringify(initial);
+    const isSame = JSON.stringify(cfg) === JSON.stringify(initialRef.current);
     if (isSame) return;
 
     setSaveStatus('saving');
+    setErr(null);
+    const reqId = ++saveReqIdRef.current;
+
     const timer = setTimeout(() => {
       startTransition(async () => {
         const res = await saveReceiptPrintPresetAction(cfg, existingId);
+        if (reqId !== saveReqIdRef.current) return;
+
         if (res.success) {
           setSaveStatus('saved');
           onSave(existingId, true); // silent reload
-          setTimeout(() => setSaveStatus('idle'), 2000);
+          setTimeout(() => {
+            if (reqId === saveReqIdRef.current) {
+              setSaveStatus('idle');
+            }
+          }, 2000);
         } else {
           setSaveStatus('error');
           setErr(res.error || 'Auto-save failed.');
@@ -375,7 +415,17 @@ function ReceiptPresetEditor({
 
   const [zoom, setZoom] = useState(0.85);
 
-  const previewHtml = getReceiptHtml(cfg, generateTestReceiptData(), true);
+  const [debouncedCfg, setDebouncedCfg] = useState(cfg);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedCfg(cfg), 250);
+    return () => clearTimeout(t);
+  }, [cfg]);
+
+  const previewData = React.useMemo(() => generateTestReceiptData(), []);
+  const previewHtml = React.useMemo(
+    () => getReceiptHtml(debouncedCfg, previewData, true),
+    [debouncedCfg, previewData]
+  );
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
@@ -546,7 +596,7 @@ function ReceiptPresetEditor({
               }}
               className="border-none pointer-events-none"
               title="Receipt Preview Frame"
-              sandbox="allow-same-origin"
+              sandbox="allow-scripts"
             />
           </div>
         </div>
@@ -573,21 +623,36 @@ function InvoicePresetEditor({
   const [err, setErr] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
+  const saveReqIdRef = React.useRef(0);
+  const initialRef = React.useRef(initial);
+  useEffect(() => {
+    initialRef.current = initial;
+  }, [initial]);
+
   // Debounced auto-save effect
   useEffect(() => {
     if (!existingId) return;
 
-    const isSame = JSON.stringify(cfg) === JSON.stringify(initial);
+    const isSame = JSON.stringify(cfg) === JSON.stringify(initialRef.current);
     if (isSame) return;
 
     setSaveStatus('saving');
+    setErr(null);
+    const reqId = ++saveReqIdRef.current;
+
     const timer = setTimeout(() => {
       startTransition(async () => {
         const res = await saveInvoicePrintPresetAction(cfg, existingId);
+        if (reqId !== saveReqIdRef.current) return;
+
         if (res.success) {
           setSaveStatus('saved');
           onSave(existingId, true); // silent reload
-          setTimeout(() => setSaveStatus('idle'), 2000);
+          setTimeout(() => {
+            if (reqId === saveReqIdRef.current) {
+              setSaveStatus('idle');
+            }
+          }, 2000);
         } else {
           setSaveStatus('error');
           setErr(res.error || 'Auto-save failed.');
@@ -628,7 +693,17 @@ function InvoicePresetEditor({
 
   const [zoom, setZoom] = useState(0.65);
 
-  const previewHtml = getInvoiceHtml(cfg, generateTestInvoiceData('Invoice'), true);
+  const [debouncedCfg, setDebouncedCfg] = useState(cfg);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedCfg(cfg), 250);
+    return () => clearTimeout(t);
+  }, [cfg]);
+
+  const previewData = React.useMemo(() => generateTestInvoiceData('Invoice'), []);
+  const previewHtml = React.useMemo(
+    () => getInvoiceHtml(debouncedCfg, previewData, true),
+    [debouncedCfg, previewData]
+  );
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
@@ -823,7 +898,7 @@ function InvoicePresetEditor({
               }}
               className="border-none pointer-events-none"
               title="Invoice Preview Frame"
-              sandbox="allow-same-origin"
+              sandbox="allow-scripts"
             />
           </div>
         </div>
@@ -875,6 +950,8 @@ export default function PrinterPresetsPage() {
       } else {
         setSelectedBarcodeId('new');
       }
+    } else {
+      showToast(res.error || 'Failed to load barcode presets.', 'error');
     }
     setLoadingBarcode(false);
   };
@@ -893,6 +970,8 @@ export default function PrinterPresetsPage() {
       } else {
         setSelectedReceiptId('new');
       }
+    } else {
+      showToast(res.error || 'Failed to load receipt presets.', 'error');
     }
     setLoadingReceipt(false);
   };
@@ -911,15 +990,25 @@ export default function PrinterPresetsPage() {
       } else {
         setSelectedInvoiceId('new');
       }
+    } else {
+      showToast(res.error || 'Failed to load invoice presets.', 'error');
     }
     setLoadingInvoice(false);
   };
 
+  // Initial load on mount for initial active tab
   useEffect(() => {
     void loadBarcodePresets();
-    void loadReceiptPresets();
-    void loadInvoicePresets();
   }, []);
+
+  // Lazy load non-active tab collections when user opens them
+  useEffect(() => {
+    if (activeTab === 'receipt' && receiptPresets.length === 0 && loadingReceipt) {
+      void loadReceiptPresets();
+    } else if (activeTab === 'invoice' && invoicePresets.length === 0 && loadingInvoice) {
+      void loadInvoicePresets();
+    }
+  }, [activeTab, receiptPresets.length, loadingReceipt, invoicePresets.length, loadingInvoice]);
 
   // Barcode Handlers
   const handleDeleteBarcode = (id: string) => {
@@ -1026,59 +1115,59 @@ export default function PrinterPresetsPage() {
     }
   };
 
-  // Active configurations
-  const activeBarcodePreset = barcodePresets.find((p) => p.id === selectedBarcodeId) || null;
-  const barcodeEditorInitial = activeBarcodePreset
+  // Resolve initial config for active preset in each category
+  const activeBarcodePreset = barcodePresets.find((p) => p.id === selectedBarcodeId);
+  const barcodeEditorInitial: BarcodePrintConfig = activeBarcodePreset
     ? parseBarcodeConfig(activeBarcodePreset.config)
-    : { ...DEFAULT_BARCODE_CONFIG };
+    : { ...DEFAULT_BARCODE_CONFIG, isDefault: barcodePresets.length === 0 };
 
-  const activeReceiptPreset = receiptPresets.find((p) => p.id === selectedReceiptId) || null;
-  const receiptEditorInitial = activeReceiptPreset
+  const activeReceiptPreset = receiptPresets.find((p) => p.id === selectedReceiptId);
+  const receiptEditorInitial: ReceiptPrintConfig = activeReceiptPreset
     ? parseReceiptConfig(activeReceiptPreset.config)
-    : { ...DEFAULT_RECEIPT_CONFIG };
+    : { ...DEFAULT_RECEIPT_CONFIG, isDefault: receiptPresets.length === 0 };
 
-  const activeInvoicePreset = invoicePresets.find((p) => p.id === selectedInvoiceId) || null;
-  const invoiceEditorInitial = activeInvoicePreset
+  const activeInvoicePreset = invoicePresets.find((p) => p.id === selectedInvoiceId);
+  const invoiceEditorInitial: InvoicePrintConfig = activeInvoicePreset
     ? parseInvoiceConfig(activeInvoicePreset.config)
-    : { ...DEFAULT_INVOICE_CONFIG };
+    : { ...DEFAULT_INVOICE_CONFIG, isDefault: invoicePresets.length === 0 };
 
   return (
-    <div className="space-y-6 max-w-7xl pb-16">
-      {/* Toast Alert */}
-      {toast && (
-        <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lg text-xs font-semibold text-white animate-in fade-in slide-in-from-top-2 ${
-          toast.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'
-        }`}>
-          {toast.type === 'success' ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
-          {toast.msg}
-        </div>
-      )}
-
-      {/* Header with Back button */}
-      <div className="border-b border-border pb-5">
-        <Link
-          href="/admin/system-config"
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mb-3 group"
-        >
-          <ArrowLeft className="h-3.5 w-3.5 group-hover:-translate-x-0.5 transition-transform" />
-          Back to System Configurations
-        </Link>
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 bg-emerald-500/10 rounded-xl flex items-center justify-center">
-            <Printer className="h-5 w-5 text-emerald-500" />
+    <div className="space-y-6 text-foreground pb-12">
+      {/* Header */}
+      <div className="border-b border-border pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+            <Link href="/admin/system-config" className="hover:text-foreground flex items-center gap-1">
+              <ArrowLeft className="h-3 w-3" /> System Config
+            </Link>
           </div>
-          <div>
-            <h1 className="text-xl font-bold text-foreground">Printer Presets</h1>
-            <p className="text-xs text-muted-foreground">Manage barcode sticker layouts and POS thermal receipt printing formats.</p>
-          </div>
+          <h1 className="text-2xl font-black tracking-tight flex items-center gap-2.5">
+            <Printer className="h-6 w-6 text-blue-500" />
+            Printer &amp; Print Presets
+          </h1>
+          <p className="text-xs text-muted-foreground mt-1">
+            Configure custom layouts, paper dimensions, typography, and default presets for Barcode Labels, POS Thermal Receipts, and A4 Sales Invoices.
+          </p>
         </div>
       </div>
 
-      {/* Tab Navigation Selector */}
-      <div className="flex border-b border-border mb-6">
+      {toast && (
+        <div
+          className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl shadow-lg border text-xs font-bold flex items-center gap-2 animate-in fade-in slide-in-from-bottom-5 duration-200 ${
+            toast.type === 'success' ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-red-600 text-white border-red-500'
+          }`}
+        >
+          {toast.type === 'success' ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+          <span>{toast.msg}</span>
+        </div>
+      )}
+
+      {/* Tabs Header */}
+      <div className="flex items-center gap-2 border-b border-border pb-0">
         <button
+          type="button"
           onClick={() => setActiveTab('barcode')}
-          className={`px-5 py-3 text-xs font-bold border-b-2 -mb-[2px] transition-colors cursor-pointer flex items-center gap-2 ${
+          className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
             activeTab === 'barcode' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'
           }`}
         >
@@ -1086,8 +1175,9 @@ export default function PrinterPresetsPage() {
           Barcode Labels
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('receipt')}
-          className={`px-5 py-3 text-xs font-bold border-b-2 -mb-[2px] transition-colors cursor-pointer flex items-center gap-2 ${
+          className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
             activeTab === 'receipt' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'
           }`}
         >
@@ -1095,13 +1185,14 @@ export default function PrinterPresetsPage() {
           POS Receipts
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('invoice')}
-          className={`px-5 py-3 text-xs font-bold border-b-2 -mb-[2px] transition-colors cursor-pointer flex items-center gap-2 ${
+          className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
             activeTab === 'invoice' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'
           }`}
         >
           <FileText className="h-4 w-4" />
-          Invoices & Quotations
+          Invoices &amp; Quotations
         </button>
       </div>
 
@@ -1109,259 +1200,253 @@ export default function PrinterPresetsPage() {
       <div className="space-y-6">
         
         {/* BARCODE PRESETS TAB */}
-        {activeTab === 'barcode' && (
-          <div className="space-y-6">
-            {/* Control selector bar */}
-            <div className="flex flex-wrap items-center gap-4 bg-muted/20 border border-border rounded-xl p-3">
-              <div className="flex items-center gap-2 min-w-[200px]">
-                <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Format:</span>
-                <select
-                  value={selectedBarcodeId}
-                  onChange={(e) => setSelectedBarcodeId(e.target.value)}
-                  className="h-8 rounded-lg border border-border bg-background text-xs px-2.5 font-bold cursor-pointer max-w-[220px] truncate"
-                >
-                  <option value="new">+ Create New Preset</option>
-                  {barcodePresets.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label} {p.isDefault ? '(Default)' : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
+        <div className={activeTab === 'barcode' ? 'space-y-6' : 'hidden'}>
+          {/* Control selector bar */}
+          <div className="flex flex-wrap items-center gap-4 bg-muted/20 border border-border rounded-xl p-3">
+            <div className="flex items-center gap-2 min-w-[200px]">
+              <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Format:</span>
+              <select
+                value={selectedBarcodeId}
+                onChange={(e) => setSelectedBarcodeId(e.target.value)}
+                className="h-8 rounded-lg border border-border bg-background text-xs px-2.5 font-bold cursor-pointer max-w-[220px] truncate"
+              >
+                <option value="new">+ Create New Preset</option>
+                {barcodePresets.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label} {p.isDefault ? '(Default)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-              {selectedBarcodeId !== 'new' && (
-                <div className="flex items-center gap-2">
-                  {activeBarcodePreset?.isDefault ? (
-                    <span className="text-[10px] font-bold bg-amber-500/10 text-amber-600 px-2 py-1 rounded-full flex items-center gap-1">
-                      <Star className="h-3 w-3 fill-current" /> Default Format
-                    </span>
-                  ) : (
+            {selectedBarcodeId !== 'new' && (
+              <div className="flex items-center gap-2">
+                {activeBarcodePreset?.isDefault ? (
+                  <span className="text-[10px] font-bold bg-amber-500/10 text-amber-600 px-2 py-1 rounded-full flex items-center gap-1">
+                    <Star className="h-3 w-3 fill-current" /> Default Format
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => handleSetDefaultBarcode(selectedBarcodeId)}
+                    disabled={isPending}
+                    className="h-8 px-3 rounded-lg border border-border bg-background hover:bg-muted text-amber-500 hover:text-amber-600 flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors"
+                  >
+                    <Star className="h-3.5 w-3.5" />
+                    Set Default
+                  </button>
+                )}
+
+                {deleteBarcodeId === selectedBarcodeId ? (
+                  <div className="flex items-center gap-1">
                     <button
-                      onClick={() => handleSetDefaultBarcode(selectedBarcodeId)}
+                      onClick={() => handleDeleteBarcode(selectedBarcodeId)}
                       disabled={isPending}
-                      className="h-8 px-3 rounded-lg border border-border bg-background hover:bg-muted text-amber-500 hover:text-amber-600 flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors"
+                      className="h-8 px-3 rounded-lg bg-red-600 text-white hover:bg-red-700 text-xs font-semibold flex items-center justify-center cursor-pointer min-w-[70px]"
                     >
-                      <Star className="h-3.5 w-3.5" />
-                      Set Default
+                      {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Confirm'}
                     </button>
-                  )}
-
-                  {deleteBarcodeId === selectedBarcodeId ? (
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleDeleteBarcode(selectedBarcodeId)}
-                        disabled={isPending}
-                        className="h-8 px-3 rounded-lg bg-red-600 text-white hover:bg-red-700 text-xs font-semibold flex items-center justify-center cursor-pointer min-w-[70px]"
-                      >
-                        {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Confirm'}
-                      </button>
-                      <button
-                        onClick={() => setDeleteBarcodeId(null)}
-                        className="h-8 px-3 rounded-lg border border-border bg-background text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
                     <button
-                      onClick={() => setDeleteBarcodeId(selectedBarcodeId)}
-                      className="h-8 px-3 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 text-red-600 flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors"
+                      onClick={() => setDeleteBarcodeId(null)}
+                      className="h-8 px-3 rounded-lg border border-border bg-background text-xs text-muted-foreground hover:text-foreground cursor-pointer"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Delete
+                      Cancel
                     </button>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Config & Preview workspace */}
-            <div className="bg-card border border-border rounded-xl shadow-sm p-6">
-              <BarcodePresetEditor
-                key={selectedBarcodeId}
-                initial={barcodeEditorInitial}
-                existingId={selectedBarcodeId === 'new' ? undefined : selectedBarcodeId}
-                onSave={async (id, silent) => {
-                  if (!silent) {
-                    showToast(selectedBarcodeId === 'new' ? 'Barcode preset saved!' : 'Barcode preset updated!');
-                  }
-                  await loadBarcodePresets(id);
-                }}
-                onCancel={handleCancelBarcode}
-              />
-            </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setDeleteBarcodeId(selectedBarcodeId)}
+                    className="h-8 px-3 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 text-red-600 flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete
+                  </button>
+                )}
+              </div>
+            )}
           </div>
-        )}
+
+          {/* Config & Preview workspace */}
+          <div className="bg-card border border-border rounded-xl shadow-sm p-6">
+            <BarcodePresetEditor
+              key={selectedBarcodeId}
+              initial={barcodeEditorInitial}
+              existingId={selectedBarcodeId === 'new' ? undefined : selectedBarcodeId}
+              onSave={async (id, silent) => {
+                if (!silent) {
+                  showToast(selectedBarcodeId === 'new' ? 'Barcode preset saved!' : 'Barcode preset updated!');
+                }
+                await loadBarcodePresets(id);
+              }}
+              onCancel={handleCancelBarcode}
+            />
+          </div>
+        </div>
 
         {/* POS RECEIPTS TAB */}
-        {activeTab === 'receipt' && (
-          <div className="space-y-6">
-            {/* Control selector bar */}
-            <div className="flex flex-wrap items-center gap-4 bg-muted/20 border border-border rounded-xl p-3">
-              <div className="flex items-center gap-2 min-w-[200px]">
-                <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Format:</span>
-                <select
-                  value={selectedReceiptId}
-                  onChange={(e) => setSelectedReceiptId(e.target.value)}
-                  className="h-8 rounded-lg border border-border bg-background text-xs px-2.5 font-bold cursor-pointer max-w-[220px] truncate"
-                >
-                  <option value="new">+ Create New Preset</option>
-                  {receiptPresets.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label} {p.isDefault ? '(Default)' : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
+        <div className={activeTab === 'receipt' ? 'space-y-6' : 'hidden'}>
+          {/* Control selector bar */}
+          <div className="flex flex-wrap items-center gap-4 bg-muted/20 border border-border rounded-xl p-3">
+            <div className="flex items-center gap-2 min-w-[200px]">
+              <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Format:</span>
+              <select
+                value={selectedReceiptId}
+                onChange={(e) => setSelectedReceiptId(e.target.value)}
+                className="h-8 rounded-lg border border-border bg-background text-xs px-2.5 font-bold cursor-pointer max-w-[220px] truncate"
+              >
+                <option value="new">+ Create New Preset</option>
+                {receiptPresets.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label} {p.isDefault ? '(Default)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-              {selectedReceiptId !== 'new' && (
-                <div className="flex items-center gap-2">
-                  {activeReceiptPreset?.isDefault ? (
-                    <span className="text-[10px] font-bold bg-amber-500/10 text-amber-600 px-2 py-1 rounded-full flex items-center gap-1">
-                      <Star className="h-3 w-3 fill-current" /> Default Format
-                    </span>
-                  ) : (
+            {selectedReceiptId !== 'new' && (
+              <div className="flex items-center gap-2">
+                {activeReceiptPreset?.isDefault ? (
+                  <span className="text-[10px] font-bold bg-amber-500/10 text-amber-600 px-2 py-1 rounded-full flex items-center gap-1">
+                    <Star className="h-3 w-3 fill-current" /> Default Format
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => handleSetDefaultReceipt(selectedReceiptId)}
+                    disabled={isPending}
+                    className="h-8 px-3 rounded-lg border border-border bg-background hover:bg-muted text-amber-500 hover:text-amber-600 flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors"
+                  >
+                    <Star className="h-3.5 w-3.5" />
+                    Set Default
+                  </button>
+                )}
+
+                {deleteReceiptId === selectedReceiptId ? (
+                  <div className="flex items-center gap-1">
                     <button
-                      onClick={() => handleSetDefaultReceipt(selectedReceiptId)}
+                      onClick={() => handleDeleteReceipt(selectedReceiptId)}
                       disabled={isPending}
-                      className="h-8 px-3 rounded-lg border border-border bg-background hover:bg-muted text-amber-500 hover:text-amber-600 flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors"
+                      className="h-8 px-3 rounded-lg bg-red-600 text-white hover:bg-red-700 text-xs font-semibold flex items-center justify-center cursor-pointer min-w-[70px]"
                     >
-                      <Star className="h-3.5 w-3.5" />
-                      Set Default
+                      {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Confirm'}
                     </button>
-                  )}
-
-                  {deleteReceiptId === selectedReceiptId ? (
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleDeleteReceipt(selectedReceiptId)}
-                        disabled={isPending}
-                        className="h-8 px-3 rounded-lg bg-red-600 text-white hover:bg-red-700 text-xs font-semibold flex items-center justify-center cursor-pointer min-w-[70px]"
-                      >
-                        {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Confirm'}
-                      </button>
-                      <button
-                        onClick={() => setDeleteReceiptId(null)}
-                        className="h-8 px-3 rounded-lg border border-border bg-background text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
                     <button
-                      onClick={() => setDeleteReceiptId(selectedReceiptId)}
-                      className="h-8 px-3 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 text-red-600 flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors"
+                      onClick={() => setDeleteReceiptId(null)}
+                      className="h-8 px-3 rounded-lg border border-border bg-background text-xs text-muted-foreground hover:text-foreground cursor-pointer"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Delete
+                      Cancel
                     </button>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Config & Preview workspace */}
-            <div className="bg-card border border-border rounded-xl shadow-sm p-6">
-              <ReceiptPresetEditor
-                key={selectedReceiptId}
-                initial={receiptEditorInitial}
-                existingId={selectedReceiptId === 'new' ? undefined : selectedReceiptId}
-                onSave={async (id, silent) => {
-                  if (!silent) {
-                    showToast(selectedReceiptId === 'new' ? 'Receipt preset saved!' : 'Receipt preset updated!');
-                  }
-                  await loadReceiptPresets(id);
-                }}
-                onCancel={handleCancelReceipt}
-              />
-            </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setDeleteReceiptId(selectedReceiptId)}
+                    className="h-8 px-3 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 text-red-600 flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete
+                  </button>
+                )}
+              </div>
+            )}
           </div>
-        )}
+
+          {/* Config & Preview workspace */}
+          <div className="bg-card border border-border rounded-xl shadow-sm p-6">
+            <ReceiptPresetEditor
+              key={selectedReceiptId}
+              initial={receiptEditorInitial}
+              existingId={selectedReceiptId === 'new' ? undefined : selectedReceiptId}
+              onSave={async (id, silent) => {
+                if (!silent) {
+                  showToast(selectedReceiptId === 'new' ? 'Receipt preset saved!' : 'Receipt preset updated!');
+                }
+                await loadReceiptPresets(id);
+              }}
+              onCancel={handleCancelReceipt}
+            />
+          </div>
+        </div>
 
         {/* INVOICES & QUOTATIONS TAB */}
-        {activeTab === 'invoice' && (
-          <div className="space-y-6">
-            {/* Control selector bar */}
-            <div className="flex flex-wrap items-center gap-4 bg-muted/20 border border-border rounded-xl p-3">
-              <div className="flex items-center gap-2 min-w-[200px]">
-                <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Format:</span>
-                <select
-                  value={selectedInvoiceId}
-                  onChange={(e) => setSelectedInvoiceId(e.target.value)}
-                  className="h-8 rounded-lg border border-border bg-background text-xs px-2.5 font-bold cursor-pointer max-w-[220px] truncate"
-                >
-                  <option value="new">+ Create New Preset</option>
-                  {invoicePresets.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label} {p.isDefault ? '(Default)' : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
+        <div className={activeTab === 'invoice' ? 'space-y-6' : 'hidden'}>
+          {/* Control selector bar */}
+          <div className="flex flex-wrap items-center gap-4 bg-muted/20 border border-border rounded-xl p-3">
+            <div className="flex items-center gap-2 min-w-[200px]">
+              <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Format:</span>
+              <select
+                value={selectedInvoiceId}
+                onChange={(e) => setSelectedInvoiceId(e.target.value)}
+                className="h-8 rounded-lg border border-border bg-background text-xs px-2.5 font-bold cursor-pointer max-w-[220px] truncate"
+              >
+                <option value="new">+ Create New Preset</option>
+                {invoicePresets.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label} {p.isDefault ? '(Default)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-              {selectedInvoiceId !== 'new' && (
-                <div className="flex items-center gap-2">
-                  {activeInvoicePreset?.isDefault ? (
-                    <span className="text-[10px] font-bold bg-amber-500/10 text-amber-600 px-2 py-1 rounded-full flex items-center gap-1">
-                      <Star className="h-3 w-3 fill-current" /> Default Format
-                    </span>
-                  ) : (
+            {selectedInvoiceId !== 'new' && (
+              <div className="flex items-center gap-2">
+                {activeInvoicePreset?.isDefault ? (
+                  <span className="text-[10px] font-bold bg-amber-500/10 text-amber-600 px-2 py-1 rounded-full flex items-center gap-1">
+                    <Star className="h-3 w-3 fill-current" /> Default Format
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => handleSetDefaultInvoice(selectedInvoiceId)}
+                    disabled={isPending}
+                    className="h-8 px-3 rounded-lg border border-border bg-background hover:bg-muted text-amber-500 hover:text-amber-600 flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors"
+                  >
+                    <Star className="h-3.5 w-3.5" />
+                    Set Default
+                  </button>
+                )}
+
+                {deleteInvoiceId === selectedInvoiceId ? (
+                  <div className="flex items-center gap-1">
                     <button
-                      onClick={() => handleSetDefaultInvoice(selectedInvoiceId)}
+                      onClick={() => handleDeleteInvoice(selectedInvoiceId)}
                       disabled={isPending}
-                      className="h-8 px-3 rounded-lg border border-border bg-background hover:bg-muted text-amber-500 hover:text-amber-600 flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors"
+                      className="h-8 px-3 rounded-lg bg-red-600 text-white hover:bg-red-700 text-xs font-semibold flex items-center justify-center cursor-pointer min-w-[70px]"
                     >
-                      <Star className="h-3.5 w-3.5" />
-                      Set Default
+                      {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Confirm'}
                     </button>
-                  )}
-
-                  {deleteInvoiceId === selectedInvoiceId ? (
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleDeleteInvoice(selectedInvoiceId)}
-                        disabled={isPending}
-                        className="h-8 px-3 rounded-lg bg-red-600 text-white hover:bg-red-700 text-xs font-semibold flex items-center justify-center cursor-pointer min-w-[70px]"
-                      >
-                        {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Confirm'}
-                      </button>
-                      <button
-                        onClick={() => setDeleteInvoiceId(null)}
-                        className="h-8 px-3 rounded-lg border border-border bg-background text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
                     <button
-                      onClick={() => setDeleteInvoiceId(selectedInvoiceId)}
-                      className="h-8 px-3 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 text-red-600 flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors"
+                      onClick={() => setDeleteInvoiceId(null)}
+                      className="h-8 px-3 rounded-lg border border-border bg-background text-xs text-muted-foreground hover:text-foreground cursor-pointer"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Delete
+                      Cancel
                     </button>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Config & Preview workspace */}
-            <div className="bg-card border border-border rounded-xl shadow-sm p-6">
-              <InvoicePresetEditor
-                key={selectedInvoiceId}
-                initial={invoiceEditorInitial}
-                existingId={selectedInvoiceId === 'new' ? undefined : selectedInvoiceId}
-                onSave={async (id, silent) => {
-                  if (!silent) {
-                    showToast(selectedInvoiceId === 'new' ? 'Invoice preset saved!' : 'Invoice preset updated!');
-                  }
-                  await loadInvoicePresets(id);
-                }}
-                onCancel={handleCancelInvoice}
-              />
-            </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setDeleteInvoiceId(selectedInvoiceId)}
+                    className="h-8 px-3 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 text-red-600 flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete
+                  </button>
+                )}
+              </div>
+            )}
           </div>
-        )}
+
+          {/* Config & Preview workspace */}
+          <div className="bg-card border border-border rounded-xl shadow-sm p-6">
+            <InvoicePresetEditor
+              key={selectedInvoiceId}
+              initial={invoiceEditorInitial}
+              existingId={selectedInvoiceId === 'new' ? undefined : selectedInvoiceId}
+              onSave={async (id, silent) => {
+                if (!silent) {
+                  showToast(selectedInvoiceId === 'new' ? 'Invoice preset saved!' : 'Invoice preset updated!');
+                }
+                await loadInvoicePresets(id);
+              }}
+              onCancel={handleCancelInvoice}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );

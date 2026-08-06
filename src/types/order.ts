@@ -12,9 +12,10 @@ export interface ShippingAddress {
 }
 
 export interface PaymentDetails {
-  method: 'stripe' | 'paypal' | 'cod';
+  method: 'stripe' | 'paypal' | 'payhere' | 'bank_transfer' | 'cash_pickup' | 'cash_delivery' | 'cod';
   paymentId?: string;
   status: 'pending' | 'paid' | 'failed';
+  paymentSlipUrl?: string; // Bank transfer slip uploaded by customer
 }
 
 export interface OrderItem {
@@ -37,7 +38,7 @@ export interface Order {
   shippingPrice: number;
   taxPrice: number;
   totalPrice: number;
-  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+  status: 'pending_payment' | 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
   isPaid: boolean;
   paidAt?: string;
   isDelivered: boolean;

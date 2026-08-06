@@ -9,6 +9,9 @@ import {
   Smartphone,
   Keyboard,
   Headphones,
+  BatteryCharging,
+  Sparkles,
+  Plug,
   X,
   ChevronRight,
   Layers,
@@ -35,7 +38,7 @@ const defaultCategories: CategoryCard[] = [
     count: "48+ Products",
     icon: (
       <Laptop
-        className="w-16 h-16 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-blue-400"
+        className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-blue-400"
         strokeWidth={1.0}
       />
     ),
@@ -83,7 +86,7 @@ const defaultCategories: CategoryCard[] = [
     count: "60+ Products",
     icon: (
       <Smartphone
-        className="w-20 h-20 sm:w-32 lg:w-44 sm:h-32 lg:h-44 text-emerald-400"
+        className="w-12 h-12 sm:w-32 lg:w-44 sm:h-32 lg:h-44 text-emerald-400"
         strokeWidth={1.0}
       />
     ),
@@ -130,33 +133,74 @@ export default function CategoryBentoGrid({
       (c) => c.slug === (slotConfig?.slug || (customCategories[idx]?.slug)),
     ) || customCategories?.[idx];
 
-    const label = (
-      slotConfig?.label ||
-      matchedCategory?.name ||
-      def.label
-    ).toUpperCase();
-
     const title = slotConfig?.title || matchedCategory?.name || def.title;
-    const description =
-      slotConfig?.description ||
-      matchedCategory?.description ||
-      matchedCategory?.tagline ||
-      def.description;
 
-    const slug = slotConfig?.slug || matchedCategory?.slug || def.href.replace("/products/","").replace("/products?category=","");
+    const slug = (slotConfig?.slug || matchedCategory?.slug || def.href.replace("/products/","").replace("/products?category=","")).toLowerCase();
     const href = slug.startsWith("/") ? slug : `/products?category=${slug}`;
 
     const count = matchedCategory
       ? `${matchedCategory.productCount || 0}+ Products`
       : def.count;
 
+    // Detect theme & icon based on title or slug keywords
+    const searchText = `${title} ${slug}`.toLowerCase();
+
+    // Default matching description based on category topic
+    const defaultDescription = searchText.includes("phone") || searchText.includes("mobile")
+      ? "Flagship Mobile Devices & Ecosystem Docks"
+      : searchText.includes("power") || searchText.includes("battery") || searchText.includes("charge")
+      ? "High-Capacity Fast Charging & Portable Power"
+      : searchText.includes("care") || searchText.includes("personal") || searchText.includes("groom")
+      ? "Smart Personal Care & Wellness Essentials"
+      : searchText.includes("accessor") || searchText.includes("cable") || searchText.includes("gadget")
+      ? "Essential Cables, Adapters & Daily Gear"
+      : searchText.includes("key")
+      ? "Custom Mechanical & Tactile Layouts"
+      : searchText.includes("audio") || searchText.includes("head") || searchText.includes("speaker")
+      ? "Studio Quality ANC & Wireless Sound"
+      : searchText.includes("laptop") || searchText.includes("comp") || searchText.includes("mac")
+      ? "High-Performance Workstations & Ultrabooks"
+      : def.description;
+
+    const description =
+      slotConfig?.description ||
+      matchedCategory?.description ||
+      matchedCategory?.tagline ||
+      defaultDescription;
+
+    let theme = {
+      label: slotConfig?.label || (searchText.includes("phone") || searchText.includes("mobile") ? "SMARTPHONES" : searchText.includes("power") || searchText.includes("battery") || searchText.includes("charge") ? "POWER BANKS" : searchText.includes("care") || searchText.includes("personal") || searchText.includes("groom") ? "PERSONAL CARE" : searchText.includes("accessor") || searchText.includes("cable") || searchText.includes("gadget") ? "ACCESSORIES" : searchText.includes("key") ? "KEYBOARDS" : searchText.includes("audio") || searchText.includes("head") || searchText.includes("speaker") ? "AUDIO" : searchText.includes("laptop") || searchText.includes("comp") || searchText.includes("mac") ? "LAPTOPS" : def.label),
+      icon: searchText.includes("phone") || searchText.includes("mobile") ? (
+        <Smartphone className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-emerald-400" strokeWidth={1.0} />
+      ) : searchText.includes("power") || searchText.includes("battery") || searchText.includes("charge") ? (
+        <BatteryCharging className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-amber-400" strokeWidth={1.0} />
+      ) : searchText.includes("care") || searchText.includes("personal") || searchText.includes("groom") ? (
+        <Sparkles className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-cyan-400" strokeWidth={1.0} />
+      ) : searchText.includes("accessor") || searchText.includes("cable") || searchText.includes("gadget") ? (
+        <Plug className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-pink-400" strokeWidth={1.0} />
+      ) : searchText.includes("key") ? (
+        <Keyboard className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-purple-400" strokeWidth={1.0} />
+      ) : searchText.includes("audio") || searchText.includes("head") || searchText.includes("speaker") ? (
+        <Headphones className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-rose-400" strokeWidth={1.0} />
+      ) : (
+        <Laptop className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-blue-400" strokeWidth={1.0} />
+      ),
+      glowColor: searchText.includes("phone") ? "rgba(16,185,129,0.35)" : searchText.includes("power") ? "rgba(245,158,11,0.35)" : searchText.includes("care") ? "rgba(6,182,212,0.35)" : searchText.includes("accessor") ? "rgba(236,72,153,0.35)" : searchText.includes("key") ? "rgba(168,85,247,0.3)" : searchText.includes("audio") ? "rgba(244,63,94,0.3)" : "rgba(59,130,246,0.3)",
+      hoverColor: searchText.includes("phone") ? "group-hover:text-emerald-400" : searchText.includes("power") ? "group-hover:text-amber-400" : searchText.includes("care") ? "group-hover:text-cyan-400" : searchText.includes("accessor") ? "group-hover:text-pink-400" : searchText.includes("key") ? "group-hover:text-purple-400" : searchText.includes("audio") ? "group-hover:text-rose-400" : "group-hover:text-blue-400",
+      tagColor: searchText.includes("phone") ? "bg-emerald-500/90 text-white border-emerald-400/30" : searchText.includes("power") ? "bg-amber-500/90 text-white border-amber-400/30" : searchText.includes("care") ? "bg-cyan-500/90 text-white border-cyan-400/30" : searchText.includes("accessor") ? "bg-pink-500/90 text-white border-pink-400/30" : searchText.includes("key") ? "bg-purple-500/90 text-white border-purple-400/30" : searchText.includes("audio") ? "bg-rose-500/90 text-white border-rose-400/30" : "bg-blue-500/90 text-white border-blue-400/30",
+    };
+
     return {
       ...def,
-      label,
+      label: theme.label.toUpperCase(),
       title,
       description,
       href,
       count,
+      icon: theme.icon,
+      glowColor: theme.glowColor,
+      hoverColor: theme.hoverColor,
+      tagColor: theme.tagColor,
     };
   });
 
@@ -212,17 +256,17 @@ export default function CategoryBentoGrid({
             {/* Slot 1: Laptops Wide Bento Card */}
             <IconBentoCard
               card={laptops}
-              heightClass="h-[140px] sm:h-[180px] lg:h-[200px]"
+              heightClass="h-[125px] sm:h-[180px] lg:h-[200px]"
               wide
             >
-              <div className="absolute top-0 right-0 h-full w-[45%] overflow-hidden flex items-center justify-center pointer-events-none select-none">
+              <div className="absolute right-4 bottom-4 select-none pointer-events-none">
                 <div
-                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-28 h-28 sm:w-40 sm:h-40 rounded-full pointer-events-none group-hover:scale-125 transition-transform duration-500 opacity-60"
+                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 sm:w-40 sm:h-40 rounded-full pointer-events-none group-hover:scale-125 transition-transform duration-500 opacity-60"
                   style={{
                     background: `radial-gradient(circle, ${laptops.glowColor} 0%, transparent 70%)`,
                   }}
                 />
-                <div className="flex items-center justify-center pr-4 sm:pr-8 group-hover:scale-110 group-hover:-translate-y-1 transition-transform duration-300 transform-gpu">
+                <div className="group-hover:scale-110 transition-transform duration-300 transform-gpu">
                   {laptops.icon}
                 </div>
               </div>
@@ -232,11 +276,11 @@ export default function CategoryBentoGrid({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4.5">
               <IconBentoCard
                 card={keyboards}
-                heightClass="h-[140px] sm:h-[180px] lg:h-[200px]"
+                heightClass="h-[125px] sm:h-[180px] lg:h-[200px]"
               >
                 <div className="absolute right-4 bottom-4 select-none pointer-events-none">
                   <div
-                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 sm:w-32 sm:h-32 rounded-full pointer-events-none group-hover:scale-125 transition-transform duration-500 opacity-60"
+                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 sm:w-32 sm:h-32 rounded-full pointer-events-none group-hover:scale-125 transition-transform duration-500 opacity-60"
                     style={{
                       background: `radial-gradient(circle, ${keyboards.glowColor} 0%, transparent 70%)`,
                     }}
@@ -249,11 +293,11 @@ export default function CategoryBentoGrid({
 
               <IconBentoCard
                 card={audio}
-                heightClass="h-[140px] sm:h-[180px] lg:h-[200px]"
+                heightClass="h-[125px] sm:h-[180px] lg:h-[200px]"
               >
                 <div className="absolute right-4 bottom-4 select-none pointer-events-none">
                   <div
-                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 sm:w-32 sm:h-32 rounded-full pointer-events-none group-hover:scale-125 transition-transform duration-500 opacity-60"
+                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 sm:w-32 sm:h-32 rounded-full pointer-events-none group-hover:scale-125 transition-transform duration-500 opacity-60"
                     style={{
                       background: `radial-gradient(circle, ${audio.glowColor} 0%, transparent 70%)`,
                     }}
@@ -270,17 +314,17 @@ export default function CategoryBentoGrid({
           <div className="lg:col-span-4">
             <IconBentoCard
               card={phones}
-              heightClass="h-[140px] sm:h-[180px] lg:h-full lg:min-h-[416px]"
+              heightClass="h-[125px] sm:h-[180px] lg:h-full lg:min-h-[416px]"
               tall
             >
-              <div className="absolute inset-0 flex items-center justify-center lg:pb-16 pointer-events-none select-none overflow-hidden">
+              <div className="absolute right-4 bottom-4 lg:inset-0 lg:flex lg:items-center lg:justify-center lg:pb-16 select-none pointer-events-none">
                 <div
-                  className="absolute w-36 h-36 sm:w-52 sm:h-52 rounded-full pointer-events-none group-hover:scale-125 transition-transform duration-500 opacity-65"
+                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 sm:w-52 sm:h-52 rounded-full pointer-events-none group-hover:scale-125 transition-transform duration-500 opacity-65"
                   style={{
                     background: `radial-gradient(circle, ${phones.glowColor} 0%, transparent 70%)`,
                   }}
                 />
-                <div className="flex items-center justify-center relative z-10 group-hover:scale-110 group-hover:-rotate-3 group-hover:-translate-y-1.5 transition-transform duration-300 transform-gpu">
+                <div className="group-hover:scale-110 group-hover:-rotate-3 group-hover:-translate-y-1.5 transition-transform duration-300 transform-gpu">
                   {phones.icon}
                 </div>
               </div>
@@ -374,13 +418,10 @@ function IconBentoCard({
         {/* Subtle inner hover glow */}
         <div className="absolute inset-0 bg-gradient-to-br from-blue-500/[0.04] via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
 
-        {/* Top Row: Tag Badge & Product Count */}
-        <div className="relative z-10 flex items-center justify-between gap-2">
+        {/* Top Row: Tag Badge */}
+        <div className="relative z-10 flex items-center justify-start gap-2">
           <span className={`px-2.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border ${card.tagColor}`}>
             {card.label}
-          </span>
-          <span className="text-[10px] font-bold text-neutral-300 px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10">
-            {card.count}
           </span>
         </div>
 
@@ -389,17 +430,17 @@ function IconBentoCard({
 
         {/* Bottom Text Content */}
         <div className="relative z-10 mt-auto pt-2">
-          <div className={wide ? "max-w-[65%]" : tall ? "max-w-full" : "max-w-[75%]"}>
+          <div className={wide ? "max-w-[60%] sm:max-w-[65%]" : tall ? "max-w-[65%] sm:max-w-full" : "max-w-[65%] sm:max-w-[75%]"}>
             <h3
               className={`font-black uppercase tracking-tight text-white leading-tight transition-colors duration-300 ${card.hoverColor} ${
                 tall
-                  ? "text-lg sm:text-2xl lg:text-3xl"
-                  : "text-base sm:text-xl lg:text-2xl"
+                  ? "text-sm sm:text-2xl lg:text-3xl"
+                  : "text-sm sm:text-xl lg:text-2xl"
               }`}
             >
               {card.title}
             </h3>
-            <p className="text-[11px] sm:text-xs text-neutral-400 font-medium mt-1 line-clamp-1">
+            <p className="text-[10px] sm:text-xs text-neutral-400 font-medium mt-0.5 sm:mt-1 line-clamp-1">
               {card.description}
             </p>
           </div>

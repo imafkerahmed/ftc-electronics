@@ -6,8 +6,9 @@ interface ProductJsonLdProps {
   url: string;
 }
 
-function safeJsonLd(obj: any): string {
-  return JSON.stringify(obj).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+function safeJsonLd(obj: unknown): string {
+  const serialized = JSON.stringify(obj);
+  return (serialized ?? '').replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
 }
 
 export function ProductJsonLd({ product, url }: ProductJsonLdProps) {

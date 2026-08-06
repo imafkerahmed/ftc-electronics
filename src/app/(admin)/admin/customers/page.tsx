@@ -30,8 +30,7 @@ export default function AdminCustomersPage() {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'https://ftc-db.codix.site';
-      const pb = new PocketBase(pbUrl);
+      const { pb } = await import('@/lib/pocketbase');
 
       let records: any[] = [];
       try {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCart } from '@/hooks/use-cart';
+import { formatPrice } from '@/lib/utils';
 
 interface OrderSummaryProps {
   showItems?: boolean;
@@ -23,7 +24,7 @@ export default function OrderSummary({ showItems = false }: OrderSummaryProps) {
                 <span className="text-muted-foreground truncate max-w-[200px]">
                   {item.product.name} <span className="text-muted-foreground/60">x{item.quantity}</span>
                 </span>
-                <span className="font-semibold">${(price * item.quantity).toFixed(2)}</span>
+                <span className="font-semibold">{formatPrice(price * item.quantity)}</span>
               </div>
             );
           })}
@@ -34,24 +35,24 @@ export default function OrderSummary({ showItems = false }: OrderSummaryProps) {
       <div className="space-y-3 border-b border-border pb-4 text-sm text-muted-foreground">
         <div className="flex justify-between">
           <span>Subtotal</span>
-          <span className="text-foreground font-medium">${subtotal.toFixed(2)}</span>
+          <span className="text-foreground font-medium">{formatPrice(subtotal)}</span>
         </div>
         <div className="flex justify-between">
           <span>Estimated Shipping</span>
           <span className="text-foreground font-medium">
-            {shipping === 0 ? <span className="text-blue-500 font-semibold">Free</span> : `$${shipping.toFixed(2)}`}
+            {shipping === 0 ? <span className="text-blue-500 font-semibold">Free</span> : formatPrice(shipping)}
           </span>
         </div>
         <div className="flex justify-between">
-          <span>Sales Tax (8%)</span>
-          <span className="text-foreground font-medium">${tax.toFixed(2)}</span>
+          <span>Sales Tax</span>
+          <span className="text-foreground font-medium">{formatPrice(tax)}</span>
         </div>
       </div>
 
       {/* Total cost */}
       <div className="flex justify-between text-base font-bold">
         <span>Total</span>
-        <span className="text-blue-500 font-extrabold">${total.toFixed(2)}</span>
+        <span className="text-blue-500 font-extrabold">{formatPrice(total)}</span>
       </div>
 
       {/* Promo Code placeholder */}

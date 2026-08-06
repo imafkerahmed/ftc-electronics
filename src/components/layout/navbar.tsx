@@ -53,6 +53,7 @@ export default function Navbar() {
   const { logoUrl, siteName, announcement, isLoading } = useSiteBranding();
   const { cartCount } = useCart();
   const toggleCartDrawer = useUiStore((state) => state.toggleCartDrawer);
+  const setMobileNavOpen = useUiStore((state) => state.setMobileNavOpen);
   const hasIntroPlayed = useUiStore((state) => state.hasIntroPlayed);
   const setIntroPlayed = useUiStore((state) => state.setIntroPlayed);
   const router = useRouter();
@@ -62,6 +63,7 @@ export default function Navbar() {
 
   const [isIntroActive, setIsIntroActive] = useState(shouldPlayIntro);
   const [showOverlay, setShowOverlay] = useState(shouldPlayIntro);
+  const closeMobileNav = () => setMobileNavOpen(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [showBanner, setShowBanner] = useState(true);
@@ -124,30 +126,61 @@ export default function Navbar() {
   }, [isLoggedIn]);
 
   useEffect(() => {
+    const NAV_CACHE_KEY = 'ftc_nav_data';
+    const NAV_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
     async function fetchData() {
+      // Try sessionStorage cache first
+      try {
+        const raw = sessionStorage.getItem(NAV_CACHE_KEY);
+        if (raw) {
+          const { cats, brs, ts } = JSON.parse(raw) as { cats: any[]; brs: any[]; ts: number };
+          if (Date.now() - ts < NAV_CACHE_TTL_MS) {
+            setCategories(cats.filter((c: any) => c.isActive !== false));
+            setBrands(brs);
+            setDataLoaded(true);
+            return;
+          } else {
+            sessionStorage.removeItem(NAV_CACHE_KEY);
+          }
+        }
+      } catch {
+        // ignore cache read error, fall through to fetch
+      }
+
+      // Cache miss — fetch from PocketBase
       const [catsResult, brsResult] = await Promise.allSettled([
         pbCategories.getAll(),
         pbBrands.getAll(),
       ]);
 
+      const cats = catsResult.status === "fulfilled" ? (catsResult.value || []) : [];
+      const brs = brsResult.status === "fulfilled" ? (brsResult.value || []) : [];
+
       if (catsResult.status === "fulfilled") {
-        setCategories(
-          (catsResult.value || []).filter((c: any) => c.isActive !== false),
-        );
+        setCategories(cats.filter((c: any) => c.isActive !== false));
       } else {
         console.error("Failed to load navbar categories:", catsResult.reason);
       }
 
       if (brsResult.status === "fulfilled") {
-        setBrands(brsResult.value || []);
+        setBrands(brs);
       } else {
         console.error("Failed to load navbar brands:", brsResult.reason);
+      }
+
+      // Write to cache
+      try {
+        sessionStorage.setItem(NAV_CACHE_KEY, JSON.stringify({ cats, brs, ts: Date.now() }));
+      } catch {
+        // quota exceeded or unavailable — skip
       }
 
       setDataLoaded(true);
     }
     void fetchData();
   }, []);
+
 
   const activeAnnouncements = announcement?.text
     ? [announcement.text, ...defaultAnnouncements]
@@ -314,13 +347,8 @@ export default function Navbar() {
         <div className="relative flex h-16 w-full items-center justify-between px-4 sm:px-6 lg:px-8">
           {/* Left Side: Menu + Search */}
           <motion.div
-            initial={hasIntroPlayed ? { opacity: 1 } : { opacity: 0 }}
-            animate={{ opacity: isIntroActive ? 0 : 1 }}
-            transition={{
-              duration: 0.8,
-              ease: "easeOut",
-              delay: isIntroActive ? 0 : 1.5,
-            }}
+            initial={{ opacity: 1 }}
+            animate={{ opacity: 1 }}
             className="flex items-center pl-10 sm:pl-12 lg:pl-16"
           >
             <StaggeredMenu
@@ -349,6 +377,7 @@ export default function Navbar() {
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
             <Link
               href="/"
+              onClick={closeMobileNav}
               className="flex items-center gap-1.5 sm:gap-2 text-xl font-bold tracking-wider text-foreground group select-none"
             >
               {!isIntroActive && (
@@ -378,13 +407,8 @@ export default function Navbar() {
 
           {/* Right: Utility Icons */}
           <motion.div
-            initial={hasIntroPlayed ? { opacity: 1 } : { opacity: 0 }}
-            animate={{ opacity: isIntroActive ? 0 : 1 }}
-            transition={{
-              duration: 0.8,
-              ease: "easeOut",
-              delay: isIntroActive ? 0 : 1.5,
-            }}
+            initial={{ opacity: 1 }}
+            animate={{ opacity: 1 }}
             className="flex items-center space-x-1 sm:space-x-2"
           >
             {/* Account — profile avatar if logged in, icon if not */}
@@ -475,61 +499,28 @@ export default function Navbar() {
           onClose={() => setIsSearchOpen(false)}
         />
 
-        {/* Cinematic Intro Overlay */}
-        {showOverlay && (
+        {/* Cinematic Intro Overlay — Only plays if custom logoUrl is configured */}
+        {showOverlay && logoUrl && (
           <motion.div
             initial={{ opacity: 1 }}
             animate={{ opacity: isIntroActive ? 1 : 0 }}
             transition={{ duration: 0.5, ease: "easeInOut" }}
             className="fixed inset-0 z-[100] flex items-center justify-center bg-background pointer-events-none"
           >
-            {isIntroActive &&
-              (logoUrl ? (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.85 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ type: "spring", stiffness: 80, damping: 20 }}
-                  className="flex flex-col items-center justify-center p-4"
-                >
-                  <img
-                    src={logoUrl}
-                    alt={siteName || "FTC Electronics"}
-                    className="h-32 sm:h-44 lg:h-52 max-h-64 w-auto max-w-[85vw] object-contain drop-shadow-2xl"
-                  />
-                </motion.div>
-              ) : (
-                <div className="flex items-center gap-4 text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-widest uppercase">
-                  <motion.span
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ type: "spring", stiffness: 80, damping: 20 }}
-                    className="text-blue-600"
-                  >
-                    FTC
-                  </motion.span>
-                  <motion.span
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ delay: 0.15, duration: 0.4 }}
-                    className="text-muted-foreground font-light"
-                  >
-                    |
-                  </motion.span>
-                  <motion.span
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{
-                      type: "spring",
-                      stiffness: 80,
-                      damping: 20,
-                      delay: 0.2,
-                    }}
-                    className="text-2xl uppercase tracking-widest text-foreground/80 font-bold"
-                  >
-                    Electronics
-                  </motion.span>
-                </div>
-              ))}
+            {isIntroActive && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.85 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ type: "spring", stiffness: 80, damping: 20 }}
+                className="flex flex-col items-center justify-center p-4"
+              >
+                <img
+                  src={logoUrl}
+                  alt={siteName || "FTC Electronics"}
+                  className="h-32 sm:h-44 lg:h-52 max-h-64 w-auto max-w-[85vw] object-contain drop-shadow-2xl"
+                />
+              </motion.div>
+            )}
           </motion.div>
         )}
       </header>

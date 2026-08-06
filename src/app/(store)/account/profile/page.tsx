@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { getCurrentUserSessionAction, updateUserProfilePageAction, type CustomerProfileData } from '@/app/actions/auth';
-import { CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Loader2, MapPin } from 'lucide-react';
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -48,14 +48,20 @@ export default function ProfilePage() {
 
     try {
       const res = await updateUserProfilePageAction({
+        firstName: profile.firstName,
+        lastName: profile.lastName,
         name: profile.name,
         phone: profile.phone,
-        address: profile.address,
+        addressLine1: profile.addressLine1,
+        addressLine2: profile.addressLine2,
+        city: profile.city,
+        state: profile.state,
+        postalCode: profile.postalCode,
+        country: profile.country || 'Sri Lanka',
       });
 
       if (res.success) {
-        setSuccess('Profile details saved successfully.');
-        // Instantly notify navbar to fetch/refresh the display name and avatar letter
+        setSuccess('Profile and default shipping address saved successfully.');
         window.dispatchEvent(new Event('auth-change'));
       } else {
         setError(res.error || 'Failed to update profile.');
@@ -95,8 +101,10 @@ export default function ProfilePage() {
   return (
     <div className="space-y-6 text-foreground">
       <div>
-        <h2 className="text-xl font-bold tracking-wide">My Profile</h2>
-        <p className="text-xs text-muted-foreground mt-1">Manage your customer details and default shipping options.</p>
+        <h2 className="text-xl font-bold tracking-wide">My Profile & Shipping Address</h2>
+        <p className="text-xs text-muted-foreground mt-1">
+          Save your personal details and default shipping address so your checkout is automatically pre-filled every time.
+        </p>
       </div>
 
       {success && (
@@ -113,8 +121,9 @@ export default function ProfilePage() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-4 max-w-xl">
-        <div className="flex items-center gap-4 bg-secondary/40 p-4 rounded-lg border border-border">
+      <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl bg-card p-6 rounded-xl border border-border">
+        {/* Account Header */}
+        <div className="flex items-center gap-4 bg-secondary/40 p-4 rounded-xl border border-border">
           <div className="h-12 w-12 rounded-full bg-blue-600 text-white flex items-center justify-center text-lg font-bold shrink-0">
             {initials}
           </div>
@@ -124,56 +133,135 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        <div>
-          <label htmlFor="profile-name" className="block text-xs text-muted-foreground mb-2">Full Name</label>
-          <Input
-            id="profile-name"
-            value={profile.name}
-            onChange={(e) => setProfile((p) => (p ? { ...p, name: e.target.value } : null))}
-            className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
-          />
+        {/* Personal Details */}
+        <div className="space-y-4">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Personal Information</h4>
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="firstName" className="block text-xs text-muted-foreground mb-2">First Name</label>
+              <Input
+                id="firstName"
+                value={profile.firstName || ''}
+                onChange={(e) => setProfile((p) => (p ? { ...p, firstName: e.target.value } : null))}
+                className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label htmlFor="lastName" className="block text-xs text-muted-foreground mb-2">Last Name</label>
+              <Input
+                id="lastName"
+                value={profile.lastName || ''}
+                onChange={(e) => setProfile((p) => (p ? { ...p, lastName: e.target.value } : null))}
+                className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="profile-email" className="block text-xs text-muted-foreground mb-2">Email Address</label>
+              <Input
+                id="profile-email"
+                type="email"
+                readOnly
+                value={profile.email}
+                className="h-10 bg-muted/60 border-border text-muted-foreground text-sm cursor-not-allowed"
+              />
+            </div>
+            <div>
+              <label htmlFor="profile-phone" className="block text-xs text-muted-foreground mb-2">Phone Number</label>
+              <Input
+                id="profile-phone"
+                type="tel"
+                placeholder="+94 77 123 4567"
+                value={profile.phone || ''}
+                onChange={(e) => setProfile((p) => (p ? { ...p, phone: e.target.value } : null))}
+                className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
+              />
+            </div>
+          </div>
         </div>
 
-        <div>
-          <label htmlFor="profile-email" className="block text-xs text-muted-foreground mb-2">Email Address</label>
-          <Input
-            id="profile-email"
-            type="email"
-            readOnly
-            value={profile.email}
-            className="h-10 bg-muted/60 border-border text-muted-foreground text-sm cursor-not-allowed"
-          />
-        </div>
+        {/* Shipping Address Section */}
+        <div className="space-y-4 pt-2 border-t border-border">
+          <div className="flex items-center gap-2">
+            <MapPin className="h-4 w-4 text-blue-500" />
+            <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Default Shipping Address</h4>
+          </div>
 
-        <div>
-          <label htmlFor="profile-phone" className="block text-xs text-muted-foreground mb-2">Phone Number</label>
-          <Input
-            id="profile-phone"
-            type="tel"
-            placeholder="+94 77 123 4567"
-            value={profile.phone || ''}
-            onChange={(e) => setProfile((p) => (p ? { ...p, phone: e.target.value } : null))}
-            className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
-          />
-        </div>
+          <div>
+            <label htmlFor="addressLine1" className="block text-xs text-muted-foreground mb-2">Address Line 1</label>
+            <Input
+              id="addressLine1"
+              placeholder="No. 123 Main Street"
+              value={profile.addressLine1 || ''}
+              onChange={(e) => setProfile((p) => (p ? { ...p, addressLine1: e.target.value } : null))}
+              className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
+            />
+          </div>
 
-        <div>
-          <label htmlFor="profile-address" className="block text-xs text-muted-foreground mb-2">Default Shipping Address</label>
-          <Input
-            id="profile-address"
-            placeholder="No. 123 Main Street, Colombo 03, Sri Lanka"
-            value={profile.address || ''}
-            onChange={(e) => setProfile((p) => (p ? { ...p, address: e.target.value } : null))}
-            className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
-          />
+          <div>
+            <label htmlFor="addressLine2" className="block text-xs text-muted-foreground mb-2">Address Line 2 (Optional)</label>
+            <Input
+              id="addressLine2"
+              placeholder="Apartment, suite, unit, etc."
+              value={profile.addressLine2 || ''}
+              onChange={(e) => setProfile((p) => (p ? { ...p, addressLine2: e.target.value } : null))}
+              className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label htmlFor="city" className="block text-xs text-muted-foreground mb-2">City</label>
+              <Input
+                id="city"
+                placeholder="Colombo"
+                value={profile.city || ''}
+                onChange={(e) => setProfile((p) => (p ? { ...p, city: e.target.value } : null))}
+                className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label htmlFor="state" className="block text-xs text-muted-foreground mb-2">State / Province</label>
+              <Input
+                id="state"
+                placeholder="Western Province"
+                value={profile.state || ''}
+                onChange={(e) => setProfile((p) => (p ? { ...p, state: e.target.value } : null))}
+                className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label htmlFor="postalCode" className="block text-xs text-muted-foreground mb-2">Postal Code</label>
+              <Input
+                id="postalCode"
+                placeholder="00300"
+                value={profile.postalCode || ''}
+                onChange={(e) => setProfile((p) => (p ? { ...p, postalCode: e.target.value } : null))}
+                className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="country" className="block text-xs text-muted-foreground mb-2">Country</label>
+            <Input
+              id="country"
+              value={profile.country || 'Sri Lanka'}
+              onChange={(e) => setProfile((p) => (p ? { ...p, country: e.target.value } : null))}
+              className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
+            />
+          </div>
         </div>
 
         <Button
           type="submit"
           disabled={saving}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-semibold cursor-pointer px-6 transition-colors"
+          className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-bold cursor-pointer transition-colors rounded-xl"
         >
-          {saving ? 'Saving changes...' : 'Save Profile Details'}
+          {saving ? 'Saving Profile Details...' : 'Save Profile & Default Shipping Address'}
         </Button>
       </form>
     </div>

@@ -1,4 +1,4 @@
-import PocketBase from 'pocketbase';
+import PocketBase, { AsyncAuthStore } from 'pocketbase';
 
 const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
 
@@ -7,11 +7,26 @@ if (!pbUrl) {
 }
 
 /**
- * Reusable PocketBase Client Instance.
- * - On the client-side, this automatically uses localStorage to persist the auth session.
- * - On the server-side, you can configure it with headers/cookies.
+ * Reusable OWASP-Compliant PocketBase Client Instance.
+ * - Enforces in-memory AuthStore (AsyncAuthStore) on the client side.
+ * - Prevents sensitive auth tokens from being saved to localStorage (protecting against XSS token theft).
+ * - Automatically purges legacy localStorage tokens on client initialization.
  */
-export const pb = new PocketBase(pbUrl);
+if (typeof window !== 'undefined') {
+  try {
+    window.localStorage.removeItem('pocketbase_auth');
+  } catch {
+    // Ignore storage access errors
+  }
+}
+
+export const pb = new PocketBase(
+  pbUrl,
+  new AsyncAuthStore({
+    save: async () => {},
+    clear: async () => {},
+  })
+);
 pb.autoCancellation(false);
 
 // Optional: Helper to check if a user is currently logged in

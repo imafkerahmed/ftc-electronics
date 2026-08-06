@@ -268,60 +268,60 @@ export default function PosScanTerminal({
       );
       if (!res.ok) {
         event.status = "error";
-        setScanLog((prev) => [event, ...prev]);
+        event.error = `Scan failed (HTTP ${res.status})`;
         flashFeedback("error");
-        return;
-      }
-      const data = await res.json();
-
-      if (data.success && data.data) {
-        const item = data.data;
-        const uniqueKey = item.unitBarcode
-          ? `${item.productId}-${item.unitBarcode}`
-          : item.productId;
-        const alreadyInCart = cartItems.some((c) => c.key === uniqueKey);
-
-        if (alreadyInCart && item.unitBarcode) {
-          event.status = "duplicate";
-          event.productName = item.productName;
-          event.unitBarcode = item.unitBarcode;
-          event.error = `Unit ${item.unitBarcode} is already in cart.`;
-          flashFeedback("error");
-        } else {
-          onAddToCart({
-            key: uniqueKey,
-            productId: item.productId,
-            productName: item.productName,
-            sku: item.sku,
-            imageUrl: item.imageUrl,
-            unitPrice: item.unitPrice,
-            countInStock: item.countInStock,
-            unitId: item.unitId,
-            unitBarcode: item.unitBarcode,
-            unitSerial: item.unitSerial,
-          });
-          event.status = "ok";
-          event.productName = item.productName;
-          event.unitBarcode = item.unitBarcode;
-          event.unitSerial = item.unitSerial;
-          flashFeedback("ok");
-        }
       } else {
-        event.status = "error";
-        event.error = data.error || `No item found for "${q.trim()}".`;
-        flashFeedback("error");
+        const data = await res.json();
+
+        if (data.success && data.data) {
+          const item = data.data;
+          const uniqueKey = item.unitBarcode
+            ? `${item.productId}-${item.unitBarcode}`
+            : item.productId;
+          const alreadyInCart = cartItems.some((c) => c.key === uniqueKey);
+
+          if (alreadyInCart && item.unitBarcode) {
+            event.status = "duplicate";
+            event.productName = item.productName;
+            event.unitBarcode = item.unitBarcode;
+            event.error = `Unit ${item.unitBarcode} is already in cart.`;
+            flashFeedback("error");
+          } else {
+            onAddToCart({
+              key: uniqueKey,
+              productId: item.productId,
+              productName: item.productName,
+              sku: item.sku,
+              imageUrl: item.imageUrl,
+              unitPrice: item.unitPrice,
+              countInStock: item.countInStock,
+              unitId: item.unitId,
+              unitBarcode: item.unitBarcode,
+              unitSerial: item.unitSerial,
+            });
+            event.status = "ok";
+            event.productName = item.productName;
+            event.unitBarcode = item.unitBarcode;
+            event.unitSerial = item.unitSerial;
+            flashFeedback("ok");
+          }
+        } else {
+          event.status = "error";
+          event.error = data.error || `No item found for "${q.trim()}".`;
+          flashFeedback("error");
+        }
       }
     } catch (err: any) {
       event.status = "error";
       event.error = `Scan failed: ${err.message || "Network error"}`;
       flashFeedback("error");
+    } finally {
+      setLastScan(event);
+      setScanLog((prev) => [event, ...prev].slice(0, 50));
+      setScanning(false);
+      setScanInput("");
+      scanRef.current?.focus();
     }
-
-    setLastScan(event);
-    setScanLog((prev) => [event, ...prev].slice(0, 50));
-    setScanning(false);
-    setScanInput("");
-    scanRef.current?.focus();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

@@ -139,6 +139,9 @@ export default function AdminSalesTrackerPage() {
   const modalRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
+  const workflowModalRef = useRef<HTMLDivElement | null>(null);
+  const previousWorkflowFocusRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     if (!selectedPosSaleId) return;
 
@@ -152,11 +155,12 @@ export default function AdminSalesTrackerPage() {
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        if (showSendWorkflow) return;
         setSelectedPosSaleId(null);
         return;
       }
 
-      if (e.key === "Tab" && modalRef.current) {
+      if (e.key === "Tab" && modalRef.current && !showSendWorkflow) {
         const focusables: HTMLElement[] = Array.from(
           modalRef.current.querySelectorAll(
             'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -192,7 +196,60 @@ export default function AdminSalesTrackerPage() {
         toRestore.focus();
       }
     };
-  }, [selectedPosSaleId]);
+  }, [selectedPosSaleId, showSendWorkflow]);
+
+  useEffect(() => {
+    if (!showSendWorkflow) return;
+
+    previousWorkflowFocusRef.current = document.activeElement as HTMLElement | null;
+
+    const frameId = requestAnimationFrame(() => {
+      workflowModalRef.current?.focus();
+    });
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setShowSendWorkflow(false);
+        return;
+      }
+
+      if (e.key === "Tab" && workflowModalRef.current) {
+        const focusables: HTMLElement[] = Array.from(
+          workflowModalRef.current.querySelectorAll(
+            'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          )
+        );
+
+        if (focusables.length === 0) return;
+
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first || document.activeElement === workflowModalRef.current) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    const toRestore = previousWorkflowFocusRef.current;
+    return () => {
+      cancelAnimationFrame(frameId);
+      window.removeEventListener("keydown", onKeyDown, true);
+      if (toRestore?.isConnected) {
+        toRestore.focus();
+      }
+    };
+  }, [showSendWorkflow]);
 
   const handleReprintReceipt = async () => {
     if (!posReceiptDetails) return;
@@ -270,6 +327,16 @@ export default function AdminSalesTrackerPage() {
 
   const handleShareWhatsappInvoice = async () => {
     if (!posReceiptDetails) return;
+
+    const cleanPhone = (workflowPhone || '').replace(/\D/g, '');
+    if (!cleanPhone) {
+      setWorkflowMessage({
+        type: 'error',
+        text: 'Please enter a valid customer phone number before sharing on WhatsApp.',
+      });
+      return;
+    }
+
     setSharingWhatsapp(true);
     setWorkflowMessage(null);
 
@@ -337,24 +404,23 @@ export default function AdminSalesTrackerPage() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
 
-      const phone = workflowPhone || '';
-      const cleanPhone = phone.replace(/\D/g, '');
-      const itemsStr = items.map(i => `• ${i.product_name} x${i.quantity} - ${fmt(i.line_total)}`).join('%0A');
-      const text = `*FTC Electronics*%0AInvoice Document: *${docNumber}*%0A*Date:* ${formattedDate}%0A*Total:* ${fmt(sale.total)}%0A%0A*Items:*%0A${itemsStr}%0A%0A📄 *Invoice PDF document (${fileName}) has been downloaded to your device.* Please attach it to this chat!%0AThank you for shopping with us!`;
+      const itemsStr = items.map(i => `• ${i.product_name} x${i.quantity} - ${fmt(i.line_total)}`).join('\n');
+      const text = `*FTC Electronics*\nInvoice Document: *${docNumber}*\n*Date:* ${formattedDate}\n*Total:* ${fmt(sale.total)}\n\n*Items:*\n${itemsStr}\n\n📄 *Invoice PDF document (${fileName}) has been downloaded to your device.* Please attach it to this chat!\nThank you for shopping with us!`;
 
-      window.open(`https://wa.me/${cleanPhone || '94'}?text=${text}`, '_blank');
+      window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`, '_blank');
 
       setWorkflowMessage({
         type: 'success',
         text: `📄 Invoice PDF (${fileName}) downloaded! WhatsApp Web opened — drag & drop or attach the PDF file into the chat.`,
       });
     } catch (err: any) {
+      if (err?.name === 'AbortError') return;
       console.error('WhatsApp PDF share error:', err);
       setWorkflowMessage({
         type: 'error',
-        text: err.message || 'Failed to generate PDF document for WhatsApp.',
+        text: err?.message || 'Failed to generate PDF document for WhatsApp.',
       });
     } finally {
       setSharingWhatsapp(false);
@@ -878,8 +944,13 @@ export default function AdminSalesTrackerPage() {
           onClick={() => setShowSendWorkflow(false)}
         >
           <div
+            ref={workflowModalRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Send Digital Invoice"
             onClick={(e) => e.stopPropagation()}
-            className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200"
+            className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200 outline-none"
           >
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20">
@@ -905,7 +976,11 @@ export default function AdminSalesTrackerPage() {
                     ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
                     : 'bg-red-500/10 border-red-500/20 text-red-400'
                 }`}>
-                  <CheckCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                  {workflowMessage.type === 'success' ? (
+                    <CheckCircle className="h-4 w-4 mt-0.5 shrink-0 text-emerald-500" />
+                  ) : (
+                    <AlertCircle className="h-4 w-4 mt-0.5 shrink-0 text-red-500" />
+                  )}
                   <p className="leading-relaxed font-semibold">{workflowMessage.text}</p>
                 </div>
               )}
@@ -974,6 +1049,7 @@ export default function AdminSalesTrackerPage() {
                       Email Address *
                     </label>
                     <Input
+                      type="email"
                       value={workflowEmail}
                       onChange={(e) => setWorkflowEmail(e.target.value)}
                       placeholder="Enter customer email address"
@@ -990,7 +1066,7 @@ export default function AdminSalesTrackerPage() {
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                      Customer Phone / WhatsApp Number
+                      Customer Phone / WhatsApp Number *
                     </label>
                     <Input
                       value={workflowPhone}
@@ -1014,14 +1090,28 @@ export default function AdminSalesTrackerPage() {
               </Button>
               {workflowTab === 'email' ? (
                 <Button
-                  disabled={sendingWorkflow || !workflowEmail.trim()}
+                  disabled={
+                    sendingWorkflow ||
+                    !workflowEmail.trim() ||
+                    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(workflowEmail.trim())
+                  }
                   onClick={async () => {
+                    const trimmedEmail = workflowEmail.trim();
+                    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                    if (!emailRegex.test(trimmedEmail)) {
+                      setWorkflowMessage({
+                        type: 'error',
+                        text: 'Please enter a valid email address (e.g. customer@example.com).',
+                      });
+                      return;
+                    }
+
                     setSendingWorkflow(true);
                     setWorkflowMessage(null);
                     try {
                       const res = await sendInvoiceViaWorkflowAction({
                         saleId: posReceiptDetails.sale.id,
-                        email: workflowEmail.trim(),
+                        email: trimmedEmail,
                         customerName: workflowName.trim(),
                         customerPhone: workflowPhone.trim(),
                       });
@@ -1058,7 +1148,7 @@ export default function AdminSalesTrackerPage() {
                       setSendingWorkflow(false);
                     }
                   }}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold gap-1 cursor-pointer"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold gap-1 cursor-pointer disabled:opacity-50"
                 >
                   {sendingWorkflow ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1069,9 +1159,9 @@ export default function AdminSalesTrackerPage() {
                 </Button>
               ) : (
                 <Button
-                  disabled={sharingWhatsapp}
+                  disabled={sharingWhatsapp || !(workflowPhone || '').replace(/\D/g, '')}
                   onClick={handleShareWhatsappInvoice}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold gap-1 cursor-pointer"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold gap-1 cursor-pointer disabled:opacity-50"
                 >
                   {sharingWhatsapp ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />

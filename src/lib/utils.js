@@ -4,13 +4,13 @@ import { twMerge } from "tailwind-merge";
 export function cn(...inputs) {
     return twMerge(clsx(inputs));
 }
-// Utility function to format a number with currency
-export function formatCurrency(amount, currency = "USD", options) {
-    return new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency,
+export function formatCurrency(amount, currency = "LKR", options) {
+    const formatted = new Intl.NumberFormat("en-US", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
         ...options,
-    }).format(amount);
+    }).format(amount || 0);
+    return `LKR ${formatted}`;
 }
 // Utility function to generate a unique ID
 export function generateUniqueId(prefix = "id") {

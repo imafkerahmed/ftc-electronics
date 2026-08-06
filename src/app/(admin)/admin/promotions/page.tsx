@@ -142,6 +142,21 @@ export default function AdminPromotionsPage() {
       return;
     }
 
+    if (parseFloat(value) < 0) {
+      setError('Discount value cannot be negative.');
+      return;
+    }
+
+    if (minOrderValue && parseFloat(minOrderValue) < 0) {
+      setError('Minimum order value cannot be negative.');
+      return;
+    }
+
+    if (usageLimit && (parseFloat(usageLimit) < 0 || !Number.isInteger(parseFloat(usageLimit)))) {
+      setError('Usage limit must be a non-negative whole number.');
+      return;
+    }
+
     startTransition(async () => {
       let res;
       const payload = {
@@ -151,8 +166,8 @@ export default function AdminPromotionsPage() {
         discountValue: parseFloat(value) || 0,
         startDate: new Date(startDate).toISOString(),
         endDate: new Date(endDate).toISOString(),
-        minOrderValue: parseFloat(minOrderValue) || 0,
-        usageLimit: parseInt(usageLimit) || 0,
+        minOrderValue: minOrderValue ? parseFloat(minOrderValue) : 0,
+        usageLimit: usageLimit ? parseInt(usageLimit, 10) : 0,
       };
 
       if (editingPromotion) {
@@ -209,15 +224,15 @@ export default function AdminPromotionsPage() {
         </div>
       )}
 
-      {/* Title */}
+      {/* Header Title */}
       <div className="flex items-center justify-between gap-4 flex-wrap border-b border-border pb-5">
         <div>
           <h1 className="text-2xl font-bold tracking-wide flex items-center gap-2">
-            <Tag className="h-6 w-6 text-emerald-500" />
-            Promotions & Campaigns
+            <Tag className="h-6 w-6 text-blue-500" />
+            Promotions &amp; Coupon Campaigns
           </h1>
           <p className="text-xs text-muted-foreground mt-1">
-            Create coupon codes, flat discounts, or BNPL promo campaigns.
+            Create percentage discounts, flat coupon vouchers, minimum order thresholds, and scheduled deals.
           </p>
         </div>
         <Button
@@ -225,120 +240,99 @@ export default function AdminPromotionsPage() {
           size="sm"
           className="bg-blue-600 hover:bg-blue-700 text-white font-semibold cursor-pointer h-9 px-4 flex items-center gap-1.5"
         >
-          <Plus className="h-4 w-4" /> Add Promotion
+          <Plus className="h-4 w-4" /> Create Campaign
         </Button>
       </div>
 
-      {/* List of promotions */}
+      {/* Promotions List */}
       {loading ? (
         <div className="p-8 text-center text-xs text-muted-foreground bg-card border border-border rounded-xl">
           <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-blue-500" />
           Loading promotions...
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {promotions.length === 0 ? (
             <div className="col-span-full p-8 text-center text-xs text-muted-foreground bg-card border border-border rounded-xl">
-              No promotions found.
+              No promotions or coupon codes configured.
             </div>
           ) : (
             promotions.map((promo) => (
-              <div
-                key={promo.id}
-                className="bg-card border border-border rounded-xl p-5 hover:border-blue-500/25 transition-all group relative flex flex-col justify-between min-h-[210px] overflow-hidden"
-              >
-                {/* Dotted coupon line divider & ticket cutout indicators */}
-                <div className="absolute top-1/2 left-0 w-3 h-6 bg-background border-r border-border -mt-3 rounded-r-full -translate-x-[1px] z-10" />
-                <div className="absolute top-1/2 right-0 w-3 h-6 bg-background border-l border-border -mt-3 rounded-l-full translate-x-[1px] z-10" />
-
+              <div key={promo.id} className="bg-card border border-border rounded-xl p-5 shadow-sm space-y-4 relative flex flex-col justify-between">
                 <div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="px-2.5 py-1 rounded bg-secondary/85 border border-border/80 text-xs font-mono font-bold uppercase tracking-wider text-foreground">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
                       {promo.code}
                     </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleToggleActive(promo)}
-                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${promo.isActive ? 'bg-emerald-600' : 'bg-slate-700'}`}
-                      >
-                        <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${promo.isActive ? 'translate-x-4' : 'translate-x-0'}`} />
-                      </button>
-                      <span
-                        className={`px-2 py-0.5 border text-[9px] rounded font-bold uppercase tracking-wider ${
-                          promo.isActive && promo.status === 'active'
-                            ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
-                            : promo.isActive && promo.status === 'scheduled'
-                            ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
-                            : 'bg-muted text-muted-foreground border-border'
-                        }`}
-                      >
-                        {promo.isActive ? promo.status : 'inactive'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <h3 className="font-bold text-foreground text-sm mt-3.5 leading-snug">
-                    {promo.name}
-                  </h3>
-                  
-                  {/* Coupon criteria details */}
-                  <div className="mt-2 space-y-1 text-[10px] text-muted-foreground">
-                    <div>
-                      {promo.minOrderValue && promo.minOrderValue > 0 ? (
-                        <span>🛒 Min. Purchase: <strong className="text-foreground">LKR {promo.minOrderValue.toLocaleString()}</strong></span>
-                      ) : (
-                        <span>🛒 No minimum purchase required</span>
-                      )}
-                    </div>
-                    <div>
-                      {promo.usageLimit && promo.usageLimit > 0 ? (
-                        <span>
-                          🎟️ Usage: <strong className="text-foreground">{promo.usageCount} / {promo.usageLimit}</strong> times
-                          {promo.usageCount !== undefined && promo.usageCount >= promo.usageLimit && (
-                            <span className="ml-1 text-red-400 font-bold">(Fully Used)</span>
-                          )}
-                        </span>
-                      ) : (
-                        <span>🎟️ Unlimited usage times</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-4 pt-4 border-t border-dashed border-border/80 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-1 text-muted-foreground">
-                    <Percent className="h-3.5 w-3.5 text-emerald-500" />
-                    <span className="font-bold text-foreground">
-                      {promo.type === 'percentage'
-                        ? `${promo.value}% Off`
-                        : `LKR ${promo.value.toLocaleString()} Off`}
+                    <span
+                      className={`px-2 py-0.5 text-[9px] rounded font-bold uppercase tracking-wider border ${
+                        promo.status === 'active' && promo.isActive
+                          ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20'
+                          : promo.status === 'scheduled'
+                          ? 'bg-amber-500/15 text-amber-400 border-amber-500/20'
+                          : 'bg-slate-700/60 text-slate-400 border-slate-700/40'
+                      }`}
+                    >
+                      {promo.isActive ? promo.status : 'Disabled'}
                     </span>
                   </div>
-
-                  <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                    <Calendar className="h-3.5 w-3.5" />
-                    <span>Ends {promo.endDate}</span>
+                  <h3 className="font-bold text-sm text-foreground">{promo.name}</h3>
+                  <div className="flex items-center gap-1 text-lg font-black text-blue-500 mt-1">
+                    <Percent className="h-4 w-4" />
+                    <span>{promo.type === 'percentage' ? `${promo.value}% OFF` : `LKR ${promo.value} OFF`}</span>
                   </div>
                 </div>
 
-                {/* Actions overlay */}
-                <div className="absolute top-4 right-4 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    onClick={() => handleOpenEdit(promo)}
-                    className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted border border-border bg-card cursor-pointer"
-                    title="Edit Campaign"
-                    disabled={isPending}
-                  >
-                    <Edit className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(promo.id)}
-                    className="p-1.5 rounded-md text-muted-foreground hover:text-red-500 hover:bg-red-500/10 border border-border bg-card cursor-pointer"
-                    title="Delete Campaign"
-                    disabled={isPending}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                <div className="space-y-2 text-[11px] text-muted-foreground pt-3 border-t border-border/50">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1"><Calendar className="h-3.5 w-3.5" /> Start:</span>
+                    <span className="font-medium text-foreground">{promo.startDate || '—'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1"><Calendar className="h-3.5 w-3.5" /> End:</span>
+                    <span className="font-medium text-foreground">{promo.endDate || '—'}</span>
+                  </div>
+                  {promo.minOrderValue ? (
+                    <div className="flex items-center justify-between">
+                      <span>Min Order:</span>
+                      <span className="font-medium text-foreground">LKR {promo.minOrderValue.toLocaleString()}</span>
+                    </div>
+                  ) : null}
+                  {promo.usageLimit ? (
+                    <div className="flex items-center justify-between">
+                      <span>Usage Limit:</span>
+                      <span className="font-medium text-foreground">{promo.usageCount || 0} / {promo.usageLimit}</span>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="flex items-center justify-between pt-3 border-t border-border mt-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleActive(promo)}
+                      aria-label={`Toggle active state for promotion ${promo.name}`}
+                      className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors duration-200 ease-in-out ${
+                        promo.isActive ? 'bg-emerald-600' : 'bg-slate-700'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                          promo.isActive ? 'translate-x-3' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                    <span className="text-[10px] text-muted-foreground">{promo.isActive ? 'Active' : 'Disabled'}</span>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(promo)} className="h-7 w-7 p-0 cursor-pointer">
+                      <Edit className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => handleDelete(promo.id)} className="h-7 w-7 p-0 cursor-pointer text-red-500 hover:text-red-400">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
               </div>
             ))
@@ -348,31 +342,26 @@ export default function AdminPromotionsPage() {
 
       {/* Editor Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
           <div className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full overflow-hidden animate-scale-in">
-            {/* Header */}
             <div className="p-5 border-b border-border flex items-center justify-between">
               <h3 className="text-base font-bold text-foreground">
-                {editingPromotion ? 'Edit Promotion Campaign' : 'Create Promotion'}
+                {editingPromotion ? 'Edit Promotion' : 'Create Promotion Campaign'}
               </h3>
-              <button 
-                onClick={() => setIsModalOpen(false)}
-                className="p-1 text-muted-foreground hover:text-foreground rounded-md hover:bg-muted"
-              >
+              <button onClick={() => setIsModalOpen(false)} className="p-1 text-muted-foreground hover:text-foreground rounded-md hover:bg-muted">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            {/* Form Content */}
             <form onSubmit={handleSubmit} className="p-5 space-y-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-foreground/80 block">Campaign Name *</label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Summer Special" />
+                <Input value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. New Year Special Discount" />
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-foreground/80 block">Promo Code *</label>
-                <Input value={code} onChange={(e) => setCode(e.target.value)} required placeholder="e.g. SUMMER26" />
+                <label className="text-xs font-semibold text-foreground/80 block">Coupon Code *</label>
+                <Input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} required placeholder="e.g. NEWYEAR2026" className="font-mono uppercase" />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -389,18 +378,18 @@ export default function AdminPromotionsPage() {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-foreground/80 block">Discount Value *</label>
-                  <Input type="number" value={value} onChange={(e) => setValue(e.target.value)} required />
+                  <Input type="number" min="0" step="0.01" value={value} onChange={(e) => setValue(e.target.value)} required />
                 </div>
               </div>
 
-               <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-foreground/80 block">Min Order Value (LKR)</label>
-                  <Input type="number" value={minOrderValue} onChange={(e) => setMinOrderValue(e.target.value)} placeholder="e.g. 5000" />
+                  <Input type="number" min="0" step="0.01" value={minOrderValue} onChange={(e) => setMinOrderValue(e.target.value)} placeholder="e.g. 5000" />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-foreground/80 block">Usage Limit</label>
-                  <Input type="number" value={usageLimit} onChange={(e) => setUsageLimit(e.target.value)} placeholder="Leave blank if unlimited" />
+                  <Input type="number" min="0" step="1" value={usageLimit} onChange={(e) => setUsageLimit(e.target.value)} placeholder="Leave blank if unlimited" />
                 </div>
               </div>
 

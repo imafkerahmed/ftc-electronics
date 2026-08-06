@@ -9,7 +9,9 @@ import type { AdminRole, AuditAction, DealerSaleRecord } from '@/types/admin';
 import type { BarcodePrintConfig } from '@/types/barcode-config';
 import type { ReceiptPrintConfig, ReceiptPrintPreset } from '@/types/receipt-config';
 import type { InvoicePrintConfig, InvoicePrintPreset } from '@/types/invoice-config';
-import { sendQuotationEmail, sendOrderInvoiceEmail } from '@/lib/email';
+import { sendQuotationEmail, sendOrderInvoiceEmail, sendOrderShippingEmail } from '@/lib/email';
+import { sendInvoiceEmailForOrder } from '@/lib/order-email';
+import { deductStockForConfirmedOrderAction } from '@/app/actions/checkout';
 import {
   pbProducts,
   pbCategories,
@@ -25,6 +27,7 @@ import {
   pbCustomers,
   pbWholesaleDealers,
   pbQuotations,
+  pbContactInquiries,
 } from '@/lib/pb-collections';
 import type { PaymentMethod, PBSale, PBSaleItem, SalePayload } from '@/types/pos';
 
@@ -36,7 +39,7 @@ function toRecord(obj: any): Record<string, unknown> | undefined {
 
 // ─── Permission Check Helper ────────────────────────────────────────────────
 
-async function checkPermission(
+export async function checkPermission(
   module: keyof typeof ROLE_PERMISSIONS[AdminRole],
   action: 'read' | 'write' | 'delete'
 ): Promise<{ allowed: boolean; role?: AdminRole; actorEmail?: string; actorId?: string; ip?: string; userAgent?: string }> {
@@ -698,6 +701,16 @@ export async function createPromotionAction(data: {
   const check = await checkPermission('promotions', 'write');
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
+  if (data.discountValue !== undefined && data.discountValue < 0) {
+    return { success: false, error: 'Discount value cannot be negative.' };
+  }
+  if (data.minOrderValue !== undefined && data.minOrderValue < 0) {
+    return { success: false, error: 'Minimum order value cannot be negative.' };
+  }
+  if (data.usageLimit !== undefined && (data.usageLimit < 0 || !Number.isInteger(data.usageLimit))) {
+    return { success: false, error: 'Usage limit must be a non-negative whole number.' };
+  }
+
   try {
     const record = await pbPromotions.create({
       ...data,
@@ -725,8 +738,17 @@ export async function updatePromotionAction(id: string, data: any) {
   const check = await checkPermission('promotions', 'write');
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
+  if (data.discountValue !== undefined && data.discountValue < 0) {
+    return { success: false, error: 'Discount value cannot be negative.' };
+  }
+  if (data.minOrderValue !== undefined && data.minOrderValue < 0) {
+    return { success: false, error: 'Minimum order value cannot be negative.' };
+  }
+  if (data.usageLimit !== undefined && (data.usageLimit < 0 || !Number.isInteger(data.usageLimit))) {
+    return { success: false, error: 'Usage limit must be a non-negative whole number.' };
+  }
+
   try {
-    const oldRecord = await pbPromotions.getAll({ page: 1, perPage: 1 }); // not needed for details, but we can do simple update
     const record = await pbPromotions.update(id, data);
 
     await writeAuditLog(
@@ -771,12 +793,7 @@ export async function deletePromotionAction(id: string) {
 }
 
 function generatePbId(): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  let result = '';
-  for (let i = 0; i < 15; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
+  return crypto.randomUUID().replace(/-/g, '').slice(0, 15);
 }
 
 export async function createAnnouncementAction(formData: FormData) {
@@ -787,6 +804,17 @@ export async function createAnnouncementAction(formData: FormData) {
     if (!formData.has('id')) {
       formData.append('id', generatePbId());
     }
+
+    // Normalize endsAt to end of specified day (23:59:59.999)
+    const endsAtVal = formData.get('endsAt')?.toString();
+    if (endsAtVal) {
+      const endOfDay = new Date(endsAtVal);
+      if (!isNaN(endOfDay.getTime())) {
+        endOfDay.setHours(23, 59, 59, 999);
+        formData.set('endsAt', endOfDay.toISOString());
+      }
+    }
+
     const record = await pbAnnouncements.create(formData);
 
     await writeAuditLog(
@@ -812,6 +840,21 @@ export async function updateAnnouncementAction(id: string, formData: FormData) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
+    // Normalize endsAt to end of specified day (23:59:59.999)
+    const endsAtVal = formData.get('endsAt')?.toString();
+    if (endsAtVal) {
+      const endOfDay = new Date(endsAtVal);
+      if (!isNaN(endOfDay.getTime())) {
+        endOfDay.setHours(23, 59, 59, 999);
+        formData.set('endsAt', endOfDay.toISOString());
+      }
+    }
+
+    // Explicitly delete image file in PocketBase when client requests image removal
+    if (formData.get('removeImage') === 'true') {
+      formData.set('image', '');
+    }
+
     const record = await pbAnnouncements.update(id, formData);
 
     await writeAuditLog(
@@ -1232,6 +1275,26 @@ export async function toggleCustomerStatusAction(id: string, currentStatus: 'act
 
 // ─── Orders Actions ──────────────────────────────────────────────────────────
 
+export async function getAdminOrdersAction() {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.', data: [] };
+
+  try {
+    const pb = await getAdminPb();
+    const result = await pb.collection('orders').getList(1, 100, {
+      sort: '-created',
+    });
+
+    return {
+      success: true,
+      data: result.items,
+    };
+  } catch (err: any) {
+    console.error('[getAdminOrdersAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to fetch orders.', data: [] };
+  }
+}
+
 export async function updateOrderStatusAction(id: string, status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded') {
   const check = await checkPermission('orders', 'write');
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
@@ -1250,6 +1313,25 @@ export async function updateOrderStatusAction(id: string, status: 'pending' | 'p
 
     const record = await pbOrders.update(id, updateData);
 
+    if (status === 'shipped') {
+      try {
+        const customerEmail = oldRecord.customer?.email || oldRecord.customerEmail || oldRecord.email;
+        if (customerEmail) {
+          await sendOrderShippingEmail({
+            to: customerEmail,
+            orderNumber: oldRecord.orderId || oldRecord.id,
+            customerName: oldRecord.customer?.name || oldRecord.customerName || 'Customer',
+            shippingAddress: oldRecord.shippingAddress,
+            items: Array.isArray(oldRecord.items)
+              ? oldRecord.items.map((i: any) => ({ name: i.name || 'Product', qty: i.quantity || i.qty || 1 }))
+              : [],
+          });
+        }
+      } catch (shippingEmailErr) {
+        console.error('[updateOrderStatusAction] Failed to send shipping email:', shippingEmailErr);
+      }
+    }
+
     await writeAuditLog(
       check.actorEmail!,
       'update',
@@ -1267,7 +1349,154 @@ export async function updateOrderStatusAction(id: string, status: 'pending' | 'p
   }
 }
 
+export async function markOrderAsPaidAction(id: string) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
+
+  try {
+    const pb = await getAdminPb();
+    const oldRecord = await pb.collection('orders').getOne(id);
+
+    const updateData: Record<string, any> = {
+      isPaid: true,
+      paidAt: new Date().toISOString(),
+      status: 'processing',
+    };
+
+    const record = await pbOrders.update(id, updateData);
+
+    // Deduct stock upon confirmed payment
+    try {
+      await deductStockForConfirmedOrderAction(id);
+    } catch (stockErr) {
+      console.error('[markOrderAsPaidAction] Stock deduction error:', stockErr);
+    }
+
+    // Send confirmation email to customer now that payment is confirmed
+    try {
+      await sendInvoiceEmailForOrder(id);
+    } catch (emailErr) {
+      console.error('[markOrderAsPaidAction] Failed to send email:', emailErr);
+    }
+
+    await writeAuditLog(
+      check.actorEmail!,
+      'update',
+      'orders',
+      id,
+      toRecord(oldRecord),
+      toRecord(record),
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/admin/orders');
+    return { success: true, data: record };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to mark order as paid.' };
+  }
+}
+
+/**
+ * Marks an order as Returned (e.g. customer unreachable / package returned).
+ * Restores product countInStock, releases serial units back to available status,
+ * and updates order status to 'cancelled'.
+ */
+export async function markOrderAsReturnedAction(id: string, reason = 'Returned / Unreachable Customer') {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
+
+  try {
+    const adminPb = await getAdminPb();
+    const order = await adminPb.collection('orders').getOne(id);
+    if (!order) return { success: false, error: 'Order not found.' };
+
+    const items = Array.isArray(order.items) ? order.items : [];
+    const orderNum = order.orderId || order.id;
+
+    // 1. If stock was deducted for this order, restore countInStock and log stock_purchases restock entry
+    if (order.stockDeducted) {
+      for (const item of items) {
+        const productId = item.productId || item.product || item.id;
+        const qty = item.quantity || item.qty || 1;
+
+        if (productId) {
+          try {
+            const product = await pbProducts.getById(productId);
+            if (product) {
+              const currentStock = product.countInStock || 0;
+              await adminPb.collection('products').update(productId, {
+                countInStock: currentStock + qty,
+              });
+            }
+          } catch (pErr) {
+            console.warn(`[markOrderAsReturnedAction] Failed restoring stock for ${productId}:`, pErr);
+          }
+
+          try {
+            await adminPb.collection('stock_purchases').create({
+              product: productId,
+              batchNumber: `RESTOCK-${orderNum}`,
+              quantity: qty,
+              unitCost: item.price || 0,
+              supplier: `Returned Order (${reason})`,
+              purchaseDate: new Date().toISOString().split('T')[0],
+              notes: `Package Returned - Restocked from Order ${orderNum} (${reason})`,
+            });
+          } catch (spErr) {
+            console.warn('[markOrderAsReturnedAction] Failed creating stock_purchases restock record:', spErr);
+          }
+        }
+      }
+    }
+
+    // 2. Release all serial units linked to this order back to 'available' status
+    try {
+      const filterStr = order.orderId ? `orderId = "${order.id}" || orderId = "${order.orderId}"` : `orderId = "${order.id}"`;
+      const linkedUnits = await adminPb.collection('stock_management').getFullList({
+        filter: filterStr,
+      });
+
+      for (const unit of linkedUnits) {
+        await adminPb.collection('stock_management').update(unit.id, {
+          status: 'available',
+          orderId: '',
+          notes: `Restored to available stock from Returned Order ${orderNum} (${reason})`,
+        });
+      }
+    } catch (unitErr) {
+      console.warn('[markOrderAsReturnedAction] Error releasing serial units:', unitErr);
+    }
+
+    // 3. Update order status to 'cancelled' with return notes
+    const updatedOrder = await pbOrders.update(id, {
+      status: 'cancelled',
+      stockDeducted: false,
+      notes: `Returned: ${reason}`,
+    });
+
+    await writeAuditLog(
+      check.actorEmail!,
+      'update',
+      'orders',
+      id,
+      toRecord(order),
+      toRecord(updatedOrder),
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/admin/orders');
+    revalidatePath('/admin/inventory');
+    revalidatePath('/products');
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('[markOrderAsReturnedAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to process order return.' };
+  }
+}
+
 // ─── System Configurations (Barcode Print Presets) ────────────────────────────
+
 // BarcodePrintConfig is imported at the top of the file from @/types/barcode-config.
 // Do NOT re-export anything non-async from a 'use server' file.
 
@@ -1709,6 +1938,9 @@ export async function createSaleAction(payload: SalePayload) {
 }
 
 export async function sendPosSaleEmailAction(saleId: string, emailAddress?: string) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
   try {
     const sale = await pbSales.getById(saleId);
     if (!sale) return { success: false, error: 'Sale record not found.' };
@@ -1738,7 +1970,7 @@ export async function sendPosSaleEmailAction(saleId: string, emailAddress?: stri
     }
 
     const saleItems = await pbSales.getItemsBySale(saleId);
-    const items = (saleItems || []).map((i) => ({
+    const items: Array<{ name: string; qty: number; unitPrice: number; discount?: number }> = (saleItems || []).map((i) => ({
       name: i.product_name,
       qty: i.quantity,
       unitPrice: i.unit_price,
@@ -1790,12 +2022,11 @@ export async function getSaleByIdAction(
     if (sale.customer_phone && (!sale.customer_email || sale.customer_email.endsWith('@customer.local') || sale.customer_email === 'customer@ftc.lk')) {
       try {
         const adminPb = await getAdminPb();
-        const list = await adminPb.collection('customers').getFullList({
-          filter: `phone = "${sale.customer_phone.replace(/"/g, '\\"')}"`,
-          limit: 1
-        });
-        if (list.length > 0) {
-          const cust = list[0];
+        const cust = await adminPb
+          .collection('customers')
+          .getFirstListItem(adminPb.filter('phone = {:phone}', { phone: sale.customer_phone }))
+          .catch(() => null);
+        if (cust) {
           if (cust.email && !cust.email.endsWith('@customer.local') && cust.email !== 'customer@ftc.lk') {
             sale.customer_email = cust.email;
           }
@@ -1818,7 +2049,7 @@ export async function verifyManagerPinAction(pin: string) {
     if (!cleanPin) return { success: false, error: 'PIN is required.' };
 
     const users = await adminPb.collection('users').getFullList({
-      filter: `pin = "${cleanPin.replace(/"/g, '\\"')}"`,
+      filter: adminPb.filter('pin = {:pin}', { pin: cleanPin }),
     });
 
     const manager = users.find(
@@ -2370,7 +2601,7 @@ export async function sendOrderInvoiceEmailAction(id: string) {
       console.warn('[sendOrderInvoiceEmailAction] Warning: Failed to load invoice config:', presetErr);
     }
 
-    let items = [];
+    let items: Array<{ name: string; qty: number; unitPrice: number; discount?: number }> = [];
     if (Array.isArray(order.items)) {
       items = order.items.map((item: any) => ({
         name: item.name || `Order Item`,
@@ -2447,13 +2678,10 @@ export async function sendInvoiceViaWorkflowAction(params: SendInvoiceWorkflowPa
     let customerRecord: any = null;
 
     if (resolvedPhone) {
-      const list = await adminPb.collection('customers').getFullList({
-        filter: `phone = "${resolvedPhone.replace(/"/g, '\\"')}"`,
-        limit: 1
-      });
-      if (list.length > 0) {
-        customerRecord = list[0];
-      }
+      customerRecord = await adminPb
+        .collection('customers')
+        .getFirstListItem(adminPb.filter('phone = {:phone}', { phone: resolvedPhone }))
+        .catch(() => null);
     }
 
     if (!resolvedEmail) {
@@ -2475,6 +2703,52 @@ export async function sendInvoiceViaWorkflowAction(params: SendInvoiceWorkflowPa
       }
     }
 
+    let storeName = 'FTC Electronics';
+    let storePhone = '';
+    let storeEmail = '';
+    let storeAddress = '';
+
+    try {
+      const presetsRes = await getInvoicePrintPresetsAction();
+      if (presetsRes.success && presetsRes.data && presetsRes.data.length > 0) {
+        const defaultPreset = presetsRes.data.find((p) => p.isDefault) || presetsRes.data[0];
+        const config = JSON.parse(defaultPreset.config);
+        storeName = config.storeName || storeName;
+        storePhone = config.headerPhone || storePhone;
+        storeEmail = config.headerEmail || storeEmail;
+        storeAddress = config.headerAddress || storeAddress;
+      }
+    } catch (presetErr) {
+      console.warn('[sendInvoiceViaWorkflowAction] Warning: Failed to load invoice config:', presetErr);
+    }
+
+    const items: Array<{ name: string; qty: number; unitPrice: number; discount?: number }> = saleItems.map((i) => ({
+      name: i.product_name,
+      qty: i.quantity,
+      unitPrice: i.unit_price,
+      discount: i.item_discount || 0,
+    }));
+
+    // Send email FIRST before mutating DB records so DB updates are consistent with successful delivery
+    const emailResult = await sendOrderInvoiceEmail({
+      to: resolvedEmail,
+      orderNumber: sale.receipt_number || `FTC-POS-${sale.id.slice(-6).toUpperCase()}`,
+      customerName: resolvedName,
+      shippingAddress: '',
+      items,
+      totalAmount: sale.total,
+      paymentMethod: `Paid via ${sale.payment_method?.toUpperCase() || 'POS'}`,
+      storeName,
+      storePhone,
+      storeEmail,
+      storeAddress,
+    });
+
+    if (!emailResult.success) {
+      return { success: false, error: emailResult.error || 'Failed to send email.' };
+    }
+
+    // Persist customer & sale updates only after email is successfully dispatched
     if (customerRecord) {
       const currentEmail = customerRecord.email;
       if (!currentEmail || currentEmail.endsWith('@customer.local') || currentEmail === 'customer@ftc.lk' || currentEmail !== resolvedEmail) {
@@ -2502,50 +2776,6 @@ export async function sendInvoiceViaWorkflowAction(params: SendInvoiceWorkflowPa
     
     await adminPb.collection('sales').update(sale.id, saleUpdate);
 
-    let storeName = 'FTC Electronics';
-    let storePhone = '';
-    let storeEmail = '';
-    let storeAddress = '';
-
-    try {
-      const presetsRes = await getInvoicePrintPresetsAction();
-      if (presetsRes.success && presetsRes.data && presetsRes.data.length > 0) {
-        const defaultPreset = presetsRes.data.find((p) => p.isDefault) || presetsRes.data[0];
-        const config = JSON.parse(defaultPreset.config);
-        storeName = config.storeName || storeName;
-        storePhone = config.headerPhone || storePhone;
-        storeEmail = config.headerEmail || storeEmail;
-        storeAddress = config.headerAddress || storeAddress;
-      }
-    } catch (presetErr) {
-      console.warn('[sendInvoiceViaWorkflowAction] Warning: Failed to load invoice config:', presetErr);
-    }
-
-    const items = saleItems.map((i) => ({
-      name: i.product_name,
-      qty: i.quantity,
-      unitPrice: i.unit_price,
-      discount: i.item_discount || 0,
-    }));
-
-    const emailResult = await sendOrderInvoiceEmail({
-      to: resolvedEmail,
-      orderNumber: sale.receipt_number || `FTC-POS-${sale.id.slice(-6).toUpperCase()}`,
-      customerName: resolvedName,
-      shippingAddress: '',
-      items,
-      totalAmount: sale.total,
-      paymentMethod: `Paid via ${sale.payment_method?.toUpperCase() || 'POS'}`,
-      storeName,
-      storePhone,
-      storeEmail,
-      storeAddress,
-    });
-
-    if (!emailResult.success) {
-      return { success: false, error: emailResult.error || 'Failed to send email.' };
-    }
-
     await writeAuditLog(
       check.actorEmail || 'admin',
       'update',
@@ -2563,6 +2793,369 @@ export async function sendInvoiceViaWorkflowAction(params: SendInvoiceWorkflowPa
     return { success: false, error: err.message || 'An error occurred.' };
   }
 }
+
+// ─── Admin Notifications Action ───────────────────────────────────────────────
+
+export interface AdminNotification {
+  id: string;
+  type: 'inquiry' | 'order' | 'quotation' | 'stock';
+  title: string;
+  description: string;
+  timestamp: string;
+  link: string;
+  read: boolean;
+}
+
+export async function getAdminNotificationsAction(): Promise<{
+  success: boolean;
+  notifications?: AdminNotification[];
+  unreadCount?: number;
+  error?: string;
+}> {
+  try {
+    const notifications: AdminNotification[] = [];
+
+    // Helper for safe array extraction
+    const toArray = (res: any): any[] => {
+      if (!res) return [];
+      if (Array.isArray(res)) return res;
+      if (Array.isArray(res.items)) return res.items;
+      return [];
+    };
+
+    // 1. Inquiries Notifications (New / Unread)
+    try {
+      const inquiriesRaw = await pbContactInquiries.getAll().catch(() => []);
+      const inquiries = toArray(inquiriesRaw);
+      inquiries
+        .filter((i: any) => i.status === 'new' || !i.read)
+        .slice(0, 10)
+        .forEach((i: any) => {
+          notifications.push({
+            id: `inquiry-${i.id}`,
+            type: 'inquiry',
+            title: `New Inquiry from ${i.name || 'Customer'}`,
+            description: i.message ? `${i.message.slice(0, 70)}${i.message.length > 70 ? '...' : ''}` : 'Customer submitted contact message',
+            timestamp: i.created || new Date().toISOString(),
+            link: '/admin/inquiries',
+            read: Boolean(i.read),
+          });
+        });
+    } catch {}
+
+    // 2. Orders Notifications (New / Pending / Processing)
+    try {
+      const pb = await getAdminPb();
+      const ordersRes = await pb.collection('orders').getList(1, 20, { sort: '-created' });
+      ordersRes.items
+        .filter((o: any) => o.status === 'pending' || o.status === 'processing' || !o.isPaid)
+        .slice(0, 10)
+        .forEach((o: any) => {
+          const orderNum = o.orderId || o.id;
+          const custName = o.customer?.name || o.customerName || 'Customer';
+          const amt = (o.total || o.totalAmount || 0).toLocaleString();
+          const pMethod = o.paymentDetails?.method ? ` (${o.paymentDetails.method})` : '';
+          notifications.push({
+            id: `order-${o.id}`,
+            type: 'order',
+            title: `New Order #${orderNum}`,
+            description: `Total LKR ${amt} — ${custName}${pMethod}`,
+            timestamp: o.created || new Date().toISOString(),
+            link: '/admin/orders',
+            read: false,
+          });
+        });
+    } catch (orderErr) {
+      console.warn('[getAdminNotificationsAction] Order notifications error:', orderErr);
+    }
+
+    // 3. Due Quotations Notifications
+    try {
+      const quotationsRaw = await pbQuotations.getAll().catch(() => []);
+      const quotations = toArray(quotationsRaw);
+      quotations
+        .filter((q: any) => q.status === 'pending' || q.status === 'sent')
+        .slice(0, 10)
+        .forEach((q: any) => {
+          notifications.push({
+            id: `quotation-${q.id}`,
+            type: 'quotation',
+            title: `Pending Quotation Follow-up`,
+            description: `Quotation for ${q.customerName || 'Customer'} (${q.items?.length || 1} items)`,
+            timestamp: q.created || new Date().toISOString(),
+            link: '/admin/quotations',
+            read: false,
+          });
+        });
+    } catch {}
+
+    // 4. Low Stock Alerts
+    try {
+      const productsRaw = await pbProducts.getAll().catch(() => []);
+      const products = toArray(productsRaw);
+      products
+        .filter((p: any) => p.stock !== undefined && p.stock >= 0 && p.stock <= 3)
+        .slice(0, 5)
+        .forEach((p: any) => {
+          notifications.push({
+            id: `stock-${p.id}`,
+            type: 'stock',
+            title: `Low Stock Warning`,
+            description: `${p.name} has only ${p.stock} unit${p.stock === 1 ? '' : 's'} remaining!`,
+            timestamp: p.updated || p.created || new Date().toISOString(),
+            link: '/admin/inventory',
+            read: false,
+          });
+        });
+    } catch {}
+
+    // Sort by most recent timestamp
+    notifications.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    const unreadCount = notifications.filter((n) => !n.read).length;
+
+    return {
+      success: true,
+      notifications: notifications.slice(0, 20),
+      unreadCount,
+    };
+  } catch (err: any) {
+    console.error('[getAdminNotificationsAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to fetch admin notifications' };
+  }
+}
+
+/**
+ * Clears all orders and sales logs, resets all stock_management units back to 'available',
+ * restores product stock levels, and resets system state for a fresh start.
+ */
+export async function resetAllOrdersAndRestoreStockAction(): Promise<{
+  success: boolean;
+  message?: string;
+  error?: string;
+}> {
+  const check = await checkPermission('settings', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
+
+  try {
+    const adminPb = await getAdminPb();
+
+    // 1. Delete all orders from orders collection
+    let deletedOrdersCount = 0;
+    try {
+      const orders = await adminPb.collection('orders').getFullList();
+      for (const order of orders) {
+        await adminPb.collection('orders').delete(order.id);
+        deletedOrdersCount++;
+      }
+    } catch (err) {
+      console.warn('[resetAllOrdersAndRestoreStockAction] Error clearing orders:', err);
+    }
+
+    // 2. Delete outbound sales logs from stock_purchases collection (quantity < 0 or sale batch)
+    let deletedSalesLogsCount = 0;
+    try {
+      const purchases = await adminPb.collection('stock_purchases').getFullList();
+      for (const p of purchases) {
+        if (p.quantity < 0 || p.batchNumber?.startsWith('SALE-') || p.batchNumber?.startsWith('POS-')) {
+          await adminPb.collection('stock_purchases').delete(p.id);
+          deletedSalesLogsCount++;
+        }
+      }
+    } catch (err) {
+      console.warn('[resetAllOrdersAndRestoreStockAction] Error clearing sales logs:', err);
+    }
+
+    // 3. Reset all stock_management units back to 'available' and clear orderId
+    let resetUnitsCount = 0;
+    try {
+      const units = await adminPb.collection('stock_management').getFullList();
+      for (const unit of units) {
+        await adminPb.collection('stock_management').update(unit.id, {
+          status: 'available',
+          orderId: '',
+          notes: 'Restored to available inventory upon system reset',
+        });
+        resetUnitsCount++;
+      }
+    } catch (err) {
+      console.warn('[resetAllOrdersAndRestoreStockAction] Error resetting stock units:', err);
+    }
+
+    // 4. Update product countInStock based on available stock_management units or positive purchase quantities
+    try {
+      const products = await adminPb.collection('products').getFullList();
+      for (const prod of products) {
+        let availableCount = 0;
+        try {
+          const availUnits = await adminPb.collection('stock_management').getFullList({
+            filter: `product = "${prod.id}" && status = "available"`,
+          });
+          availableCount = availUnits.length;
+        } catch {}
+
+        if (availableCount > 0) {
+          await adminPb.collection('products').update(prod.id, { countInStock: availableCount });
+        } else {
+          // If no units exist in stock_management, calculate total from positive stock_purchases
+          let purchaseSum = 0;
+          try {
+            const purchases = await adminPb.collection('stock_purchases').getFullList({
+              filter: `product = "${prod.id}" && quantity > 0`,
+            });
+            purchaseSum = purchases.reduce((acc: number, item: any) => acc + (item.quantity || 0), 0);
+          } catch {}
+
+          const restoredStock = purchaseSum > 0 ? purchaseSum : Math.max(10, prod.countInStock || 10);
+          await adminPb.collection('products').update(prod.id, { countInStock: restoredStock });
+        }
+      }
+    } catch (err) {
+      console.warn('[resetAllOrdersAndRestoreStockAction] Error restoring product stock levels:', err);
+    }
+
+    // Audit log
+    await writeAuditLog(
+      check.actorEmail!,
+      'delete',
+      'orders',
+      'ALL_ORDERS',
+      {},
+      { resetOrders: deletedOrdersCount, resetSales: deletedSalesLogsCount, resetUnits: resetUnitsCount },
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/admin/orders');
+    revalidatePath('/admin/inventory');
+    revalidatePath('/admin/sales');
+    revalidatePath('/admin/dashboard');
+    revalidatePath('/account/orders');
+    revalidatePath('/pos');
+    revalidatePath('/products');
+
+    return {
+      success: true,
+      message: `System reset complete! Deleted ${deletedOrdersCount} orders, reset ${resetUnitsCount} inventory serial units back to available, and restored product stock levels.`,
+    };
+  } catch (err: any) {
+    console.error('[resetAllOrdersAndRestoreStockAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to reset system orders and stock.' };
+  }
+}
+
+export interface ProductSaleRecord {
+  id: string;
+  orderNumber: string;
+  channel: 'Online' | 'POS';
+  customerName: string;
+  customerEmail: string;
+  date: string;
+  quantity: number;
+  unitPrice: number;
+  totalAmount: number;
+  status: string;
+  serials: string[];
+}
+
+/**
+ * Fetches itemized sales history for a specific product across Online Orders and POS transactions.
+ */
+export async function getProductSalesHistoryAction(productId: string): Promise<{
+  success: boolean;
+  sales: ProductSaleRecord[];
+  error?: string;
+}> {
+  const check = await checkPermission('products', 'read');
+  if (!check.allowed) return { success: false, sales: [] };
+
+  try {
+    const adminPb = await getAdminPb();
+    const sales: ProductSaleRecord[] = [];
+
+    // 1. Query orders containing this product ID in items array
+    try {
+      const orders = await adminPb.collection('orders').getFullList({
+        sort: '-created',
+      });
+
+      for (const order of orders) {
+        const items = Array.isArray(order.items) ? order.items : [];
+        const matchedItem = items.find(
+          (i: any) => i.productId === productId || i.product === productId || i.id === productId
+        );
+
+        if (matchedItem) {
+          const qty = matchedItem.quantity || matchedItem.qty || 1;
+          const price = matchedItem.price || matchedItem.unit_price || 0;
+          const serials = Array.isArray(matchedItem.assignedSerials)
+            ? matchedItem.assignedSerials
+            : Array.isArray(matchedItem.assignedUnits)
+              ? matchedItem.assignedUnits.map((u: any) => u.serialNumber || u.barcode).filter(Boolean)
+              : [];
+
+          sales.push({
+            id: order.id,
+            orderNumber: order.orderId || order.id,
+            channel: order.channel === 'pos' ? 'POS' : 'Online',
+            customerName: order.customer?.name || order.customerName || order.shippingAddress?.firstName || 'Customer',
+            customerEmail: order.customer?.email || order.customerEmail || order.email || '',
+            date: order.created ? new Date(order.created).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A',
+            quantity: qty,
+            unitPrice: price,
+            totalAmount: qty * price,
+            status: order.status || 'pending',
+            serials,
+          });
+        }
+      }
+    } catch (orderErr) {
+      console.warn('[getProductSalesHistoryAction] Order query error:', orderErr);
+    }
+
+    // 2. Query stock_purchases for outbound sales (quantity < 0) not captured above
+    try {
+      const purchases = await adminPb.collection('stock_purchases').getFullList({
+        filter: `product = "${productId}" && quantity < 0`,
+        sort: '-created',
+      });
+
+      for (const pur of purchases) {
+        const batchNum = pur.batchNumber || '';
+        const orderIdFromBatch = batchNum.replace(/^(SALE|POS)-/, '');
+        const exists = sales.some((s) => s.orderNumber === orderIdFromBatch || s.id === orderIdFromBatch);
+
+        if (!exists) {
+          const qty = Math.abs(pur.quantity || 0);
+          const price = pur.unitCost || 0;
+          sales.push({
+            id: pur.id,
+            orderNumber: pur.batchNumber || pur.id,
+            channel: pur.batchNumber?.startsWith('POS-') ? 'POS' : 'Online',
+            customerName: pur.supplier || 'Customer Sale',
+            customerEmail: '',
+            date: pur.purchaseDate || new Date(pur.created).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+            quantity: qty,
+            unitPrice: price,
+            totalAmount: qty * price,
+            status: 'completed',
+            serials: [],
+          });
+        }
+      }
+    } catch (purErr) {
+      console.warn('[getProductSalesHistoryAction] Purchases query error:', purErr);
+    }
+
+    sales.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    return { success: true, sales };
+  } catch (err: any) {
+    console.error('[getProductSalesHistoryAction] Failed:', err);
+    return { success: false, sales: [] };
+  }
+}
+
+
 
 
 

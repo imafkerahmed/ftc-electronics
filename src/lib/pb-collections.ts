@@ -29,6 +29,7 @@ import type {
   PBCustomer,
   PBWholesaleDealer,
   PBQuotation,
+  PBContactInquiry,
 } from "@/types/admin";
 import { pbProductToProduct, pbCategoryToCategory } from "@/types/admin";
 import type { Product, Category } from "@/types/product";
@@ -879,7 +880,7 @@ export const pbAnnouncements = {
 
       return await pbClient.collection("announcements").getFullList<PBAnnouncement>({
         filter: `isActive = true && (endsAt = "" || endsAt >= "${now}")`,
-        sort: "-id",
+        sort: "-created",
       });
     } catch (err) {
       handleError(err, "pbAnnouncements.getActive");
@@ -896,7 +897,7 @@ export const pbAnnouncements = {
       const result = await pbClient
         .collection("announcements")
         .getList<PBAnnouncement>(options?.page || 1, options?.perPage || 25, {
-          sort: "-id",
+          sort: "-created",
         });
       return { items: result.items, totalItems: result.totalItems };
     } catch (err) {
@@ -1520,6 +1521,101 @@ export const pbQuotations = {
       return await adminPb.collection("quotations").delete(id);
     } catch (err) {
       handleError(err, "pbQuotations.delete");
+    }
+  },
+};
+
+// ─── Contact Inquiries Collection ──────────────────────────────────────────────
+
+export const pbContactInquiries = {
+  /**
+   * Ensures that the 'contact_inquiries' collection exists in PocketBase.
+   */
+  async ensureCollection(): Promise<boolean> {
+    try {
+      const adminPb = await getAdminPb();
+      try {
+        await adminPb.collections.getOne("contact_inquiries");
+        return true;
+      } catch {
+        // Create collection if missing
+        await adminPb.collections.create({
+          id: "contact_inquiries",
+          name: "contact_inquiries",
+          type: "base",
+          schema: [
+            { name: "name", type: "text", required: true },
+            { name: "email", type: "email", required: true },
+            { name: "phone", type: "text", required: false },
+            { name: "message", type: "editor", required: true },
+            { name: "status", type: "select", required: true, options: { values: ["new", "in-progress", "resolved"] } },
+            { name: "notes", type: "text", required: false },
+            { name: "read", type: "bool", required: false },
+          ],
+          listRule: "",
+          viewRule: "",
+          createRule: "",
+          updateRule: "",
+          deleteRule: "",
+        });
+        return true;
+      }
+    } catch (err) {
+      console.warn("Failed to auto-create contact_inquiries collection:", err);
+      return false;
+    }
+  },
+
+  async getAll(): Promise<PBContactInquiry[]> {
+    try {
+      await this.ensureCollection();
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("contact_inquiries").getFullList<PBContactInquiry>({
+        sort: "-created",
+      });
+    } catch (err) {
+      handleError(err, "pbContactInquiries.getAll");
+    }
+  },
+
+  async getById(id: string): Promise<PBContactInquiry | null> {
+    try {
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("contact_inquiries").getOne<PBContactInquiry>(id);
+    } catch (err) {
+      handleError(err, "pbContactInquiries.getById");
+    }
+  },
+
+  async create(data: Partial<PBContactInquiry>): Promise<PBContactInquiry> {
+    try {
+      await this.ensureCollection();
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("contact_inquiries").create<PBContactInquiry>({
+        status: "new",
+        read: false,
+        ...data,
+      });
+    } catch (err) {
+      handleError(err, "pbContactInquiries.create");
+    }
+  },
+
+  async update(id: string, data: Partial<PBContactInquiry>): Promise<PBContactInquiry> {
+    try {
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("contact_inquiries").update<PBContactInquiry>(id, data);
+    } catch (err) {
+      handleError(err, "pbContactInquiries.update");
+    }
+  },
+
+  async delete(id: string): Promise<boolean> {
+    try {
+      const adminPb = await getAdminPb();
+      return await adminPb.collection("contact_inquiries").delete(id);
+    } catch (err) {
+      handleError(err, "pbContactInquiries.delete");
     }
   },
 };

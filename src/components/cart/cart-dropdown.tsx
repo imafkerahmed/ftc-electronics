@@ -1,5 +1,6 @@
 'use client';
 
+import { formatPrice } from '@/lib/utils';
 import Link from 'next/link';
 import { X, ShoppingCart, ArrowRight } from 'lucide-react';
 import { useCart } from '@/hooks/use-cart';
@@ -71,7 +72,7 @@ export default function CartDropdown() {
           <div className="border-t border-border bg-card p-6 space-y-4">
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Subtotal</span>
-              <span className="font-semibold text-foreground">${subtotal}</span>
+              <span className="font-semibold text-foreground">{formatPrice(subtotal)}</span>
             </div>
             <p className="text-[11px] text-muted-foreground">
               Shipping, taxes, and coupons calculated at checkout.

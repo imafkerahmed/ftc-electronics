@@ -34,6 +34,8 @@ import {
   updateStockUnitStatusAction,
   getStockPurchasesAction,
   getStockManagementUnitsAction,
+  getProductSalesHistoryAction,
+  type ProductSaleRecord,
 } from '@/app/actions/admin';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -46,6 +48,7 @@ export default function ProductStockDetailPage({ params }: { params: Promise<{ i
   const [product, setProduct] = useState<Product | null>(null);
   const [purchases, setPurchases] = useState<PBStockPurchase[]>([]);
   const [stockUnits, setStockUnits] = useState<PBStockManagementUnit[]>([]);
+  const [salesHistory, setSalesHistory] = useState<ProductSaleRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
 
@@ -86,9 +89,10 @@ export default function ProductStockDetailPage({ params }: { params: Promise<{ i
         setError('Product not found.');
       }
 
-      const [purchasesRes, unitsRes] = await Promise.all([
+      const [purchasesRes, unitsRes, salesRes] = await Promise.all([
         getStockPurchasesAction(id),
         getStockManagementUnitsAction(id),
+        getProductSalesHistoryAction(id),
       ]);
 
       if (purchasesRes.data && Array.isArray(purchasesRes.data)) {
@@ -96,6 +100,9 @@ export default function ProductStockDetailPage({ params }: { params: Promise<{ i
       }
       if (unitsRes.data && Array.isArray(unitsRes.data)) {
         setStockUnits(unitsRes.data as PBStockManagementUnit[]);
+      }
+      if (salesRes.success && Array.isArray(salesRes.sales)) {
+        setSalesHistory(salesRes.sales);
       }
     } catch (err: any) {
       console.error('Failed to load product stock details:', err);
@@ -579,48 +586,116 @@ export default function ProductStockDetailPage({ params }: { params: Promise<{ i
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border text-foreground">
-                  {purchases.length === 0 ? (
+                  {purchases.filter((pur) => (pur.quantity || 0) > 0).length === 0 ? (
                     <tr>
                       <td colSpan={7} className="p-8 text-center text-xs text-muted-foreground">
-                        No stock purchase records logged yet. Click &quot;Add Purchase Entry&quot; to log a batch.
+                        No inbound stock purchase records logged yet. Click &quot;Add Purchase Entry&quot; to log a batch.
                       </td>
                     </tr>
                   ) : (
-                    purchases.map((pur) => {
-                      const isOutbound = (pur.quantity || 0) < 0;
-                      const totalCost = Math.abs(pur.quantity || 0) * (pur.unitCost || 0);
-                      return (
-                        <tr key={pur.id} className="hover:bg-muted/10 transition-colors">
-                          <td className="p-3 font-mono font-bold">
-                            <span className={isOutbound ? 'text-red-500' : 'text-blue-600 dark:text-blue-400'}>
+                    purchases
+                      .filter((pur) => (pur.quantity || 0) > 0)
+                      .map((pur) => {
+                        const totalCost = (pur.quantity || 0) * (pur.unitCost || 0);
+                        return (
+                          <tr key={pur.id} className="hover:bg-muted/10 transition-colors">
+                            <td className="p-3 font-mono font-bold text-blue-600 dark:text-blue-400">
                               {pur.batchNumber}
-                            </span>
-                          </td>
-                          <td className="p-3 text-muted-foreground">{pur.purchaseDate || new Date(pur.created).toLocaleDateString()}</td>
-                          <td className="p-3 font-medium">
-                            {pur.supplier || (isOutbound ? 'Customer Online Sale' : 'Official Supplier')}
-                          </td>
-                          <td className="p-3 font-extrabold">
-                            {isOutbound ? (
-                              <span className="text-red-500 bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20 text-[11px]">
-                                {pur.quantity} units (Sale)
-                              </span>
-                            ) : (
+                            </td>
+                            <td className="p-3 text-muted-foreground">{pur.purchaseDate || new Date(pur.created).toLocaleDateString()}</td>
+                            <td className="p-3 font-medium">{pur.supplier || 'Official Supplier'}</td>
+                            <td className="p-3 font-extrabold">
                               <span className="text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 text-[11px]">
                                 +{pur.quantity} units (Stock In)
                               </span>
-                            )}
-                          </td>
-                          <td className="p-3 text-muted-foreground">
-                            {product.currency === 'LKR' ? 'Rs. ' : '$'}{(pur.unitCost || 0).toLocaleString()}
-                          </td>
-                          <td className="p-3 font-bold text-foreground">
-                            {product.currency === 'LKR' ? 'Rs. ' : '$'}{totalCost.toLocaleString()}
-                          </td>
-                          <td className="p-3 text-muted-foreground max-w-[150px] truncate">{pur.notes || '—'}</td>
-                        </tr>
-                      );
-                    })
+                            </td>
+                            <td className="p-3 text-muted-foreground">
+                              {product.currency === 'LKR' ? 'Rs. ' : '$'}{(pur.unitCost || 0).toLocaleString()}
+                            </td>
+                            <td className="p-3 font-bold text-foreground">
+                              {product.currency === 'LKR' ? 'Rs. ' : '$'}{totalCost.toLocaleString()}
+                            </td>
+                            <td className="p-3 text-muted-foreground max-w-[150px] truncate">{pur.notes || '—'}</td>
+                          </tr>
+                        );
+                      })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Product Sales History Section */}
+          <div className="p-5 bg-card border border-border rounded-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-border pb-3 flex-wrap gap-2">
+              <div>
+                <h2 className="text-sm font-bold text-foreground">Product Sales History</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Outbound customer purchases and POS sales transactions.</p>
+              </div>
+              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                {salesHistory.length} Total Sale{salesHistory.length === 1 ? '' : 's'}
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-secondary/40 border-b border-border text-muted-foreground uppercase tracking-wider font-semibold">
+                    <th className="p-3">Order / Sale #</th>
+                    <th className="p-3">Channel</th>
+                    <th className="p-3">Date</th>
+                    <th className="p-3">Customer</th>
+                    <th className="p-3">Qty Sold</th>
+                    <th className="p-3">Total Price</th>
+                    <th className="p-3">Serial S/N</th>
+                    <th className="p-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border text-foreground">
+                  {salesHistory.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-8 text-center text-xs text-muted-foreground">
+                        No customer sales recorded for this product yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    salesHistory.map((sale) => (
+                      <tr key={sale.id} className="hover:bg-muted/10 transition-colors">
+                        <td className="p-3 font-mono font-bold text-blue-600 dark:text-blue-400">
+                          #{sale.orderNumber}
+                        </td>
+                        <td className="p-3">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${sale.channel === 'POS' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-sky-500/10 text-sky-400 border border-sky-500/20'}`}>
+                            {sale.channel}
+                          </span>
+                        </td>
+                        <td className="p-3 text-muted-foreground">{sale.date}</td>
+                        <td className="p-3 font-medium">
+                          <div>{sale.customerName}</div>
+                          {sale.customerEmail && <div className="text-[10px] text-muted-foreground">{sale.customerEmail}</div>}
+                        </td>
+                        <td className="p-3 font-extrabold text-foreground">{sale.quantity} unit{sale.quantity === 1 ? '' : 's'}</td>
+                        <td className="p-3 font-bold text-foreground">
+                          {product.currency === 'LKR' ? 'Rs. ' : '$'}{sale.totalAmount.toLocaleString()}
+                        </td>
+                        <td className="p-3 font-mono text-[11px]">
+                          {sale.serials.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {sale.serials.map((sn, sIdx) => (
+                                <span key={sIdx} className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded text-[10px]">
+                                  {sn}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground/60">—</span>
+                          )}
+                        </td>
+                        <td className="p-3 capitalize font-semibold text-muted-foreground">
+                          {sale.status}
+                        </td>
+                      </tr>
+                    ))
                   )}
                 </tbody>
               </table>

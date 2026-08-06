@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useTransition } from 'react';
+import React, { useState, useEffect, useTransition, useRef } from 'react';
 import {
   FileText,
   Plus,
@@ -125,6 +125,8 @@ export default function AdminQuotationsPage() {
   ]);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [focusedLineItemIndex, setFocusedLineItemIndex] = useState<number | null>(null);
+  const [activeSuggestionIdx, setActiveSuggestionIdx] = useState<number>(-1);
+  const blurTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Convert to Sale Modal State
   const [convertingQuote, setConvertingQuote] = useState<Quotation | null>(null);
@@ -132,61 +134,73 @@ export default function AdminQuotationsPage() {
   const [convertedSale, setConvertedSale] = useState<{ saleId: string; receiptNumber?: string } | null>(null);
   const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
 
+  // Cleanup blur timer on unmount
+  useEffect(() => {
+    return () => {
+      if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+    };
+  }, []);
+
   // Load Quotations, Dealers, and Customers
   const loadInitialData = async () => {
     setLoading(true);
-    const [qRes, dRes, cRes, pRes] = await Promise.all([
-      getQuotationsAction(),
-      getWholesaleDealersAction(),
-      searchPosCustomersAction(''),
-      pbProducts.getAll({ perPage: 300, status: 'published' }).catch(() => ({ items: [] })),
-    ]);
+    try {
+      const [qRes, dRes, cRes, pRes] = await Promise.all([
+        getQuotationsAction().catch(() => ({ success: false, data: [] })),
+        getWholesaleDealersAction().catch(() => ({ success: false, data: [] })),
+        searchPosCustomersAction('').catch(() => ({ success: false, data: [] })),
+        pbProducts.getAll({ perPage: 300, status: 'published' }).catch(() => ({ items: [] })),
+      ]);
 
-    if (pRes && pRes.items) {
-      setAllProducts(pRes.items);
+      if (pRes && pRes.items) {
+        setAllProducts(pRes.items);
+      }
+
+      if (qRes.success && qRes.data) {
+        const formatted = (qRes.data as PBQuotation[]).map((q) => ({
+          id: q.id,
+          quoteNumber: q.quote_number,
+          quoteType: (q.quote_type as 'wholesale' | 'direct') || (q.customer_company ? 'wholesale' : 'direct'),
+          dealerId: q.dealer_id,
+          customerName: q.customer_name,
+          customerCompany: q.customer_company,
+          customerEmail: q.customer_email,
+          customerPhone: q.customer_phone,
+          customerAddress: q.customer_address,
+          date: new Date(q.created || Date.now()).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+          dueDate: q.valid_until ? new Date(q.valid_until).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
+          validUntil: q.valid_until || '',
+          items: Array.isArray(q.items) ? q.items : [],
+          subtotal: q.subtotal || 0,
+          taxAmount: q.tax_amount || 0,
+          discountAmount: q.discount_amount || 0,
+          totalAmount: q.total_amount || 0,
+          notes: q.notes || '',
+          status: q.status || 'draft',
+        }));
+        setQuotations(formatted);
+      }
+
+      if (dRes.success && dRes.data) {
+        setWholesaleDealers(dRes.data);
+      }
+
+      if (cRes.success && cRes.data) {
+        setExistingCustomers(
+          cRes.data.map((c: { id: string; name?: string; customer_name?: string; email?: string; phone?: string }) => ({
+            id: c.id,
+            name: c.name || c.customer_name || 'Unnamed Customer',
+            email: c.email || '',
+            phone: c.phone || '',
+          }))
+        );
+      }
+    } catch (err) {
+      console.error('[loadInitialData] Failed to load initial quotation data:', err);
+      showToast('Failed to load quotation data.', 'error');
+    } finally {
+      setLoading(false);
     }
-
-    if (qRes.success && qRes.data) {
-      const formatted = (qRes.data as PBQuotation[]).map((q) => ({
-        id: q.id,
-        quoteNumber: q.quote_number,
-        quoteType: (q.quote_type as 'wholesale' | 'direct') || (q.customer_company ? 'wholesale' : 'direct'),
-        dealerId: q.dealer_id,
-        customerName: q.customer_name,
-        customerCompany: q.customer_company,
-        customerEmail: q.customer_email,
-        customerPhone: q.customer_phone,
-        customerAddress: q.customer_address,
-        date: new Date(q.created || Date.now()).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
-        dueDate: q.valid_until ? new Date(q.valid_until).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
-        validUntil: q.valid_until || '',
-        items: Array.isArray(q.items) ? q.items : [],
-        subtotal: q.subtotal || 0,
-        taxAmount: q.tax_amount || 0,
-        discountAmount: q.discount_amount || 0,
-        totalAmount: q.total_amount || 0,
-        notes: q.notes || '',
-        status: q.status || 'draft',
-      }));
-      setQuotations(formatted);
-    }
-
-    if (dRes.success && dRes.data) {
-      setWholesaleDealers(dRes.data);
-    }
-
-    if (cRes.success && cRes.data) {
-      setExistingCustomers(
-        cRes.data.map((c: { id: string; name?: string; customer_name?: string; email?: string; phone?: string }) => ({
-          id: c.id,
-          name: c.name || c.customer_name || 'Unnamed Customer',
-          email: c.email || '',
-          phone: c.phone || '',
-        }))
-      );
-    }
-
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -1026,59 +1040,117 @@ export default function AdminQuotationsPage() {
                       className="grid grid-cols-12 gap-2 items-center bg-muted/20 p-2.5 rounded-xl border border-border"
                     >
                       <div className="col-span-5 relative">
-                        <Input
-                          placeholder="Product name or description"
-                          value={item.name}
-                          onChange={(e) => handleUpdateLineItem(idx, 'name', e.target.value)}
-                          onFocus={() => setFocusedLineItemIndex(idx)}
-                          onBlur={() => setTimeout(() => setFocusedLineItemIndex(null), 250)}
-                          className="text-xs bg-background"
-                          required
-                        />
-                        {focusedLineItemIndex === idx && item.name.trim().length >= 1 && (
-                          (() => {
-                            const term = item.name.toLowerCase();
-                            const suggestions = allProducts.filter(
-                              (p) =>
-                                p.name.toLowerCase().includes(term) ||
-                                (p.slug && p.slug.toLowerCase().includes(term))
-                            );
-                            if (suggestions.length === 0) return null;
-                            return (
-                              <div className="absolute left-0 top-full mt-1 w-[160%] min-w-[320px] max-w-[500px] bg-popover border border-border rounded-xl shadow-xl max-h-56 overflow-y-auto z-50 p-1 divide-y divide-border/40">
-                                {suggestions.map((prod) => (
-                                  <button
-                                    type="button"
-                                    key={prod.id}
-                                    onMouseDown={(e) => {
-                                      // Prevent blur from closing the dropdown before click registers
-                                      e.preventDefault();
-                                      const retailPrice = prod.discountPrice || prod.price;
-                                      const resolvedPrice =
-                                        quoteType === 'wholesale' && prod.wholesalePrice
-                                          ? prod.wholesalePrice
-                                          : retailPrice;
+                        {(() => {
+                          const term = item.name.toLowerCase().trim();
+                          const suggestions =
+                            focusedLineItemIndex === idx && term.length >= 1
+                              ? allProducts.filter(
+                                  (p) =>
+                                    p.name.toLowerCase().includes(term) ||
+                                    (p.slug && p.slug.toLowerCase().includes(term))
+                                )
+                              : [];
 
-                                      handleUpdateLineItem(idx, 'name', prod.name);
-                                      handleUpdateLineItem(idx, 'unitPrice', resolvedPrice);
-                                      setFocusedLineItemIndex(null);
-                                    }}
-                                    className="w-full text-left px-3 py-2 text-[11px] hover:bg-muted/70 transition-colors flex justify-between items-center rounded-lg cursor-pointer"
-                                  >
-                                    <span className="font-semibold text-foreground truncate mr-2">{prod.name}</span>
-                                    <span className="text-[10px] font-mono text-muted-foreground shrink-0">
-                                      {quoteType === 'wholesale' && prod.wholesalePrice ? (
-                                        <span className="text-amber-500 font-bold">WS: {fmt(prod.wholesalePrice)}</span>
-                                      ) : (
-                                        <span>RT: {fmt(prod.discountPrice || prod.price)}</span>
-                                      )}
-                                    </span>
-                                  </button>
-                                ))}
-                              </div>
-                            );
-                          })()
-                        )}
+                          const selectProduct = (prod: Product) => {
+                            const retailPrice = prod.discountPrice || prod.price;
+                            const resolvedPrice =
+                              quoteType === 'wholesale' && prod.wholesalePrice
+                                ? prod.wholesalePrice
+                                : retailPrice;
+
+                            handleUpdateLineItem(idx, 'name', prod.name);
+                            handleUpdateLineItem(idx, 'unitPrice', resolvedPrice);
+                            setFocusedLineItemIndex(null);
+                            setActiveSuggestionIdx(-1);
+                          };
+
+                          return (
+                            <>
+                              <Input
+                                placeholder="Product name or description"
+                                value={item.name}
+                                onChange={(e) => {
+                                  handleUpdateLineItem(idx, 'name', e.target.value);
+                                  setActiveSuggestionIdx(-1);
+                                }}
+                                onFocus={() => {
+                                  if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+                                  setFocusedLineItemIndex(idx);
+                                  setActiveSuggestionIdx(-1);
+                                }}
+                                onBlur={() => {
+                                  if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+                                  blurTimerRef.current = setTimeout(() => {
+                                    setFocusedLineItemIndex(null);
+                                    setActiveSuggestionIdx(-1);
+                                  }, 250);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (!suggestions.length) return;
+                                  if (e.key === 'ArrowDown') {
+                                    e.preventDefault();
+                                    setActiveSuggestionIdx((prev) =>
+                                      prev < suggestions.length - 1 ? prev + 1 : 0
+                                    );
+                                  } else if (e.key === 'ArrowUp') {
+                                    e.preventDefault();
+                                    setActiveSuggestionIdx((prev) =>
+                                      prev > 0 ? prev - 1 : suggestions.length - 1
+                                    );
+                                  } else if (
+                                    e.key === 'Enter' &&
+                                    activeSuggestionIdx >= 0 &&
+                                    activeSuggestionIdx < suggestions.length
+                                  ) {
+                                    e.preventDefault();
+                                    selectProduct(suggestions[activeSuggestionIdx]);
+                                  } else if (e.key === 'Escape') {
+                                    setFocusedLineItemIndex(null);
+                                    setActiveSuggestionIdx(-1);
+                                  }
+                                }}
+                                className="text-xs bg-background"
+                                required
+                              />
+                              {suggestions.length > 0 && (
+                                <div
+                                  role="listbox"
+                                  id={`quote-line-item-suggestions-${idx}`}
+                                  className="absolute left-0 top-full mt-1 w-[160%] min-w-[320px] max-w-[500px] bg-popover border border-border rounded-xl shadow-xl max-h-56 overflow-y-auto z-50 p-1 divide-y divide-border/40"
+                                >
+                                  {suggestions.map((prod, sIdx) => {
+                                    const isSelected = activeSuggestionIdx === sIdx;
+                                    return (
+                                      <button
+                                        type="button"
+                                        key={prod.id}
+                                        role="option"
+                                        aria-selected={isSelected}
+                                        onMouseDown={(e) => {
+                                          e.preventDefault();
+                                          selectProduct(prod);
+                                        }}
+                                        onClick={() => selectProduct(prod)}
+                                        className={`w-full text-left px-3 py-2 text-[11px] transition-colors flex justify-between items-center rounded-lg cursor-pointer ${
+                                          isSelected ? 'bg-amber-500/15 font-bold' : 'hover:bg-muted/70'
+                                        }`}
+                                      >
+                                        <span className="font-semibold text-foreground truncate mr-2">{prod.name}</span>
+                                        <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+                                          {quoteType === 'wholesale' && prod.wholesalePrice ? (
+                                            <span className="text-amber-500 font-bold">WS: {fmt(prod.wholesalePrice)}</span>
+                                          ) : (
+                                            <span>RT: {fmt(prod.discountPrice || prod.price)}</span>
+                                          )}
+                                        </span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
 
                       <div className="col-span-1">

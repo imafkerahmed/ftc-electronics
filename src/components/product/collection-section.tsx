@@ -42,7 +42,8 @@ export default function CollectionSection({
   const [isMobileExpanded, setIsMobileExpanded] = useState(false);
 
   // Calculate mobile products display limit based on mobileRows setting (2 products per grid row on mobile)
-  const mobileMaxCount = mobileRows && mobileRows > 0 ? mobileRows * 2 : undefined;
+  const mobileMaxCount =
+    mobileRows && mobileRows > 0 ? mobileRows * 2 : undefined;
 
   useEffect(() => {
     if (!brandLogo) {
@@ -64,8 +65,11 @@ export default function CollectionSection({
         ctx.drawImage(img, 0, 0, 30, 30);
 
         const imgData = ctx.getImageData(0, 0, 30, 30).data;
-        
-        let rSum = 0, gSum = 0, bSum = 0, count = 0;
+
+        let rSum = 0,
+          gSum = 0,
+          bSum = 0,
+          count = 0;
         let bestColor = "";
         let maxSat = 0;
 
@@ -111,7 +115,10 @@ export default function CollectionSection({
     };
   }, [brandLogo]);
 
-  const displayLimit = rows ? rows * 5 : (limit || 5);
+  // Mobile pagination state
+  const [mobilePageIndex, setMobilePageIndex] = useState(0);
+
+  const displayLimit = rows ? rows * 5 : limit || 5;
 
   // Navigation button states
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -159,58 +166,74 @@ export default function CollectionSection({
       return {
         themeColor: "red" as const,
         accentClass: "text-red-500 dark:text-red-400",
+        sectionBg:
+          "bg-gradient-to-b from-red-500/8 via-red-500/3 to-transparent dark:from-red-950/40 dark:via-neutral-900/60 dark:to-neutral-950 border-y-2 border-red-500/30 dark:border-red-800/40",
         glowBg:
-          "bg-[radial-gradient(circle_at_20%_30%,rgba(239,68,68,0.06),transparent_45%)] dark:bg-[radial-gradient(circle_at_20%_30%,rgba(239,68,68,0.11),transparent_45%)]",
+          "bg-[radial-gradient(circle_at_20%_30%,rgba(239,68,68,0.1),transparent_45%)] dark:bg-[radial-gradient(circle_at_20%_30%,rgba(239,68,68,0.18),transparent_45%)]",
         badgeBg:
-          "border-red-500/20 bg-red-500/5 text-red-600 dark:border-red-500/35 dark:bg-red-500/10 dark:text-red-400",
+          "border-2 border-red-500/30 bg-red-500/10 text-red-600 dark:border-red-500/45 dark:bg-red-500/20 dark:text-red-400 font-black",
         dotBg: "bg-red-500",
         dotPing: "bg-red-400 dark:bg-red-500",
         navHover:
           "hover:border-red-500/40 hover:text-red-500 dark:hover:border-red-400/40 dark:hover:text-red-450 hover:bg-red-500/5 dark:hover:bg-red-500/5",
-        defaultSubtitle: "Limited Stocks",
+        defaultSubtitle: "Limited Stocks & Deals",
+        sectionTag: "🔥 SPECIAL OFFERS",
       };
     } else if (titleLower.includes("new") || titleLower.includes("arrival")) {
       return {
         themeColor: "purple" as const,
-        accentClass: "text-violet-500 dark:text-violet-400",
+        accentClass: "text-emerald-600 dark:text-emerald-400",
+        sectionBg:
+          "bg-gradient-to-b from-emerald-500/8 via-emerald-500/3 to-transparent dark:from-emerald-950/40 dark:via-neutral-900/60 dark:to-neutral-950 border-y-2 border-emerald-500/30 dark:border-emerald-800/40",
         glowBg:
-          "bg-[radial-gradient(circle_at_80%_20%,rgba(139,92,246,0.05),transparent_40%)] dark:bg-[radial-gradient(circle_at_80%_20%,rgba(139,92,246,0.09),transparent_40%)]",
+          "bg-[radial-gradient(circle_at_80%_20%,rgba(16,185,129,0.1),transparent_40%)] dark:bg-[radial-gradient(circle_at_80%_20%,rgba(16,185,129,0.18),transparent_40%)]",
         badgeBg:
-          "border-violet-500/20 bg-violet-500/5 text-violet-600 dark:border-violet-500/35 dark:bg-violet-500/10 dark:text-violet-400",
-        dotBg: "bg-violet-500",
-        dotPing: "bg-violet-400 dark:bg-violet-500",
+          "border-2 border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/45 dark:bg-emerald-500/20 dark:text-emerald-400 font-black",
+        dotBg: "bg-emerald-500",
+        dotPing: "bg-emerald-400 dark:bg-emerald-500",
         navHover:
-          "hover:border-violet-500/40 hover:text-violet-500 dark:hover:border-violet-400/40 dark:hover:text-violet-450 hover:bg-violet-500/5 dark:hover:bg-violet-500/5",
-        defaultSubtitle: "New Releases",
+          "hover:border-emerald-500/40 hover:text-emerald-500 dark:hover:border-emerald-400/40 dark:hover:text-emerald-450 hover:bg-emerald-500/5 dark:hover:bg-emerald-500/5",
+        defaultSubtitle: "Fresh Releases",
+        sectionTag: "✨ JUST ARRIVED",
       };
-    } else if (titleLower.includes("air") || titleLower.includes("purifier")) {
+    } else if (
+      titleLower.includes("anker") ||
+      titleLower.includes("apple") ||
+      titleLower.includes("brand")
+    ) {
       return {
-        themeColor: "teal" as const,
-        accentClass: "text-teal-500 dark:text-teal-400",
+        themeColor: "blue" as const,
+        accentClass: "text-blue-600 dark:text-blue-400",
+        sectionBg:
+          "bg-slate-100 dark:bg-neutral-900/80 border-y-2 border-slate-300 dark:border-neutral-700",
         glowBg:
-          "bg-[radial-gradient(circle_at_30%_60%,rgba(20,184,166,0.05),transparent_45%)] dark:bg-[radial-gradient(circle_at_30%_60%,rgba(20,184,166,0.09),transparent_45%)]",
+          "bg-[radial-gradient(circle_at_50%_50%,rgba(59,130,246,0.08),transparent_50%)] dark:bg-[radial-gradient(circle_at_50%_50%,rgba(59,130,246,0.15),transparent_50%)]",
         badgeBg:
-          "border-teal-500/20 bg-teal-500/5 text-teal-600 dark:border-teal-500/35 dark:bg-teal-500/10 dark:text-teal-400",
-        dotBg: "bg-teal-500",
-        dotPing: "bg-teal-400 dark:bg-teal-500",
+          "border-2 border-blue-500/30 bg-blue-500/10 text-blue-700 dark:border-blue-500/45 dark:bg-blue-500/20 dark:text-blue-400 font-black",
+        dotBg: "bg-blue-500",
+        dotPing: "bg-blue-400 dark:bg-blue-500",
         navHover:
-          "hover:border-teal-500/40 hover:text-teal-500 dark:hover:border-teal-400/40 dark:hover:text-teal-450 hover:bg-teal-500/5 dark:hover:bg-teal-500/5",
-        defaultSubtitle: "Smart Climate",
+          "hover:border-blue-500/40 hover:text-blue-500 dark:hover:border-blue-400/40 dark:hover:text-blue-450 hover:bg-blue-500/5 dark:hover:bg-blue-500/5",
+        defaultSubtitle: "Official Store Products",
+        sectionTag: "⭐ BRAND HIGHLIGHT",
       };
     }
     // Default fallback
     return {
       themeColor: "blue" as const,
       accentClass: "text-blue-600 dark:text-blue-400",
+      sectionBg:
+        "bg-slate-50 dark:bg-neutral-900/50 border-y-2 border-slate-200 dark:border-neutral-800",
       glowBg:
         "bg-[radial-gradient(circle_at_50%_50%,rgba(59,130,246,0.04),transparent_50%)] dark:bg-[radial-gradient(circle_at_50%_50%,rgba(59,130,246,0.08),transparent_50%)]",
       badgeBg:
-        "border-blue-500/20 bg-blue-500/5 text-blue-600 dark:border-blue-500/35 dark:bg-blue-500/10 dark:text-blue-400",
+        "border-2 border-blue-500/20 bg-blue-500/5 text-blue-600 dark:border-blue-500/35 dark:bg-blue-500/10 dark:text-blue-400 font-black",
       dotBg: "bg-blue-500",
       dotPing: "bg-blue-400 dark:bg-blue-500",
       navHover:
         "hover:border-blue-500/40 hover:text-blue-500 dark:hover:border-blue-400/40 dark:hover:text-blue-450 hover:bg-blue-500/5 dark:hover:bg-blue-500/5",
-      defaultSubtitle: "Curated",
+      defaultSubtitle: "Curated Selection",
+      sectionTag: "📦 FEATURED COLLECTION",
     };
   };
 
@@ -254,10 +277,10 @@ export default function CollectionSection({
 
   const renderTitle = (titleText: string) => {
     const match = titleText.match(/^([^\s-]+[\s-]*)(.*)$/);
-    
+
     let customColorStyle = {};
     let customColorClass = config.accentClass;
-    
+
     if (extractedColor) {
       customColorStyle = { color: extractedColor };
       customColorClass = "";
@@ -274,7 +297,9 @@ export default function CollectionSection({
           <span className="text-neutral-900 dark:text-neutral-50">
             {firstWord}
           </span>
-          <span className={customColorClass} style={customColorStyle}>{secondWord}</span>
+          <span className={customColorClass} style={customColorStyle}>
+            {secondWord}
+          </span>
         </span>
       );
     }
@@ -310,60 +335,93 @@ export default function CollectionSection({
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.5, delay: 0.1 }}
         >
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 sm:gap-4 border-b border-current/8 pb-3.5 sm:pb-5 relative z-10 w-full">
-            <div className="flex flex-col gap-1 sm:gap-2">
+          <div className="flex flex-col gap-2.5 sm:gap-3 border-b-2 border-neutral-300 dark:border-neutral-700 pb-3.5 sm:pb-5 relative z-10 w-full">
+            {/* Topic Row with Title on Left, < > buttons side-by-side on Right */}
+            <div className="flex items-center justify-between w-full gap-3">
               {/* Title */}
-              <h2 className="text-xl sm:text-3xl lg:text-4xl font-black tracking-tight uppercase leading-none">
+              <h2 className="text-xl sm:text-3xl lg:text-4xl font-black tracking-tight uppercase leading-none truncate">
                 {renderTitle(title)}
               </h2>
-              {description && (
-                <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 font-medium leading-relaxed max-w-lg line-clamp-2">
-                  {description}
-                </p>
-              )}
-            </div>
-            <div className="flex items-center gap-3 shrink-0 justify-between md:justify-end w-full md:w-auto mt-0.5 sm:mt-0">
-              <Link href={seeAllLink} className="shrink-0">
+
+              {/* Side-by-side < > buttons (Mobile Only) */}
+              <div className="flex sm:hidden items-center gap-1.5 shrink-0">
                 <button
-                  className="inline-flex items-center justify-center gap-1 px-4 py-2 sm:px-5 sm:py-2.5 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98] bg-neutral-900 dark:bg-neutral-50 text-white dark:text-neutral-950 hover:bg-neutral-800 dark:hover:bg-neutral-200"
+                  type="button"
+                  onClick={() => {
+                    if (isCarouselMode) {
+                      handleScroll("left");
+                    } else {
+                      setMobilePageIndex((prev) => Math.max(0, prev - 1));
+                    }
+                  }}
+                  disabled={
+                    isCarouselMode ? !canScrollLeft : mobilePageIndex === 0
+                  }
+                  className={`h-8 w-8 rounded-full border flex items-center justify-center transition-all cursor-pointer ${
+                    (isCarouselMode ? canScrollLeft : mobilePageIndex > 0)
+                      ? "border-neutral-300 bg-white text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 hover:scale-105 active:scale-95 shadow-xs"
+                      : "border-neutral-200 dark:border-neutral-800 text-neutral-300 dark:text-neutral-700 opacity-40 cursor-not-allowed"
+                  }`}
+                  aria-label="Previous Page"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isCarouselMode) {
+                      handleScroll("right");
+                    } else {
+                      setMobilePageIndex((prev) =>
+                        Math.min(
+                          Math.ceil(products.length / (mobileMaxCount || 4)) -
+                            1,
+                          prev + 1,
+                        ),
+                      );
+                    }
+                  }}
+                  disabled={
+                    isCarouselMode
+                      ? !canScrollRight
+                      : mobilePageIndex >=
+                        Math.ceil(products.length / (mobileMaxCount || 4)) - 1
+                  }
+                  className={`h-8 w-8 rounded-full border flex items-center justify-center transition-all cursor-pointer ${
+                    (
+                      isCarouselMode
+                        ? canScrollRight
+                        : mobilePageIndex <
+                          Math.ceil(products.length / (mobileMaxCount || 4)) - 1
+                    )
+                      ? "border-neutral-300 bg-white text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 hover:scale-105 active:scale-95 shadow-xs"
+                      : "border-neutral-200 dark:border-neutral-800 text-neutral-300 dark:text-neutral-700 opacity-40 cursor-not-allowed"
+                  }`}
+                  aria-label="Next Page"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Description & Explore All Button Below Topic Row */}
+            {description && (
+              <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 font-medium leading-relaxed max-w-lg line-clamp-2">
+                {description}
+              </p>
+            )}
+
+            <div className="mt-0.5">
+              <Link href={seeAllLink} className="inline-block">
+                <button
+                  className="inline-flex items-center justify-center gap-1 px-4 py-2 sm:px-5 sm:py-2.5 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98] bg-neutral-900 dark:bg-neutral-50 text-white dark:text-neutral-950 hover:bg-neutral-800 dark:hover:bg-neutral-200 shadow-xs"
                   aria-label="Explore Collection"
                 >
                   <span>Explore All</span>
                   <ChevronRight className="h-3 w-3 sm:h-3.5 sm:w-3.5 stroke-[2.5]" />
                 </button>
               </Link>
-
-              {isCarouselMode && (
-                /* Navigation Arrows */
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleScroll("left")}
-                    disabled={!canScrollLeft}
-                    className={`h-8.5 w-8.5 rounded-full border flex items-center justify-center transition-all duration-300 cursor-pointer backdrop-blur-xs shadow-xs ${
-                      canScrollLeft
-                        ? `border-neutral-300/85 bg-white/40 text-neutral-800 dark:border-neutral-700/80 dark:bg-neutral-900/40 dark:text-neutral-200 hover:scale-105 active:scale-95 ${config.navHover}`
-                        : "border-neutral-200 dark:border-neutral-800 text-neutral-300 dark:text-neutral-700 opacity-40 cursor-not-allowed"
-                    }`}
-                    aria-label="Scroll left"
-                  >
-                    <ChevronLeft className="h-4.5 w-4.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleScroll("right")}
-                    disabled={!canScrollRight}
-                    className={`h-8.5 w-8.5 rounded-full border flex items-center justify-center transition-all duration-300 cursor-pointer backdrop-blur-xs shadow-xs ${
-                      canScrollRight
-                        ? `border-neutral-300/85 bg-white/40 text-neutral-800 dark:border-neutral-700/80 dark:bg-neutral-900/40 dark:text-neutral-200 hover:scale-105 active:scale-95 ${config.navHover}`
-                        : "border-neutral-200 dark:border-neutral-800 text-neutral-300 dark:text-neutral-700 opacity-40 cursor-not-allowed"
-                    }`}
-                    aria-label="Scroll right"
-                  >
-                    <ChevronRight className="h-4.5 w-4.5" />
-                  </button>
-                </div>
-              )}
             </div>
           </div>
         </motion.div>
@@ -386,48 +444,48 @@ export default function CollectionSection({
                 />
               ))}
             </motion.div>
-          ) : (layout === "featured-grid" || (rows && rows > 1)) ? (
+          ) : layout === "featured-grid" || (rows && rows > 1) ? (
             /* Integrated Bento Grid Layout simplified to pure grid */
             <>
+              {/* Desktop Grid of Product Cards */}
               <motion.div
-                className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 sm:gap-4 items-stretch"
+                className="hidden sm:grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 sm:gap-4 items-stretch"
                 initial={{ opacity: 0, y: 20 }}
                 animate={isInView ? { opacity: 1, y: 0 } : {}}
                 transition={{ duration: 0.6, delay: 0.2 }}
               >
-                {/* Grid of Product Cards */}
-                {products.slice(0, displayLimit).map((product, idx) => {
-                  const isHiddenOnMobile =
-                    mobileMaxCount && idx >= mobileMaxCount && !isMobileExpanded;
-                  return (
-                    <div
-                      key={product.id || idx}
-                      className={
-                        isHiddenOnMobile ? "hidden sm:block h-full" : "block h-full"
-                      }
-                    >
+                {products.slice(0, displayLimit).map((product, idx) => (
+                  <div key={product.id || idx} className="h-full">
+                    <CollectionProductCard
+                      product={product}
+                      themeColor={config.themeColor}
+                    />
+                  </div>
+                ))}
+              </motion.div>
+
+              {/* Mobile Grid of Product Cards (Page-by-Page) */}
+              <motion.div
+                key={`mobile-grid-${mobilePageIndex}`}
+                className="grid sm:hidden grid-cols-2 gap-3.5 items-stretch"
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.3 }}
+              >
+                {products
+                  .slice(
+                    mobilePageIndex * (mobileMaxCount || 4),
+                    (mobilePageIndex + 1) * (mobileMaxCount || 4),
+                  )
+                  .map((product, idx) => (
+                    <div key={product.id || idx} className="h-full">
                       <CollectionProductCard
                         product={product}
                         themeColor={config.themeColor}
                       />
                     </div>
-                  );
-                })}
+                  ))}
               </motion.div>
-
-              {mobileMaxCount &&
-                products.length > mobileMaxCount &&
-                !isMobileExpanded && (
-                  <div className="mt-4 flex justify-center sm:hidden">
-                    <button
-                      type="button"
-                      onClick={() => setIsMobileExpanded(true)}
-                      className="inline-flex items-center gap-2 rounded-full border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-5 py-2.5 text-xs font-bold text-neutral-800 dark:text-neutral-200 shadow-xs transition-transform active:scale-95 cursor-pointer"
-                    >
-                      Show More Products ({products.length - mobileMaxCount} more)
-                    </button>
-                  </div>
-                )}
             </>
           ) : (
             /* Carousel Display with 1 row scrolling horizontally (Supports flash-sale promo card injections) */
@@ -501,11 +559,11 @@ export default function CollectionSection({
                   </div>
                 )}
 
-                {/* Rest of the product cards */}
+                {/* Rest of the product cards with mobile peek & snap scrolling */}
                 {products.map((product, idx) => (
                   <div
                     key={product.id || idx}
-                    className="w-[180px] sm:w-[calc((100%-32px)/3)] md:w-[calc((100%-48px)/4)] lg:w-[calc((100%-64px)/5)] shrink-0 snap-start h-full"
+                    className="w-[76vw] max-w-[260px] sm:w-[calc((100%-32px)/3)] md:w-[calc((100%-48px)/4)] lg:w-[calc((100%-64px)/5)] shrink-0 snap-start h-full"
                   >
                     <CollectionProductCard
                       product={product}

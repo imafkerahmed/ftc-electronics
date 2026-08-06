@@ -207,10 +207,10 @@ export async function proxy(request: NextRequest) {
 
   // ── Admin route protection ──────────────────────────────────────────────
 
-  // 1. If trying to access protected admin pages without auth → redirect to login
+  // 1. If trying to access protected admin pages without auth → redirect to /auth
   if (pathname.startsWith('/admin') && pathname !== '/admin/login') {
     if (!isAdminUser) {
-      const loginUrl = new URL('/admin/login', request.url);
+      const loginUrl = new URL('/auth', request.url);
       // Save original path to redirect back after login
       loginUrl.searchParams.set('redirect', pathname);
       return NextResponse.redirect(loginUrl);
@@ -230,11 +230,15 @@ export async function proxy(request: NextRequest) {
     return addSecurityHeaders(response);
   }
 
-  // 4. If already logged in and trying to visit login page → redirect to dashboard
-  if (pathname === '/admin/login') {
-    if (isAdminUser) {
-      const dashboardUrl = new URL('/admin/dashboard', request.url);
-      return NextResponse.redirect(dashboardUrl);
+  // 4. If already logged in and trying to visit login/auth page → redirect to appropriate landing page
+  if (pathname === '/admin/login' || pathname === '/auth') {
+    if (hasValidToken) {
+      if (isAdminUser) {
+        const dashboardUrl = new URL('/admin/dashboard', request.url);
+        return NextResponse.redirect(dashboardUrl);
+      }
+      const homeUrl = new URL('/', request.url);
+      return NextResponse.redirect(homeUrl);
     }
     return addSecurityHeaders(NextResponse.next());
   }

@@ -1758,9 +1758,19 @@ export default function AdminHomepageBuilderPage() {
                           value={bentoSlots[activeSlotIdx].slug}
                           onChange={(e) => {
                             const selectedSlug = e.target.value;
+                            const matchedCat = availableCategories.find(
+                              (c) => c.slug === selectedSlug,
+                            );
                             setBentoSlots((prev) =>
                               prev.map((s, i) =>
-                                i === activeSlotIdx ? { ...s, slug: selectedSlug } : s,
+                                i === activeSlotIdx
+                                  ? {
+                                      ...s,
+                                      slug: selectedSlug,
+                                      title: matchedCat ? matchedCat.name : s.title,
+                                      label: matchedCat ? matchedCat.name.toUpperCase() : s.label,
+                                    }
+                                  : s,
                               ),
                             );
                           }}

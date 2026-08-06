@@ -94,77 +94,80 @@ export default function Footer() {
       </div>
 
       {/* ── Main Footer Grid ── */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-8 lg:px-16 py-12 sm:py-16">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10 sm:gap-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-8 lg:px-16 py-8 sm:py-16">
+        <div className="flex flex-col lg:grid lg:grid-cols-4 gap-8 lg:gap-8">
           {/* About Column */}
-          <div className="flex flex-col gap-4">
-            <h3 className="text-[10px] font-mono font-bold uppercase tracking-[0.25em] text-neutral-500">
+          <div className="flex flex-col gap-3">
+            <h3 className="text-[11px] font-mono font-bold uppercase tracking-[0.2em] text-neutral-400">
               About FTC
             </h3>
-            <p className="text-sm text-neutral-500 leading-relaxed">
+            <p className="text-xs sm:text-sm text-neutral-400 leading-relaxed max-w-md">
               High-performance consumer electronics, premium computer hardware,
               and state-of-the-art mobile gear. Engineered for the future.
               Backed by local expertise.
             </p>
           </div>
 
-          {/* Shop Column */}
-          <div className="flex flex-col gap-4">
-            <h3 className="text-[10px] font-mono font-bold uppercase tracking-[0.25em] text-neutral-500">
-              Shop
-            </h3>
-            <ul className="space-y-2.5 text-sm">
-              {shopLinks.map((link) => (
-                <li key={link.label}>
-                  <Link
-                    href={link.href}
-                    className="text-neutral-400 hover:text-white transition-colors duration-200 flex items-center gap-1.5 group"
-                  >
-                    <span className="w-0 group-hover:w-2 h-px bg-blue-500 transition-all duration-300 overflow-hidden" />
-                    {link.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
+          {/* Shop & Support Columns Side-by-Side on Mobile */}
+          <div className="grid grid-cols-2 gap-6 lg:contents">
+            {/* Shop Column */}
+            <div className="flex flex-col gap-3">
+              <h3 className="text-[11px] font-mono font-bold uppercase tracking-[0.2em] text-neutral-400">
+                Shop
+              </h3>
+              <ul className="space-y-2 text-xs sm:text-sm">
+                {shopLinks.map((link) => (
+                  <li key={link.label}>
+                    <Link
+                      href={link.href}
+                      className="text-neutral-400 hover:text-white transition-colors duration-200 flex items-center gap-1.5 group"
+                    >
+                      <span className="w-0 group-hover:w-2 h-px bg-blue-500 transition-all duration-300 overflow-hidden" />
+                      {link.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
 
-          {/* Support Column */}
-          <div className="flex flex-col gap-4">
-            <h3 className="text-[10px] font-mono font-bold uppercase tracking-[0.25em] text-neutral-500">
-              Support
-            </h3>
-            <ul className="space-y-2.5 text-sm">
-              {supportLinks.map((link) => (
-                <li key={link.label}>
-                  <Link
-                    href={link.href}
-                    className="text-neutral-400 hover:text-white transition-colors duration-200 flex items-center gap-1.5 group"
-                  >
-                    <span className="w-0 group-hover:w-2 h-px bg-blue-500 transition-all duration-300 overflow-hidden" />
-                    {link.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            {/* Support Column */}
+            <div className="flex flex-col gap-3">
+              <h3 className="text-[11px] font-mono font-bold uppercase tracking-[0.2em] text-neutral-400">
+                Support
+              </h3>
+              <ul className="space-y-2 text-xs sm:text-sm">
+                {supportLinks.map((link) => (
+                  <li key={link.label}>
+                    <Link
+                      href={link.href}
+                      className="text-neutral-400 hover:text-white transition-colors duration-200 flex items-center gap-1.5 group"
+                    >
+                      <span className="w-0 group-hover:w-2 h-px bg-blue-500 transition-all duration-300 overflow-hidden" />
+                      {link.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
 
           {/* Newsletter Column */}
-          <div className="flex flex-col gap-4">
-            <h3 className="text-[10px] font-mono font-bold uppercase tracking-[0.25em] text-neutral-500">
+          <div className="flex flex-col gap-3 pt-2 lg:pt-0 border-t border-white/5 lg:border-t-0">
+            <h3 className="text-[11px] font-mono font-bold uppercase tracking-[0.2em] text-neutral-400">
               Stay Updated
             </h3>
-            <p className="text-sm text-neutral-500 leading-relaxed">
+            <p className="text-xs sm:text-sm text-neutral-400 leading-relaxed">
               Exclusive deals and new product drops straight to your inbox.
             </p>
             <form
-              className="flex flex-col gap-2.5"
+              className="flex flex-col gap-2.5 mt-1"
               onSubmit={(e) => e.preventDefault()}
             >
               <input
                 type="email"
                 placeholder="your@email.com"
                 required
-                className="w-full px-3.5 py-2.5 text-sm bg-white/5 border border-white/8 rounded-xl text-white placeholder-neutral-600 focus:outline-none focus:border-blue-500/40 focus:bg-white/8 transition-all"
+                className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-white/5 border border-white/10 rounded-xl text-white placeholder-neutral-500 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
               />
               <button
                 type="submit"
@@ -178,19 +181,19 @@ export default function Footer() {
       </div>
 
       {/* ── Bottom Bar ── */}
-      <div className="border-t border-white/5 relative">
-        <div className="max-w-7xl mx-auto px-4 sm:px-8 lg:px-16 py-5 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-neutral-600">
-          <p>© {currentYear} FTC Electronics (Pvt) Ltd. All rights reserved.</p>
+      <div className="border-t border-white/5 relative bg-neutral-950/80">
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 lg:px-16 py-6 pb-12 sm:pb-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-neutral-500">
+          <p className="text-center sm:text-left">© {currentYear} FTC Electronics (Pvt) Ltd. All rights reserved.</p>
 
           {/* Payment method indicators */}
           <div className="flex items-center gap-2">
-            <span className="text-neutral-700 text-[10px] uppercase tracking-wider font-mono">
+            <span className="text-neutral-600 text-[10px] uppercase tracking-wider font-mono">
               We Accept
             </span>
             {["VISA", "MC", "AMEX", "KOKO"].map((card) => (
               <span
                 key={card}
-                className="inline-flex items-center px-2 py-0.5 rounded border border-white/8 bg-white/4 text-neutral-500 text-[9px] font-mono font-bold tracking-wider"
+                className="inline-flex items-center px-2 py-0.5 rounded border border-white/10 bg-white/5 text-neutral-400 text-[9px] font-mono font-bold tracking-wider"
               >
                 {card}
               </span>

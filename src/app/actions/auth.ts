@@ -1035,8 +1035,16 @@ export interface CustomerProfileData {
   id: string;
   email: string;
   name: string;
+  firstName?: string;
+  lastName?: string;
   phone?: string;
   address?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
   role: string;
   created: string;
   avatar?: string;
@@ -1077,14 +1085,48 @@ export async function getCurrentUserSessionAction(): Promise<{
       ? `${pbUrl}/api/files/_pb_users_auth_/${record.id}/${record.avatar}`
       : undefined;
 
+    const fullName = record.name || record.username || record.email?.split('@')[0] || 'Customer';
+    const nameParts = fullName.trim().split(' ');
+    const firstName = nameParts[0] || '';
+    const lastName = nameParts.slice(1).join(' ') || '';
+
+    let addressLine1 = record.address || '';
+    let addressLine2 = '';
+    let city = '';
+    let state = '';
+    let postalCode = '';
+    let country = 'Sri Lanka';
+
+    if (record.address && record.address.trim().startsWith('{')) {
+      try {
+        const parsed = JSON.parse(record.address);
+        addressLine1 = parsed.addressLine1 || '';
+        addressLine2 = parsed.addressLine2 || '';
+        city = parsed.city || '';
+        state = parsed.state || '';
+        postalCode = parsed.postalCode || '';
+        country = parsed.country || 'Sri Lanka';
+      } catch {
+        // use raw string
+      }
+    }
+
     return {
       success: true,
       user: {
         id: record.id,
         email: record.email || '',
-        name: record.name || record.username || record.email?.split('@')[0] || 'Customer',
+        name: fullName,
+        firstName,
+        lastName,
         phone: record.phone || '',
         address: record.address || '',
+        addressLine1,
+        addressLine2,
+        city,
+        state,
+        postalCode,
+        country,
         role: record.role || 'read_only',
         created: record.created || new Date().toISOString(),
         avatar: avatarUrl,
@@ -1099,8 +1141,16 @@ export async function getCurrentUserSessionAction(): Promise<{
  * Updates the current logged-in customer's profile details in PocketBase.
  */
 export async function updateUserProfilePageAction(data: {
-  name: string;
+  name?: string;
+  firstName?: string;
+  lastName?: string;
   phone?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
   address?: string;
 }): Promise<{ success: boolean; error?: string }> {
   await checkUserAuth();
@@ -1125,15 +1175,27 @@ export async function updateUserProfilePageAction(data: {
       return { success: false, error: 'Not authenticated.' };
     }
 
+    const fullName = `${data.firstName || ''} ${data.lastName || ''}`.trim() || data.name || 'Customer';
+
+    const addressObject = {
+      addressLine1: data.addressLine1 || '',
+      addressLine2: data.addressLine2 || '',
+      city: data.city || '',
+      state: data.state || '',
+      postalCode: data.postalCode || '',
+      country: data.country || 'Sri Lanka',
+    };
+    const addressJson = JSON.stringify(addressObject);
+
     // Perform update on the authenticated client instance to enforce PB policy security rules
     await pb.collection('users').update(record.id, {
-      name: data.name,
-      phone: data.phone,
-      address: data.address,
+      name: fullName,
+      phone: data.phone || '',
+      address: addressJson,
     });
 
     // Also update the name cookie so navbar avatar reflects new name
-    cookieStore.set('pb_auth_name', encodeURIComponent(data.name || ''), {
+    cookieStore.set('pb_auth_name', encodeURIComponent(fullName), {
       httpOnly: false,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
@@ -1184,11 +1246,27 @@ export async function getCustomerOrdersAction(): Promise<{
     let records: any[] = [];
     try {
       records = await adminPb.collection('orders').getFullList({
-        filter: adminPb.filter('customer_email = {:email} || email = {:email}', { email: userEmail }),
+        filter: adminPb.filter(
+          'customer.email = {:email} || shippingAddress.email = {:email} || user = {:userId} || customer.userId = {:userId}',
+          { email: userEmail, userId: record.id }
+        ),
         sort: '-created',
       });
-    } catch {
-      // Return empty list if orders collection doesn't exist yet
+    } catch (filterErr) {
+      console.warn('[getCustomerOrdersAction] Order query error:', filterErr);
+      try {
+        // Fallback search without adminPb.filter wrapper
+        records = await adminPb.collection('orders').getFullList({
+          sort: '-created',
+        });
+        records = records.filter(
+          (o) =>
+            o.customer?.email === userEmail ||
+            o.shippingAddress?.email === userEmail ||
+            o.user === record.id ||
+            o.customer?.userId === record.id
+        );
+      } catch {}
     }
 
     return { success: true, orders: records };

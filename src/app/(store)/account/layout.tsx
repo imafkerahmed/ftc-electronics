@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { User, ShoppingBag, LogOut, ArrowLeft } from 'lucide-react';
 import { logoutAction } from '@/app/actions/auth';
 import { pb } from '@/lib/pocketbase';
+import { clearAllClientSessions } from '@/lib/clear-client-storage';
 
 export default function AccountLayout({
   children,
@@ -19,10 +20,10 @@ export default function AccountLayout({
       await logoutAction();
     } catch (err) {
       console.error('Failed to invalidate server session:', err);
-      return;
     }
 
     pb.authStore.clear();
+    clearAllClientSessions();
     // Immediately tell the navbar to re-check auth state
     window.dispatchEvent(new Event('auth-change'));
     router.refresh();

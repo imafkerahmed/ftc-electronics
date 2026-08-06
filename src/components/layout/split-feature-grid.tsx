@@ -21,7 +21,7 @@ const featuredItems: FeaturedItem[] = [
     title: "Mechanical Keyboards",
     spec: "GASKET MOUNTED",
     price: "$189.00",
-    image: "/assets/hero-keyboard.png",
+    image: "/assets/hero-keyboard.webp",
   },
   {
     id: "02",
@@ -29,7 +29,7 @@ const featuredItems: FeaturedItem[] = [
     title: "Studio Headsets",
     spec: "HYBRID ACTIVE NC",
     price: "$349.00",
-    image: "/assets/hero-headphones.png",
+    image: "/assets/hero-headphones.webp",
   },
   {
     id: "03",
@@ -37,7 +37,7 @@ const featuredItems: FeaturedItem[] = [
     title: "Pro Laptops",
     spec: "INTEL I9 + OLED",
     price: "$1,899.00",
-    image: "/assets/hero-laptop.png",
+    image: "/assets/hero-laptop.webp",
   },
 ];
 

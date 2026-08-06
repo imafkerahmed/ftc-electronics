@@ -1,6 +1,5 @@
 import CampaignHeroBanner from "@/components/layout/campaign-hero-banner";
 import BrandLogoTicker from "@/components/layout/brand-logo-ticker";
-import CollectionSection from "@/components/product/collection-section";
 import ReviewCarousel from "@/components/product/review-carousel";
 import ValuePropositions from "@/components/layout/value-propositions";
 import LocationMap from "@/components/layout/location-map";
@@ -9,16 +8,17 @@ import {
   pbHomepageBlocks,
   pbBrands,
   pbCategories,
-  pbProducts,
   pbSiteSettings,
   pbHeroBanners,
 } from "@/lib/pb-collections";
 import HomePageLoaderWrapper from "@/components/layout/home-page-loader-wrapper";
 import ImageParallaxBanner from "@/components/layout/image-parallax-banner";
 import LazyScrollSection from "@/components/layout/lazy-scroll-section";
+import ProductCarouselBlock from "./_components/product-carousel-block";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+// ISR: cache homepage for 60 seconds — huge speed win for repeat visitors.
+// Use /api/revalidate to bust cache after admin content updates.
+export const revalidate = 60;
 
 export default async function StoreHomePage() {
   // Fetch active homepage blocks from the database
@@ -48,7 +48,7 @@ export default async function StoreHomePage() {
             type: "promo-banner",
             title: "Office Gear",
             config: {
-              imageSrc: "/assets/banners/anker-banner.png",
+              imageSrc: "/assets/banners/anker-banner.webp",
               alt: "Next-Gen Office Gear",
               href: "/products?search=keyboard",
               overlayText: "Next-Gen Office Gear",
@@ -103,14 +103,15 @@ export default async function StoreHomePage() {
   const pbUrl =
     process.env.NEXT_PUBLIC_POCKETBASE_URL || "https://ftc-db.codix.site";
 
-  // 1. Pre-fetch shared data in parallel to avoid sequential network waterfalls
+  // Pre-fetch only shared/metadata data — no product fetches here.
+  // Product carousels each fetch their own data via Suspense streaming.
   const [
     allBrands,
     rawCategories,
     rawHeroBanners,
     contactSetting,
     hoursSetting,
-    generalSetting
+    generalSetting,
   ] = await Promise.all([
     pbBrands.getAll().catch(() => []),
     pbCategories.getAll().catch(() => []),
@@ -133,7 +134,8 @@ export default async function StoreHomePage() {
     phone: generalSetting?.contactInfo?.phone || contactSetting?.phone,
     email: generalSetting?.contactInfo?.email || contactSetting?.email,
     hours: hoursSetting?.hours,
-    googleMapsLink: generalSetting?.location?.googleMapsUrl || contactSetting?.googleMapsLink,
+    googleMapsLink:
+      generalSetting?.location?.googleMapsUrl || contactSetting?.googleMapsLink,
     whatsappLink: contactSetting?.whatsappLink,
   };
 
@@ -148,193 +150,80 @@ export default async function StoreHomePage() {
 
   return (
     <HomePageLoaderWrapper>
-      <div className="w-full bg-slate-50/40 dark:bg-neutral-950 min-h-screen space-y-0 pb-12">
-        {await Promise.all(
-          activeBlocks.map(async (block: any) => {
-            // Resolve device visibility class
-            let visibilityClass = "block";
-            if (block.deviceVisibility === "desktop-only") {
-              visibilityClass = "hidden md:block";
-            } else if (block.deviceVisibility === "mobile-only") {
-              visibilityClass = "block md:hidden";
-            }
+      <div className="w-full bg-slate-50/40 dark:bg-neutral-950 min-h-screen space-y-0 pb-0">
+        {activeBlocks.map((block: any) => {
+          // Resolve device visibility class
+          let visibilityClass = "block";
+          if (block.deviceVisibility === "desktop-only") {
+            visibilityClass = "hidden md:block";
+          } else if (block.deviceVisibility === "mobile-only") {
+            visibilityClass = "block md:hidden";
+          }
 
-            // Fetch products dynamically for carousel
-            let products: any[] = [];
-            if (block.type === "product-carousel") {
-              const source = block.config?.source || "newest";
-              const configuredRows = block.config?.rows ? Number(block.config.rows) : undefined;
-              const limit = configuredRows ? configuredRows * 5 : (parseInt(block.config?.limit) || 8);
+          return (
+            <div key={block.id} className={visibilityClass}>
+              {block.type === "hero-banner" && (
+                <CampaignHeroBanner
+                  config={block.config}
+                  dbSlides={activeHeroBanners as any}
+                />
+              )}
 
-              try {
-                if (source === "on-sale") {
-                  products = await pbProducts.getByCollection("on-sale", limit);
-                } else if (source === "newest") {
-                  products = await pbProducts.getByCollection(
-                    "new-arrivals",
-                    limit,
-                  );
-                } else if (source === "featured") {
-                  products = await pbProducts.getByCollection(
-                    "featured",
-                    limit,
-                  );
-                } else if (source === "limited-stock") {
-                  const res = await pbProducts
-                    .getAll({ perPage: limit * 2 })
-                    .catch(() => ({ items: [] }));
-                  products = (res.items || [])
-                    .filter((p: any) => {
-                      const qty = p.countInStock ?? p.stock ?? 0;
-                      return qty > 0 && qty <= 10;
-                    })
-                    .slice(0, limit);
-                } else if (source === "category") {
-                  const categorySlug =
-                    block.config?.value || block.config?.category;
-                  const categoryRecord = allCategories.find(
-                    (c: any) =>
-                      c.slug === categorySlug ||
-                      c.id === categorySlug ||
-                      c.name === categorySlug,
-                  );
-                  if (categoryRecord) {
-                    const res = await pbProducts.getAll({
-                      category: categoryRecord.name,
-                      perPage: limit,
-                    });
-                    products = res.items;
-                  }
-                } else if (source === "brand") {
-                  const brandSlug = block.config?.value || block.config?.brand;
-                  const brandRecord = allBrands.find(
-                    (b: any) =>
-                      b.slug === brandSlug ||
-                      b.id === brandSlug ||
-                      b.name === brandSlug,
-                  );
-                  if (brandRecord) {
-                    const res = await pbProducts.getAll({
-                      brand: brandRecord.name,
-                      perPage: limit,
-                    });
-                    products = res.items;
-                  }
-                }
+              {/* Product carousels stream in independently via Suspense */}
+              {block.type === "product-carousel" && (
+                <ProductCarouselBlock
+                  block={block}
+                  allCategories={allCategories}
+                  allBrands={allBrands}
+                  pbUrl={pbUrl}
+                />
+              )}
 
-                // If specific query returned fewer items than requested limit, supplement with all products
-                if (!products || products.length < limit) {
-                  const fallbackRes = await pbProducts
-                    .getAll({ perPage: limit })
-                    .catch(() => ({ items: [] }));
-                  const existingIds = new Set((products || []).map((p: any) => p.id));
-                  const extraItems = (fallbackRes.items || []).filter(
-                    (p: any) => !existingIds.has(p.id),
-                  );
-                  products = [...(products || []), ...extraItems].slice(0, limit);
-                }
-              } catch (err) {
-                console.error(
-                  `Failed to load products for block ${block.title}:`,
-                  err,
-                );
-              }
-            }
-
-            const seeAllLink =
-              block.config?.seeAllLink ||
-              (block.config?.source === "on-sale"
-                ? "/products?filter=on-sale"
-                : block.config?.source === "newest"
-                  ? "/products?sortBy=newest"
-                  : "/products");
-
-            return (
-              <div key={block.id} className={visibilityClass}>
-                {block.type === "hero-banner" && (
-                  <CampaignHeroBanner
-                    config={block.config}
-                    dbSlides={activeHeroBanners as any}
+              {block.type === "promo-banner" && (
+                <LazyScrollSection heightClass="min-h-[220px]">
+                  <ImageParallaxBanner
+                    imageSrc={
+                      block.config?.imageSrc ||
+                      "/assets/banners/anker-banner.webp"
+                    }
+                    alt={block.config?.alt || "Promo Banner"}
+                    href={block.config?.href || "/products"}
+                    heightClass="h-[160px] sm:h-[240px] md:h-[320px]"
+                    overlayText={block.config?.overlayText || ""}
+                    ctaLabel={block.config?.ctaLabel || ""}
                   />
-                )}
+                </LazyScrollSection>
+              )}
 
-                 {block.type === "product-carousel" && (() => {
-                   let brandLogoUrl = undefined;
-                   if (block.config?.source === "brand") {
-                     const brandSlug = block.config?.value || block.config?.brand;
-                     const brandRecord = allBrands.find(
-                       (b: any) =>
-                         b.slug === brandSlug ||
-                         b.id === brandSlug ||
-                         b.name === brandSlug,
-                     );
-                     if (brandRecord && brandRecord.logo) {
-                       brandLogoUrl = `${pbUrl}/api/files/${brandRecord.collectionId}/${brandRecord.id}/${brandRecord.logo}`;
-                     }
-                   }
-                   return (
-                     <LazyScrollSection heightClass="min-h-[500px]">
-                       <CollectionSection
-                         title={block.title || "Products"}
-                         layout={block.config?.layout || "featured-grid"}
-                         products={products}
-                         seeAllLink={seeAllLink}
-                         rows={block.config?.rows}
-                         mobileRows={block.config?.mobileRows ?? 2}
-                         limit={block.config?.limit}
-                         description={block.config?.description}
-                         brandLogo={brandLogoUrl}
-                         titleColor={block.config?.titleColor}
-                       />
-                     </LazyScrollSection>
-                   );
-                 })()}
+              {block.type === "brand-logo-strip" && (
+                <LazyScrollSection heightClass="min-h-[130px]">
+                  <BrandLogoTicker brandLogos={brandLogos} />
+                </LazyScrollSection>
+              )}
 
-                {block.type === "promo-banner" && (
-                  <LazyScrollSection heightClass="min-h-[220px]">
-                    <ImageParallaxBanner
-                      imageSrc={
-                        block.config?.imageSrc ||
-                        "/assets/banners/anker-banner.png"
-                      }
-                      alt={block.config?.alt || "Promo Banner"}
-                      href={block.config?.href || "/products"}
-                      heightClass="h-[160px] sm:h-[240px] md:h-[320px]"
-                      overlayText={block.config?.overlayText || ""}
-                      ctaLabel={block.config?.ctaLabel || ""}
-                    />
-                  </LazyScrollSection>
-                )}
+              {block.type === "category-grid" && (
+                <CategoryBentoGrid
+                  categories={allCategories}
+                  config={block.config}
+                />
+              )}
 
-                {block.type === "brand-logo-strip" && (
-                  <LazyScrollSection heightClass="min-h-[130px]">
-                    <BrandLogoTicker brandLogos={brandLogos} />
-                  </LazyScrollSection>
-                )}
+              {block.type === "reviews-carousel" && <ReviewCarousel />}
 
-                {block.type === "category-grid" && (
-                  <CategoryBentoGrid categories={allCategories} config={block.config} />
-                )}
+              {block.type === "text-content" && (
+                <LazyScrollSection heightClass="min-h-[300px]">
+                  <ValuePropositions config={block.config} />
+                </LazyScrollSection>
+              )}
 
-                {block.type === "reviews-carousel" && (
-                  <ReviewCarousel />
-                )}
-
-                {block.type === "text-content" && (
-                  <LazyScrollSection heightClass="min-h-[300px]">
-                    <ValuePropositions config={block.config} />
-                  </LazyScrollSection>
-                )}
-
-                {block.type === "store-locator" && (
-                  <LazyScrollSection heightClass="min-h-[400px]">
-                    <LocationMap settings={locatorSettings} />
-                  </LazyScrollSection>
-                )}
-              </div>
-            );
-          }),
-        )}
+              {block.type === "store-locator" && (
+                <LazyScrollSection heightClass="min-h-[400px]">
+                  <LocationMap settings={locatorSettings} />
+                </LazyScrollSection>
+              )}
+            </div>
+          );
+        })}
       </div>
     </HomePageLoaderWrapper>
   );

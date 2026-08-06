@@ -1,7 +1,7 @@
 import { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
-import { ChevronRight, ShieldCheck } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { getProducts, getBrands, getBrandBySlug } from "@/lib/db";
 import ProductCard from "@/components/product/product-card";
 import { BreadcrumbJsonLd } from "@/components/seo/json-ld";
@@ -81,32 +81,41 @@ export default async function BrandPage({ params }: PageProps) {
       </nav>
 
       {/* Brand Store Banner */}
-      <div className="relative mb-8 rounded-2xl overflow-hidden bg-gradient-to-br from-card via-card to-blue-955/30 border border-border px-6 py-8 sm:px-10 sm:py-10">
-        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,hsl(var(--border)/0.3)_1px,transparent_1px),linear-gradient(to_bottom,hsl(var(--border)/0.3)_1px,transparent_1px)] bg-[size:32px_32px] opacity-40" />
-        <div className="pointer-events-none absolute -top-12 -right-12 h-56 w-56 rounded-full bg-blue-500/15 blur-3xl" />
+      <div className="relative mb-6 sm:mb-8 rounded-2xl border border-border/50 bg-card shadow-sm overflow-hidden">
+        {/* Logo Hero Area */}
+        <div className="flex flex-row items-stretch gap-0">
 
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative z-10">
-          <div>
-            <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-foreground capitalize mb-2">
+          {/* Left: Logo Panel */}
+          {brand?.logo ? (
+            <div className="w-24 sm:w-56 md:w-64 lg:w-72 shrink-0 bg-muted/30 border-r border-border/40 flex items-center justify-center p-3 sm:p-8 min-h-[90px] sm:min-h-[160px]">
+              <div className="relative w-full" style={{ aspectRatio: "3/2" }}>
+                <Image
+                  src={brand.logo}
+                  alt={`${displayName} logo`}
+                  fill
+                  className="object-contain"
+                  priority
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="w-24 sm:w-56 md:w-64 shrink-0 bg-muted/30 border-r border-border/40 flex items-center justify-center p-3 sm:p-8 min-h-[90px] sm:min-h-[160px]">
+              <div className="text-4xl font-black text-foreground/20 uppercase tracking-widest">
+                {displayName.charAt(0)}
+              </div>
+            </div>
+          )}
+
+          {/* Right: Info Panel */}
+          <div className="flex flex-col justify-center gap-1.5 p-3 sm:p-6 md:p-8 flex-1">
+            <h1 className="text-base sm:text-2xl md:text-3xl font-black tracking-tight text-foreground capitalize leading-tight">
               {displayName} Storefront
             </h1>
-
-            <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 font-medium leading-relaxed max-w-lg">
+            <p className="text-[11px] sm:text-sm text-muted-foreground font-medium leading-snug max-w-lg line-clamp-3 sm:line-clamp-none">
               {brand?.description ||
                 "Discover premium hardware with guaranteed performance, curated details, and exclusive checkout options."}
             </p>
           </div>
-
-          {brand?.logo && (
-            <div className="h-24 w-44 relative shrink-0 flex items-center justify-center">
-              <Image
-                src={brand.logo}
-                alt={`${displayName} logo`}
-                fill
-                className="object-contain"
-              />
-            </div>
-          )}
         </div>
       </div>
 

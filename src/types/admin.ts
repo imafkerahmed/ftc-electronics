@@ -20,7 +20,8 @@ export interface PBProduct extends PBRecord {
   description: string;
   price: number;
   discountPrice?: number;
-  wholesalePrice?: number;
+  wholesalePrice?: number; // Canonical field name
+  /** @deprecated Legacy migration shim for older PocketBase schemas */
   wholesale_price?: number;
   images: string[]; // PocketBase file field names
   category: string; // relation ID → categories
@@ -44,6 +45,19 @@ export interface PBProduct extends PBRecord {
     category?: PBCategory;
     brand?: PBBrand;
   };
+}
+
+// ─── Contact Inquiries Collection ──────────────────────────────────────────────
+export type InquiryStatus = 'new' | 'in-progress' | 'resolved';
+
+export interface PBContactInquiry extends PBRecord {
+  name: string;
+  email: string;
+  phone?: string;
+  message: string;
+  status: InquiryStatus;
+  notes?: string;
+  read?: boolean;
 }
 
 // ─── Categories Collection ────────────────────────────────────────────────────

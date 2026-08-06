@@ -65,8 +65,11 @@ export function AnnouncementCard({
 
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={() => onToggleActive(announcement)}
-              className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+              aria-label={`Mark "${announcement.title}" as ${announcement.isActive ? 'inactive' : 'active'}`}
+              aria-pressed={announcement.isActive}
+              className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                 announcement.isActive ? 'bg-emerald-600' : 'bg-slate-700'
               }`}
             >
@@ -80,18 +83,22 @@ export function AnnouncementCard({
         </div>
       </div>
 
-      {/* Hover actions overlay */}
-      <div className="absolute top-3 right-3 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+      {/* Hover/Focus actions overlay */}
+      <div className="absolute top-3 right-3 flex gap-1.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity z-20">
         <button
+          type="button"
           onClick={() => onEdit(announcement)}
-          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted border border-border bg-card/90 backdrop-blur-xs cursor-pointer"
+          aria-label={`Edit announcement "${announcement.title}"`}
+          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted border border-border bg-card/90 backdrop-blur-xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
           title="Edit Announcement"
         >
           <Edit className="h-3.5 w-3.5" />
         </button>
         <button
+          type="button"
           onClick={() => onDelete(announcement.id)}
-          className="p-1.5 rounded-md text-muted-foreground hover:text-red-500 hover:bg-red-500/10 border border-border bg-card/90 backdrop-blur-xs cursor-pointer"
+          aria-label={`Delete announcement "${announcement.title}"`}
+          className="p-1.5 rounded-md text-muted-foreground hover:text-red-500 hover:bg-red-500/10 border border-border bg-card/90 backdrop-blur-xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
           title="Delete Announcement"
         >
           <Trash2 className="h-3.5 w-3.5" />

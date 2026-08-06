@@ -201,26 +201,26 @@ export default async function DynamicProductOrCategoryPage({ params, searchParam
                 </div>
 
                 {/* Pricing */}
-                <div className="mt-6 flex flex-col gap-3">
-                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5">
-                    {hasDiscount ? (
-                      <>
-                        <span className="text-3xl font-black text-foreground whitespace-nowrap">
-                          {formatPrice(product.discountPrice!, currency)}
-                        </span>
-                        <span className="text-xs font-bold text-emerald-500 bg-emerald-950/10 border border-emerald-500/20 px-2 py-0.5 rounded-md whitespace-nowrap">
-                          SAVE {discountPercent}%
-                        </span>
-                        <span className="text-sm text-muted-foreground line-through whitespace-nowrap">
+                <div className="mt-6 flex flex-col gap-1">
+                  {hasDiscount ? (
+                    <>
+                      <span className="text-3xl font-black text-foreground tracking-tight whitespace-nowrap">
+                        {formatPrice(product.discountPrice!, currency)}
+                      </span>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-sm font-medium text-muted-foreground line-through whitespace-nowrap">
                           {formatPrice(product.price, currency)}
                         </span>
-                      </>
-                    ) : (
-                      <span className="text-3xl font-black text-foreground whitespace-nowrap">
-                        {formatPrice(product.price, currency)}
-                      </span>
-                    )}
-                  </div>
+                        <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md whitespace-nowrap">
+                          SAVE {discountPercent}%
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <span className="text-3xl font-black text-foreground tracking-tight whitespace-nowrap">
+                      {formatPrice(product.price, currency)}
+                    </span>
+                  )}
                 </div>
               </div>
 

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { motion } from 'motion/react';
 import {
   Mail,
   Phone,
@@ -8,56 +9,45 @@ import {
   Clock,
   MessageSquare,
   UserPlus,
-  Share2,
   ChevronRight,
   ShieldCheck,
   Send,
   Loader2,
   CheckCircle2,
 } from 'lucide-react';
+import LocationMap from '@/components/layout/location-map';
+import { pbSiteSettings } from '@/lib/pb-collections';
+import { submitContactFormAction } from '@/app/actions/contact';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faInstagram,
   faFacebook,
   faTiktok,
   faYoutube,
+  faTelegram,
   faLinkedin,
   faXTwitter,
-  faTelegram,
   faViber,
 } from '@fortawesome/free-brands-svg-icons';
-import LocationMap from '@/components/layout/location-map';
-import { pbSiteSettings, pbProducts } from '@/lib/pb-collections';
-import {
-  InstagramEmbed,
-  FacebookEmbed,
-  TikTokEmbed,
-  YouTubeEmbed,
-  XEmbed,
-  LinkedInEmbed,
-} from 'react-social-media-embed';
 
 export default function ContactPage() {
   const [settings, setSettings] = useState<any>(null);
-  const [storeImages, setStoreImages] = useState<string[]>([]);
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [formSent, setFormSent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    message: '',
+  });
 
   useEffect(() => {
     async function loadData() {
       try {
-        const [settingsRes, productsRes] = await Promise.all([
-          pbSiteSettings.get<any>('general').catch(() => null),
-          pbProducts.getAll({ perPage: 12 }).catch(() => null),
-        ]);
+        const settingsRes = await pbSiteSettings.get<any>('general').catch(() => null);
         if (settingsRes) setSettings(settingsRes);
-        if (productsRes && productsRes.items) {
-          const imgs = productsRes.items
-            .flatMap((p: any) => p.images || [])
-            .filter((img: string) => Boolean(img && img.trim()));
-          setStoreImages(imgs);
-        }
       } catch {
         // fallback
       } finally {
@@ -68,7 +58,6 @@ export default function ContactPage() {
   }, []);
 
   const siteName = settings?.siteName || 'FTC Electronics';
-  const tagline = settings?.tagline || 'Premium Electronics Store & Authorized Reseller';
   const phone = settings?.contactInfo?.phone || '+94 77 123 4567';
   const email = settings?.contactInfo?.email || 'info@ftc.lk';
   const whatsapp = settings?.contactInfo?.whatsapp || '+94 77 123 4567';
@@ -79,444 +68,314 @@ export default function ContactPage() {
   const googleMapsUrl = settings?.location?.googleMapsUrl || 'https://maps.google.com';
 
   const socialLinks = settings?.socialLinks || {};
-
   const getSocialInfo = (val: any, defaultUrl: string) => {
     if (!val) return { enabled: false, url: defaultUrl };
     if (typeof val === 'string') return { enabled: val.trim().length > 0, url: val.trim() || defaultUrl };
     return { enabled: val.enabled === true, url: (val.url && val.url.trim()) || defaultUrl };
   };
 
-  const socialButtons = [
+  const allSocials = [
     {
       name: 'Instagram',
       handle: '@ftcelectronics',
+      icon: faInstagram,
       data: getSocialInfo(socialLinks.instagram, 'https://instagram.com/ftcelectronics'),
-      faIcon: faInstagram,
-      textColor: 'text-pink-500',
-      bgColor: 'bg-pink-500/10 border-pink-500/20',
-      tag: 'Photos & Deals',
+      gradient: 'from-pink-500 to-fuchsia-600',
+      ring: 'ring-pink-500/30',
+      iconColor: 'text-pink-500',
+      bg: 'bg-pink-500/8 hover:bg-pink-500/15',
     },
     {
       name: 'Facebook',
       handle: 'FTC Electronics',
+      icon: faFacebook,
       data: getSocialInfo(socialLinks.facebook, 'https://facebook.com/ftcelectronics'),
-      faIcon: faFacebook,
-      textColor: 'text-blue-500',
-      bgColor: 'bg-blue-500/10 border-blue-500/20',
-      tag: 'Community Hub',
+      gradient: 'from-blue-500 to-blue-700',
+      ring: 'ring-blue-500/30',
+      iconColor: 'text-blue-500',
+      bg: 'bg-blue-500/8 hover:bg-blue-500/15',
     },
     {
       name: 'TikTok',
       handle: '@ftcelectronics',
+      icon: faTiktok,
       data: getSocialInfo(socialLinks.tiktok, 'https://tiktok.com/@ftcelectronics'),
-      faIcon: faTiktok,
-      textColor: 'text-purple-400',
-      bgColor: 'bg-purple-500/10 border-purple-500/20',
-      tag: 'Short Videos',
+      gradient: 'from-neutral-700 to-neutral-900',
+      ring: 'ring-neutral-400/30',
+      iconColor: 'text-foreground',
+      bg: 'bg-neutral-500/8 hover:bg-neutral-500/15',
     },
     {
       name: 'YouTube',
       handle: 'FTC Electronics',
+      icon: faYoutube,
       data: getSocialInfo(socialLinks.youtube, 'https://youtube.com/@ftcelectronics'),
-      faIcon: faYoutube,
-      textColor: 'text-red-500',
-      bgColor: 'bg-red-500/10 border-red-500/20',
-      tag: 'Product Reviews',
+      gradient: 'from-red-500 to-rose-700',
+      ring: 'ring-red-500/30',
+      iconColor: 'text-red-500',
+      bg: 'bg-red-500/8 hover:bg-red-500/15',
     },
     {
       name: 'Telegram',
       handle: '@ftcelectronics',
+      icon: faTelegram,
       data: getSocialInfo(socialLinks.telegram, 'https://t.me/ftcelectronics'),
-      faIcon: faTelegram,
-      textColor: 'text-sky-400',
-      bgColor: 'bg-sky-500/10 border-sky-500/20',
-      tag: 'Deals & Drops',
+      gradient: 'from-sky-400 to-cyan-600',
+      ring: 'ring-sky-400/30',
+      iconColor: 'text-sky-500',
+      bg: 'bg-sky-500/8 hover:bg-sky-500/15',
     },
     {
       name: 'LinkedIn',
       handle: 'FTC Electronics',
+      icon: faLinkedin,
       data: getSocialInfo(socialLinks.linkedin, 'https://linkedin.com/company/ftcelectronics'),
-      faIcon: faLinkedin,
-      textColor: 'text-sky-500',
-      bgColor: 'bg-sky-500/10 border-sky-500/20',
-      tag: 'Corporate & B2B',
+      gradient: 'from-blue-600 to-sky-700',
+      ring: 'ring-blue-600/30',
+      iconColor: 'text-blue-600',
+      bg: 'bg-blue-600/8 hover:bg-blue-600/15',
     },
     {
-      name: 'X (Twitter)',
+      name: 'X',
       handle: '@ftcelectronics',
+      icon: faXTwitter,
       data: getSocialInfo(socialLinks.twitter, 'https://x.com/ftcelectronics'),
-      faIcon: faXTwitter,
-      textColor: 'text-neutral-400',
-      bgColor: 'bg-neutral-500/10 border-neutral-500/20',
-      tag: 'Announcements',
+      gradient: 'from-neutral-600 to-neutral-800',
+      ring: 'ring-neutral-400/30',
+      iconColor: 'text-foreground/80',
+      bg: 'bg-neutral-500/8 hover:bg-neutral-500/15',
     },
     {
       name: 'Viber',
       handle: 'FTC Electronics',
+      icon: faViber,
       data: getSocialInfo(socialLinks.viber, 'https://viber.com'),
-      faIcon: faViber,
-      textColor: 'text-purple-500',
-      bgColor: 'bg-purple-500/10 border-purple-500/20',
-      tag: 'Hotline Chat',
+      gradient: 'from-purple-500 to-violet-700',
+      ring: 'ring-purple-500/30',
+      iconColor: 'text-purple-500',
+      bg: 'bg-purple-500/8 hover:bg-purple-500/15',
     },
-  ].filter((item) => item.data.enabled && Boolean(item.data.url && item.data.url.trim()));
+  ].filter((s) => s.data.enabled && Boolean(s.data.url?.trim()));
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
-    setTimeout(() => {
+    setErrorMessage('');
+    try {
+      const res = await submitContactFormAction(formData);
+      if (res.success) {
+        setFormSent(true);
+        setFormData({ name: '', email: '', phone: '', message: '' });
+      } else {
+        setErrorMessage(res.error || 'Failed to submit message.');
+      }
+    } catch {
+      setErrorMessage('An unexpected error occurred. Please try again.');
+    } finally {
       setSubmitting(false);
-      setFormSent(true);
-    }, 800);
+    }
   };
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 text-foreground space-y-10">
-      {/* ── Top Hero Card ── */}
-      <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-card via-card to-blue-500/5 border border-border px-6 py-8 sm:px-10 sm:py-10 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-        <div className="space-y-3 max-w-2xl">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-xs font-semibold text-blue-500">
-            <ShieldCheck className="h-3.5 w-3.5" /> Official Contact & Digital Hub
+    <div className="text-foreground py-8 space-y-12">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-10">
+        {/* ── Top Hero Card ── */}
+        <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-card via-card to-blue-500/5 border border-border px-6 py-8 sm:px-10 sm:py-10 shadow-sm">
+          <div className="space-y-3 max-w-3xl">
+            <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-foreground">
+              Contact &amp; Connect with Us
+            </h1>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Have a question about product specifications, warranty, wholesale inquiries, or order status? Visit our store location or send us a message below.
+            </p>
           </div>
-          <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-foreground">
-            Contact & Connect with Us
-          </h1>
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            Have a question about product specifications, warranty, wholesale inquiries, or order status? Save our contact card, reach out via WhatsApp, visit our store, or send us a message below.
-          </p>
         </div>
 
-        {/* Quick Action Pill Buttons */}
-        <div className="flex flex-col sm:flex-row md:flex-col gap-2.5 w-full md:w-auto shrink-0">
-          <a
-            href="/api/vcard"
-            download="FTC_Electronics.vcf"
-            className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs px-5 py-3 rounded-xl shadow-md transition-all hover:scale-[1.02] cursor-pointer"
-          >
-            <UserPlus className="h-4 w-4" /> Save Contact to Phone (.vcf)
-          </a>
-          {whatsapp && (
-            <a
-              href={`https://wa.me/${cleanWhatsapp.replace(/^\+/, '')}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-5 py-3 rounded-xl shadow-md transition-all hover:scale-[1.02]"
-            >
-              <MessageSquare className="h-4 w-4" /> Chat on WhatsApp
-            </a>
-          )}
-        </div>
-      </div>
-
-      {/* ── Social Profiles & Live Channel Glimpses ── */}
-      {(loadingSettings || socialButtons.length > 0) && (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between border-b border-border pb-3">
-            <div>
-              <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-                <Share2 className="h-5 w-5 text-blue-500" /> Official Channels & Live Glimpses
+        {/* ── Socials Section ── */}
+        {(loadingSettings || allSocials.length > 0) && (
+          <div className="rounded-3xl border border-border bg-card p-6 sm:p-8 shadow-sm space-y-6">
+            {/* Centered Header */}
+            <div className="text-center space-y-1.5 max-w-xl mx-auto">
+              <span className="text-xs font-bold uppercase tracking-widest text-blue-500">Official Socials</span>
+              <h2 className="text-2xl sm:text-3xl font-black text-foreground tracking-tight">
+                Connect With Us
               </h2>
-              <p className="text-xs text-muted-foreground">Get a live preview of our official store channels, unboxing videos, and exclusive flash deals.</p>
+              <p className="text-xs text-muted-foreground">
+                Follow our official channels for the latest product drops, announcements, and store updates.
+              </p>
             </div>
-            <span className="text-xs text-muted-foreground font-semibold hidden sm:inline">Live Previews</span>
-          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {loadingSettings
-              ? Array.from({ length: 6 }).map((_, idx) => (
-                  <div key={idx} className="h-64 rounded-3xl bg-card border border-border p-5 animate-pulse space-y-4">
-                    <div className="h-10 w-full bg-muted rounded-xl" />
-                    <div className="h-32 w-full bg-muted rounded-2xl" />
-                    <div className="h-9 w-full bg-muted rounded-xl" />
-                  </div>
+            {/* Centered Social Cards */}
+            <div className="flex flex-wrap items-center justify-center gap-4">
+              {loadingSettings ? (
+                Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="h-36 w-48 rounded-2xl bg-muted animate-pulse" />
                 ))
-              : socialButtons.map((social) => {
-                  return (
-                    <div
-                      key={social.name}
-                      className="bg-card border border-border hover:border-blue-500/30 rounded-3xl overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col justify-between group"
-                    >
-                      {/* Card Top Header */}
-                      <div className="p-5 pb-3 flex items-center justify-between border-b border-border/40 bg-muted/20">
-                        <div className="flex items-center gap-3">
-                          <div className={`h-11 w-11 rounded-2xl ${social.bgColor} border flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform`}>
-                            <FontAwesomeIcon icon={social.faIcon} className={`h-5 w-5 ${social.textColor}`} />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-bold text-foreground">{social.name}</span>
-                              <CheckCircle2 className="h-3.5 w-3.5 text-blue-500 fill-blue-500/20" />
-                            </div>
-                            <span className="text-[11px] text-muted-foreground font-mono">{social.handle}</span>
-                          </div>
-                        </div>
-                        <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-background border border-border text-foreground/80 shadow-2xs">
-                          {social.name === 'YouTube' && '25K Subs'}
-                          {social.name === 'Instagram' && '12.4K Followers'}
-                          {social.name === 'TikTok' && '35.2K Likes'}
-                          {social.name === 'Facebook' && '18K Likes'}
-                          {social.name === 'Telegram' && '8.5K Members'}
-                          {social.name === 'LinkedIn' && '500+ Conn.'}
-                          {social.name === 'X (Twitter)' && 'Official Updates'}
-                          {social.name === 'Viber' && 'Online'}
-                        </span>
-                      </div>
-
-                      {/* Card Body - Platform Specific Glimpse Preview */}
-                      <div className="p-4 flex-1 flex flex-col justify-center">
-                        {/* Instagram Embed */}
-                        {social.name === 'Instagram' && (
-                          <div className="w-full rounded-2xl overflow-hidden border border-pink-500/20 flex items-center justify-center bg-background p-1 shadow-2xs">
-                            <InstagramEmbed url={social.data.url} width="100%" />
-                          </div>
-                        )}
-
-                        {/* YouTube Embed */}
-                        {social.name === 'YouTube' && (
-                          <div className="w-full rounded-2xl overflow-hidden border border-red-500/20 aspect-video flex items-center justify-center bg-black shadow-2xs">
-                            <YouTubeEmbed url={social.data.url} width="100%" height={260} />
-                          </div>
-                        )}
-
-                        {/* TikTok Embed */}
-                        {social.name === 'TikTok' && (
-                          <div className="w-full rounded-2xl overflow-hidden border border-cyan-500/20 flex items-center justify-center bg-background p-1 shadow-2xs">
-                            <TikTokEmbed url={social.data.url} width="100%" />
-                          </div>
-                        )}
-
-                        {/* Facebook Embed */}
-                        {social.name === 'Facebook' && (
-                          <div className="w-full rounded-2xl overflow-hidden border border-blue-500/20 flex items-center justify-center bg-background p-1 shadow-2xs">
-                            <FacebookEmbed url={social.data.url} width="100%" />
-                          </div>
-                        )}
-
-                        {/* X (Twitter) Embed */}
-                        {social.name === 'X (Twitter)' && (
-                          <div className="w-full rounded-2xl overflow-hidden border border-border flex items-center justify-center bg-background p-1 shadow-2xs">
-                            <XEmbed url={social.data.url} width="100%" />
-                          </div>
-                        )}
-
-                        {/* LinkedIn Embed */}
-                        {social.name === 'LinkedIn' && (
-                          <div className="w-full rounded-2xl overflow-hidden border border-sky-600/20 flex items-center justify-center bg-background p-1 shadow-2xs">
-                            <LinkedInEmbed url={social.data.url} width="100%" />
-                          </div>
-                        )}
-
-                        {/* Telegram Preview */}
-                        {social.name === 'Telegram' && (
-                          <div className="p-3.5 rounded-2xl bg-sky-500/5 border border-sky-500/20 space-y-2">
-                            <div className="flex items-center justify-between text-xs font-bold text-sky-500">
-                              <span>📢 Telegram Channel</span>
-                              <span className="text-[10px] text-muted-foreground font-mono">LIVE</span>
-                            </div>
-                            <p className="text-[11px] text-foreground bg-background/60 p-2.5 rounded-xl border border-border/60 leading-relaxed font-mono">
-                              🔥 Daily Flash Deal: Instant alerts on limited stock PowerBanks & Laptops!
-                            </p>
-                          </div>
-                        )}
-
-                        {/* LinkedIn Preview */}
-                        {social.name === 'LinkedIn' && (
-                          <div className="p-3.5 rounded-2xl bg-sky-600/5 border border-sky-600/20 space-y-2">
-                            <span className="text-xs font-bold text-sky-600 block">Corporate & B2B Wholesale</span>
-                            <p className="text-[11px] text-muted-foreground leading-relaxed">
-                              Connect with FTC Electronics (Pvt) Ltd for bulk corporate procurement, dealer partnerships, and business inquiries.
-                            </p>
-                          </div>
-                        )}
-
-                        {/* X (Twitter) Preview */}
-                        {social.name === 'X (Twitter)' && (
-                          <div className="p-3.5 rounded-2xl bg-neutral-500/5 border border-border space-y-2">
-                            <div className="flex items-center justify-between text-xs font-bold text-foreground">
-                              <span>@ftcelectronics</span>
-                              <span className="text-[10px] text-muted-foreground">Pinned</span>
-                            </div>
-                            <p className="text-[11px] text-muted-foreground leading-relaxed font-mono">
-                              All authorized store locations are open daily 9:30 AM - 7:00 PM. Instant delivery across Sri Lanka!
-                            </p>
-                          </div>
-                        )}
-
-                        {/* Viber Preview */}
-                        {social.name === 'Viber' && (
-                          <div className="p-3.5 rounded-2xl bg-purple-500/5 border border-purple-500/20 space-y-2">
-                            <div className="flex items-center justify-between text-xs font-bold text-purple-500">
-                              <span>Hotline Viber Channel</span>
-                              <span className="text-[10px] text-emerald-500 font-bold">Online</span>
-                            </div>
-                            <p className="text-[11px] text-muted-foreground leading-relaxed">
-                              Send instant product inquiries, stock availability checks, or invoice queries directly via Viber.
-                            </p>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Card Footer Button */}
-                      <div className="p-4 pt-0">
-                        <a
-                          href={social.data.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="w-full py-2.5 px-4 rounded-2xl bg-muted/60 hover:bg-blue-600 hover:text-white text-foreground font-bold text-xs flex items-center justify-center gap-2 transition-all border border-border/60 hover:border-blue-600 shadow-2xs group/btn"
-                        >
-                          <span>Visit {social.name}</span>
-                          <ChevronRight className="h-3.5 w-3.5 group-hover/btn:translate-x-1 transition-transform" />
-                        </a>
-                      </div>
-                    </div>
-                  );
-                })}
-          </div>
-        </div>
-      )}
-
-      {/* ── Main Details & Form Grid ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column: Contact Cards */}
-        <div className="lg:col-span-5 space-y-6">
-          <div className="p-6 rounded-2xl bg-card border border-border space-y-6 shadow-sm">
-            <h3 className="text-lg font-bold text-foreground border-b border-border pb-3">Customer Support Details</h3>
-
-            <div className="flex items-start gap-4">
-              <div className="h-10 w-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-500 shrink-0">
-                <MapPin className="h-5 w-5" />
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-foreground uppercase tracking-wider">Store Address</h4>
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{address}</p>
-                {city && <p className="text-xs text-muted-foreground">{city}</p>}
-                {googleMapsUrl && (
+              ) : (
+                allSocials.map((social) => (
                   <a
-                    href={googleMapsUrl}
+                    key={social.name}
+                    href={social.data.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs text-blue-500 hover:underline font-semibold mt-1.5"
+                    className="group flex flex-col items-center text-center rounded-2xl border border-border/70 bg-background/50 hover:bg-background hover:border-blue-500/40 p-5 shadow-2xs hover:shadow-md transition-all duration-300 hover:-translate-y-1 w-full sm:w-48 cursor-pointer"
                   >
-                    Open in Google Maps <ChevronRight className="h-3 w-3" />
+                    {/* Platform Icon */}
+                    <div className={`h-12 w-12 rounded-2xl bg-gradient-to-br ${social.gradient} flex items-center justify-center text-white shadow-md group-hover:scale-110 transition-transform duration-300 mb-3`}>
+                      <FontAwesomeIcon icon={social.icon} className="h-6 w-6 text-white" />
+                    </div>
+
+                    {/* Name & Handle */}
+                    <div className="text-sm font-bold text-foreground group-hover:text-blue-500 transition-colors">
+                      {social.name}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
+                      {social.handle}
+                    </div>
+
+                    {/* Follow Link */}
+                    <div className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-blue-500 group-hover:underline">
+                      <span>Follow</span>
+                      <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
+                    </div>
                   </a>
-                )}
-              </div>
-            </div>
-
-            <div className="flex items-start gap-4">
-              <div className="h-10 w-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-500 shrink-0">
-                <Phone className="h-5 w-5" />
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-foreground uppercase tracking-wider">Phone Hotline</h4>
-                <a href={`tel:${phone}`} className="text-xs text-muted-foreground hover:text-blue-500 block mt-1 font-semibold">{phone}</a>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-4">
-              <div className="h-10 w-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-500 shrink-0">
-                <Mail className="h-5 w-5" />
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-foreground uppercase tracking-wider">Email Support</h4>
-                <a href={`mailto:${email}`} className="text-xs text-muted-foreground hover:text-blue-500 block mt-1 font-semibold">{email}</a>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-4">
-              <div className="h-10 w-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-500 shrink-0">
-                <Clock className="h-5 w-5" />
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-foreground uppercase tracking-wider">Operating Hours</h4>
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{hours}</p>
-              </div>
+                ))
+              )}
             </div>
           </div>
-        </div>
+        )}
 
-        {/* Right Column: Contact Form */}
-        <div className="lg:col-span-7 p-6 sm:p-8 rounded-2xl bg-card border border-border shadow-sm">
-          <h3 className="text-lg font-bold text-foreground mb-6">Send Us a Direct Message</h3>
-          
-          {formSent ? (
-            <div className="p-6 text-center space-y-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl animate-fade-in">
-              <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto" />
-              <h4 className="text-sm font-bold text-foreground">Message Sent Successfully!</h4>
-              <p className="text-xs text-muted-foreground">Thank you for reaching out to {siteName}. Our support team will get back to you shortly.</p>
-              <button
-                type="button"
-                onClick={() => setFormSent(false)}
-                className="text-xs text-blue-500 hover:underline font-semibold pt-2 block mx-auto"
-              >
-                Send another message
-              </button>
-            </div>
-          ) : (
-            <form className="space-y-4" onSubmit={handleSubmit}>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* ── Direct Message Section (2 Columns: Clean Animated Text on Left, Form Card on Right) ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+          {/* Left Column: Clean Animated Title Only */}
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.6, ease: 'easeOut' }}
+            className="lg:col-span-5 space-y-3 py-2"
+          >
+            <span className="text-xs font-bold uppercase tracking-widest text-blue-500">Fast &amp; Direct Support</span>
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black text-foreground tracking-tight leading-tight">
+              We&apos;re Here to Help With Any Inquiry
+            </h2>
+          </motion.div>
+
+          {/* Right Column: Direct Message Form Card */}
+          <div className="lg:col-span-7 p-6 sm:p-8 rounded-3xl bg-card border border-border shadow-sm">
+            <h3 className="text-xl font-bold text-foreground mb-6">Send Us a Direct Message</h3>
+
+            {formSent ? (
+              <div className="p-6 text-center space-y-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl">
+                <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto" />
+                <h4 className="text-sm font-bold text-foreground">Message Sent Successfully!</h4>
+                <p className="text-xs text-muted-foreground">Thank you for reaching out to {siteName}. A copy has been delivered to support and recorded in system logs.</p>
+                <button
+                  type="button"
+                  onClick={() => setFormSent(false)}
+                  className="text-xs text-blue-500 hover:underline font-semibold pt-2 block mx-auto"
+                >
+                  Send another message
+                </button>
+              </div>
+            ) : (
+              <form className="space-y-4" onSubmit={handleSubmit}>
+                {errorMessage && (
+                  <div className="p-3 text-xs font-semibold text-rose-500 bg-rose-500/10 border border-rose-500/20 rounded-xl">
+                    {errorMessage}
+                  </div>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="contact-name" className="block text-xs font-bold text-foreground uppercase tracking-wider mb-1.5">
+                      Your Name
+                    </label>
+                    <input
+                      id="contact-name"
+                      name="name"
+                      type="text"
+                      required
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      placeholder="John Doe"
+                      className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="contact-email" className="block text-xs font-bold text-foreground uppercase tracking-wider mb-1.5">
+                      Email Address
+                    </label>
+                    <input
+                      id="contact-email"
+                      name="email"
+                      type="email"
+                      required
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      placeholder="john@example.com"
+                      className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
                 <div>
-                  <label className="block text-xs font-bold text-foreground uppercase tracking-wider mb-1.5">
-                    Your Name
+                  <label htmlFor="contact-phone" className="block text-xs font-bold text-foreground uppercase tracking-wider mb-1.5">
+                    Phone Number
                   </label>
                   <input
-                    type="text"
-                    required
-                    placeholder="John Doe"
+                    id="contact-phone"
+                    name="phone"
+                    type="tel"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    placeholder="+94 77 123 4567"
                     className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-blue-500"
                   />
                 </div>
+
                 <div>
-                  <label className="block text-xs font-bold text-foreground uppercase tracking-wider mb-1.5">
-                    Email Address
+                  <label htmlFor="contact-message" className="block text-xs font-bold text-foreground uppercase tracking-wider mb-1.5">
+                    Message / Inquiry
                   </label>
-                  <input
-                    type="email"
+                  <textarea
+                    id="contact-message"
+                    name="message"
+                    rows={4}
                     required
-                    placeholder="john@example.com"
-                    className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-blue-500"
+                    value={formData.message}
+                    onChange={(e) => setFormData({ ...formData, message: e.target.value })}
+                    placeholder="How can we help you today?"
+                    className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-blue-500 resize-none"
                   />
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-xs font-bold text-foreground uppercase tracking-wider mb-1.5">
-                  Phone Number
-                </label>
-                <input
-                  type="tel"
-                  placeholder="+94 77 123 4567"
-                  className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-foreground uppercase tracking-wider mb-1.5">
-                  Message / Inquiry
-                </label>
-                <textarea
-                  rows={4}
-                  required
-                  placeholder="How can we help you today?"
-                  className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-blue-500 resize-none"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs uppercase tracking-wider rounded-xl py-3.5 transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-              >
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                {submitting ? 'Sending...' : 'Send Message'}
-              </button>
-            </form>
-          )}
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs uppercase tracking-wider rounded-xl py-3.5 transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  {submitting ? 'Sending...' : 'Send Message'}
+                </button>
+              </form>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* ── Location Map ── */}
-      <LocationMap />
+      {/* ── Location Map (Full width flush to footer) ── */}
+      <div className="-mb-8">
+        <LocationMap
+          settings={{
+            address,
+            city,
+            phone,
+            email,
+            hours,
+            googleMapsLink: googleMapsUrl,
+            whatsappLink: whatsapp ? (whatsapp.startsWith('http') ? whatsapp : `https://wa.me/${cleanWhatsapp.replace(/^\+/, '')}`) : undefined,
+          }}
+        />
+      </div>
     </div>
   );
 }

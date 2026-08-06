@@ -108,14 +108,14 @@ export default function ProductsPage({ searchParams }: PageProps) {
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
 
       {/* Page Header */}
-      <div className="relative mb-8 rounded-2xl overflow-hidden bg-card border border-border px-6 py-8 sm:px-10 sm:py-10">
+      <div className="relative mb-6 sm:mb-8 rounded-2xl overflow-hidden bg-card border border-border p-4 sm:p-8">
         {/* Subtle grid texture */}
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,hsl(var(--border)/0.4)_1px,transparent_1px),linear-gradient(to_bottom,hsl(var(--border)/0.4)_1px,transparent_1px)] bg-[size:32px_32px] opacity-50" />
         {/* Soft blue glow — top right */}
         <div className="pointer-events-none absolute -top-12 -right-12 h-48 w-48 rounded-full bg-blue-500/8 blur-3xl" />
 
         {/* Blue accent rule */}
-        <div className="mb-5 h-[3px] w-10 rounded-full bg-gradient-to-r from-blue-500 to-indigo-400" />
+        <div className="mb-3 sm:mb-5 h-[3px] w-8 sm:w-10 rounded-full bg-gradient-to-r from-blue-500 to-indigo-400" />
 
         {/* Back link when category is active */}
         {activeCategory && (
@@ -129,12 +129,12 @@ export default function ProductsPage({ searchParams }: PageProps) {
         )}
 
         {/* Heading */}
-        <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-foreground capitalize leading-none mb-2">
+        <h1 className="text-xl sm:text-3xl md:text-4xl font-black tracking-tight text-foreground capitalize leading-none mb-1.5 sm:mb-2">
           {headingText}
         </h1>
 
         {/* Subtitle */}
-        <p className="text-sm text-muted-foreground leading-relaxed max-w-lg mt-3">
+        <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-lg mt-1.5 sm:mt-3">
           {subText}
         </p>
       </div>

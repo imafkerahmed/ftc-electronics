@@ -40,26 +40,43 @@ export const useCartStore = create<CartStoreState>()(
 
       addItem: (product: Product, quantity = 1) =>
         set((state) => {
-          const existingItemIndex = state.items.findIndex(
-            (item) => item.id === product.id
+          const targetId = product.id;
+          const existingIndex = state.items.findIndex(
+            (item) => item.id === targetId || item.product?.id === targetId
           );
 
-          const newItems = [...state.items];
+          let newItems = [...state.items];
 
-          if (existingItemIndex > -1) {
-            const currentItem = state.items[existingItemIndex];
+          if (existingIndex > -1) {
+            const currentItem = newItems[existingIndex];
             const newQuantity = currentItem.quantity + quantity;
-
-            // Cap at stock quantity if available
             const finalQty = Math.min(newQuantity, product.countInStock);
 
-            newItems[existingItemIndex] = {
+            newItems[existingIndex] = {
               ...currentItem,
+              id: targetId,
+              product: {
+                id: product.id,
+                name: product.name,
+                slug: product.slug,
+                price: product.price,
+                discountPrice: product.discountPrice,
+                images: product.images,
+                brand: product.brand,
+                countInStock: product.countInStock,
+              },
               quantity: finalQty,
             };
+
+            // Remove any other stray duplicate entries of the same product
+            newItems = newItems.filter(
+              (item, index) =>
+                index === existingIndex ||
+                (item.id !== targetId && item.product?.id !== targetId)
+            );
           } else {
             newItems.push({
-              id: product.id,
+              id: targetId,
               product: {
                 id: product.id,
                 name: product.name,
@@ -80,7 +97,9 @@ export const useCartStore = create<CartStoreState>()(
 
       removeItem: (productId: string) =>
         set((state) => {
-          const newItems = state.items.filter((item) => item.id !== productId);
+          const newItems = state.items.filter(
+            (item) => item.id !== productId && item.product?.id !== productId
+          );
           const totals = calculateTotals(newItems);
           return { items: newItems, ...totals };
         }),
@@ -88,7 +107,7 @@ export const useCartStore = create<CartStoreState>()(
       updateQuantity: (productId: string, quantity: number) =>
         set((state) => {
           const newItems = state.items.map((item) => {
-            if (item.id === productId) {
+            if (item.id === productId || item.product?.id === productId) {
               const finalQty = Math.min(
                 Math.max(1, quantity),
                 item.product.countInStock

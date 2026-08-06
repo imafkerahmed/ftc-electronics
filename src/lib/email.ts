@@ -1,8 +1,10 @@
+import nodemailer from 'nodemailer';
+
 /**
  * Email Service Helper
  * 
- * Supports sending transactional emails using Resend.
- * Fallbacks to console logging in development mode if RESEND_API_KEY is not configured.
+ * Supports sending transactional emails using Nodemailer SMTP or Resend.
+ * Fallbacks to console logging in development mode if SMTP / API KEY is not configured.
  */
 
 interface SendEmailOptions {
@@ -34,8 +36,8 @@ const escapeHtml = (s: string): string =>
 const isDevFallbackEnabled = process.env.EMAIL_DEV_FALLBACK === 'true';
 
 /**
- * Shared Resend transport helper.
- * Handles timeouts, error logging, and development console fallbacks.
+ * Shared Nodemailer SMTP & Resend transport helper.
+ * Handles Nodemailer SMTP, Resend, error logging, and development console fallbacks.
  */
 async function sendEmail({
   to,
@@ -45,16 +47,73 @@ async function sendEmail({
   devFallbackMessage,
   prodErrorMessage,
 }: SendEmailOptions): Promise<{ success: boolean; error?: string }> {
+  const smtpHost = process.env.SMTP_HOST;
+  const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
+  const smtpUser = process.env.SMTP_USER;
+  const smtpPass = process.env.SMTP_PASS;
+  const smtpFrom = process.env.SMTP_FROM || process.env.SMTP_FROM_EMAIL || `"FTC Electronics" <${smtpUser || 'info@ftc.lk'}>`;
+
+  // 1. Primary: Use Nodemailer SMTP if SMTP_HOST and SMTP_USER are configured
+  if (smtpHost && smtpUser) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      });
+
+      await transporter.sendMail({
+        from: smtpFrom,
+        to,
+        subject,
+        html,
+      });
+
+      return { success: true };
+    } catch (smtpErr: any) {
+      console.error('[NODEMAILER SMTP ERROR]', smtpErr);
+      if (!process.env.RESEND_API_KEY && !isDevFallbackEnabled) {
+        return { success: false, error: smtpErr?.message || prodErrorMessage };
+      }
+    }
+  }
+
+  // 2. Fallback: Resend API or Brevo API if configured
   const apiKey = process.env.RESEND_API_KEY;
-  const fromEmail = process.env.RESEND_FROM_EMAIL || 'FTC Electronics <onboarding@resend.dev>';
+  const brevoApiKey = process.env.BREVO_API_KEY;
+  const fromEmail = process.env.RESEND_FROM_EMAIL || smtpFrom;
+
+  if (brevoApiKey && !apiKey) {
+    try {
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'api-key': brevoApiKey,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: 'FTC Electronics', email: process.env.SMTP_FROM_EMAIL || 'info@ftc.lk' },
+          to: [{ email: to }],
+          subject,
+          htmlContent: html,
+        }),
+      });
+      if (res.ok) return { success: true };
+    } catch (brevoErr) {
+      console.error('[BREVO MAIL ERROR]', brevoErr);
+    }
+  }
 
   if (!apiKey) {
     if (!isDevFallbackEnabled) {
-      // Production (or staging without the flag): refuse to fake a successful send.
-      console.error('[EMAIL] RESEND_API_KEY is not configured; refusing to fake a successful send.');
+      console.error('[EMAIL] No email API key (RESEND_API_KEY or BREVO_API_KEY) configured; refusing to fake send.');
       return { success: false, error: prodErrorMessage };
     }
-    // Local dev with EMAIL_DEV_FALLBACK=true: log to console instead.
     devLog();
     return { success: true };
   }
@@ -220,6 +279,16 @@ export async function sendOtpEmail({ to, code, expiresMinutes = 10 }: SendOtpEma
   });
 }
 
+export interface ShippingAddressObject {
+  addressLine1?: string;
+  addressLine2?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
+}
+
 interface SendQuotationEmailParams {
   to: string;
   quoteNumber: string;
@@ -250,7 +319,8 @@ export async function sendQuotationEmail(params: SendQuotationEmailParams): Prom
   const safeValidUntil = escapeHtml(params.validUntil);
   const safeNotes = params.notes ? escapeHtml(params.notes) : '';
 
-  const safeStoreName = escapeHtml(params.storeName || 'FTC Electronics');
+  const rawStoreName = params.storeName || 'FTC Electronics';
+  const safeStoreName = escapeHtml(rawStoreName);
   const safeStorePhone = params.storePhone ? escapeHtml(params.storePhone) : '';
   const safeStoreEmail = params.storeEmail ? escapeHtml(params.storeEmail) : '';
   const safeStoreAddress = params.storeAddress ? escapeHtml(params.storeAddress) : '';
@@ -266,16 +336,16 @@ export async function sendQuotationEmail(params: SendQuotationEmailParams): Prom
       <tr>
         <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: left; font-size: 14px; color: #18181b;">${escapeHtml(item.name || 'Item')}</td>
         <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: center; font-size: 14px; color: #52525b;">${qty}</td>
-        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; color: #52525b;">${currency} ${unitPrice.toLocaleString()}</td>
-        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; color: #52525b;">-${currency} ${discount.toLocaleString()}</td>
-        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; font-weight: 600; color: #18181b;">${currency} ${total.toLocaleString()}</td>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; color: #52525b;">${currency} ${unitPrice.toLocaleString('en-LK')}</td>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; color: #52525b;">-${currency} ${discount.toLocaleString('en-LK')}</td>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; font-weight: 600; color: #18181b;">${currency} ${total.toLocaleString('en-LK')}</td>
       </tr>
     `;
   }).join('');
 
   return sendEmail({
     to: params.to,
-    subject: `Quotation #${params.quoteNumber} from ${safeStoreName}`,
+    subject: `Quotation #${params.quoteNumber} from ${rawStoreName}`,
     html: `
       <!DOCTYPE html>
       <html>
@@ -352,21 +422,21 @@ export async function sendQuotationEmail(params: SendQuotationEmailParams): Prom
             <table class="totals-table">
               <tr>
                 <td>Subtotal</td>
-                <td style="text-align: right; font-weight: 600;">${currency} ${params.subtotal.toLocaleString()}</td>
+                <td style="text-align: right; font-weight: 600;">${currency} ${params.subtotal.toLocaleString('en-LK')}</td>
               </tr>
               ${params.discountAmount ? `
               <tr>
                 <td>Discount</td>
-                <td style="text-align: right; font-weight: 600; color: #dc2626;">-${currency} ${params.discountAmount.toLocaleString()}</td>
+                <td style="text-align: right; font-weight: 600; color: #dc2626;">-${currency} ${params.discountAmount.toLocaleString('en-LK')}</td>
               </tr>` : ''}
               ${params.taxAmount ? `
               <tr>
                 <td>Tax</td>
-                <td style="text-align: right; font-weight: 600;">${currency} ${params.taxAmount.toLocaleString()}</td>
+                <td style="text-align: right; font-weight: 600;">${currency} ${params.taxAmount.toLocaleString('en-LK')}</td>
               </tr>` : ''}
               <tr class="grand-row">
                 <td>Total</td>
-                <td style="text-align: right;">${currency} ${params.totalAmount.toLocaleString()}</td>
+                <td style="text-align: right;">${currency} ${params.totalAmount.toLocaleString('en-LK')}</td>
               </tr>
             </table>
 
@@ -391,10 +461,10 @@ export async function sendQuotationEmail(params: SendQuotationEmailParams): Prom
     devLog: () => {
       console.log('\n==================================================');
       console.log(`[DEV MAIL SENDER] Quotation Email sent for: ${params.to}`);
-      console.log(`[DEV MAIL SENDER] Quote: #${params.quoteNumber} | Total: ${currency} ${params.totalAmount.toLocaleString()}`);
+      console.log(`[DEV MAIL SENDER] Quote: #${params.quoteNumber} | Total: ${currency} ${params.totalAmount.toLocaleString('en-LK')}`);
       console.log('==================================================\n');
     },
-    devFallbackMessage: `Quotation #${params.quoteNumber} to ${params.to} for amount ${currency} ${params.totalAmount.toLocaleString()}`,
+    devFallbackMessage: `Quotation #${params.quoteNumber} to ${params.to} for amount ${currency} ${params.totalAmount.toLocaleString('en-LK')}`,
     prodErrorMessage: 'Failed to send quotation email.',
   });
 }
@@ -403,7 +473,7 @@ interface SendOrderInvoiceEmailParams {
   to: string;
   orderNumber: string;
   customerName: string;
-  shippingAddress: any;
+  shippingAddress: string | ShippingAddressObject | null | undefined;
   items: Array<{ name: string; qty: number; unitPrice: number; discount?: number }>;
   totalAmount: number;
   paymentMethod?: string;
@@ -435,7 +505,8 @@ export async function sendOrderInvoiceEmail(params: SendOrderInvoiceEmailParams)
     formattedAddress = parts.filter(Boolean).map(escapeHtml).join(', ');
   }
 
-  const safeStoreName = escapeHtml(params.storeName || 'FTC Electronics');
+  const rawStoreName = params.storeName || 'FTC Electronics';
+  const safeStoreName = escapeHtml(rawStoreName);
   const safeStorePhone = params.storePhone ? escapeHtml(params.storePhone) : '';
   const safeStoreEmail = params.storeEmail ? escapeHtml(params.storeEmail) : '';
   const safeStoreAddress = params.storeAddress ? escapeHtml(params.storeAddress) : '';
@@ -452,15 +523,16 @@ export async function sendOrderInvoiceEmail(params: SendOrderInvoiceEmailParams)
       <tr>
         <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: left; font-size: 14px; color: #18181b;">${escapeHtml(item.name || 'Item')}</td>
         <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: center; font-size: 14px; color: #52525b;">${qty}</td>
-        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; color: #52525b;">${currency} ${unitPrice.toLocaleString()}</td>
-        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; font-weight: 600; color: #18181b;">${currency} ${total.toLocaleString()}</td>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; color: #52525b;">${currency} ${unitPrice.toLocaleString('en-LK')}</td>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; color: #52525b;">${discount > 0 ? `-${currency} ${discount.toLocaleString('en-LK')}` : '—'}</td>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; font-weight: 600; color: #18181b;">${currency} ${total.toLocaleString('en-LK')}</td>
       </tr>
     `;
   }).join('');
 
   return sendEmail({
     to: params.to,
-    subject: `Tax Invoice #${params.orderNumber} from ${safeStoreName}`,
+    subject: `Tax Invoice #${params.orderNumber} from ${rawStoreName}`,
     html: `
       <!DOCTYPE html>
       <html>
@@ -522,6 +594,7 @@ export async function sendOrderInvoiceEmail(params: SendOrderInvoiceEmailParams)
                   <th style="text-align: left;">Item Description</th>
                   <th style="text-align: center; width: 60px;">Qty</th>
                   <th style="text-align: right; width: 100px;">Price</th>
+                  <th style="text-align: right; width: 80px;">Disc</th>
                   <th style="text-align: right; width: 110px;">Total</th>
                 </tr>
               </thead>
@@ -534,7 +607,7 @@ export async function sendOrderInvoiceEmail(params: SendOrderInvoiceEmailParams)
             <table class="totals-table">
               <tr class="grand-row">
                 <td>Total Paid</td>
-                <td style="text-align: right;">${currency} ${params.totalAmount.toLocaleString()}</td>
+                <td style="text-align: right;">${currency} ${params.totalAmount.toLocaleString('en-LK')}</td>
               </tr>
               <tr>
                 <td style="font-size: 12px; color: #a1a1aa; padding-top: 6px;">Payment Method</td>
@@ -556,10 +629,212 @@ export async function sendOrderInvoiceEmail(params: SendOrderInvoiceEmailParams)
     devLog: () => {
       console.log('\n==================================================');
       console.log(`[DEV MAIL SENDER] Order Invoice Email sent for: ${params.to}`);
-      console.log(`[DEV MAIL SENDER] Order: #${params.orderNumber} | Total: ${currency} ${params.totalAmount.toLocaleString()}`);
+      console.log(`[DEV MAIL SENDER] Order: #${params.orderNumber} | Total: ${currency} ${params.totalAmount.toLocaleString('en-LK')}`);
       console.log('==================================================\n');
     },
-    devFallbackMessage: `Order Invoice #${params.orderNumber} to ${params.to} for amount ${currency} ${params.totalAmount.toLocaleString()}`,
+    devFallbackMessage: `Order Invoice #${params.orderNumber} to ${params.to} for amount ${currency} ${params.totalAmount.toLocaleString('en-LK')}`,
     prodErrorMessage: 'Failed to send order invoice email.',
   });
 }
+
+export interface SendContactInquiryParams {
+  name: string;
+  email: string;
+  phone?: string;
+  message: string;
+  recipientEmail?: string;
+}
+
+export async function sendContactInquiryEmail({
+  name,
+  email,
+  phone = 'N/A',
+  message,
+  recipientEmail = 'info@ftc.lk',
+}: SendContactInquiryParams): Promise<{ success: boolean; error?: string }> {
+  const safeName = escapeHtml(name);
+  const safeEmail = escapeHtml(email);
+  const safePhone = escapeHtml(phone);
+  const safeMessage = escapeHtml(message).replace(/\n/g, '<br/>');
+  const dateStr = new Date().toLocaleString('en-US', { timeZone: 'Asia/Colombo' });
+
+  return sendEmail({
+    to: recipientEmail,
+    subject: `[New Website Inquiry] Message from ${name}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 40px 20px; }
+            .card { max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e4e4e7; padding: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+            .badge { display: inline-block; background-color: #eff6ff; border: 1px solid #bfdbfe; color: #2563eb; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 4px 10px; border-radius: 9999px; margin-bottom: 16px; }
+            .heading { font-size: 22px; font-weight: 800; color: #09090b; margin: 0 0 8px 0; }
+            .meta { font-size: 13px; color: #71717a; margin-bottom: 24px; }
+            .info-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; background: #fafafa; border-radius: 12px; border: 1px solid #f4f4f5; overflow: hidden; }
+            .info-table td { padding: 12px 16px; font-size: 14px; color: #18181b; border-bottom: 1px solid #f4f4f5; }
+            .info-table td.label { font-weight: 600; color: #71717a; width: 120px; }
+            .message-box { background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; font-size: 14px; color: #334155; line-height: 1.6; }
+            .footer { margin-top: 32px; font-size: 12px; color: #a1a1aa; border-top: 1px solid #f4f4f5; padding-top: 16px; text-align: center; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="badge">Contact Form Submission</div>
+            <h1 class="heading">New Inquiry Received</h1>
+            <p class="meta">Received on ${dateStr} (Asia/Colombo)</p>
+
+            <table class="info-table">
+              <tr>
+                <td class="label">Customer Name</td>
+                <td><strong>${safeName}</strong></td>
+              </tr>
+              <tr>
+                <td class="label">Email Address</td>
+                <td><a href="mailto:${safeEmail}">${safeEmail}</a></td>
+              </tr>
+              <tr>
+                <td class="label">Phone Number</td>
+                <td><a href="tel:${safePhone}">${safePhone}</a></td>
+              </tr>
+            </table>
+
+            <div style="margin-bottom: 8px; font-size: 12px; font-weight: 700; uppercase; color: #71717a; tracking-wider;">Message Content</div>
+            <div class="message-box">
+              ${safeMessage}
+            </div>
+
+            <div class="footer">
+              <p>This message was submitted via the FTC Electronics Contact Form.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `,
+    devLog: () => {
+      console.log('\n==================================================');
+      console.log(`[DEV MAIL SENDER] Contact Form Inquiry received!`);
+      console.log(`[DEV MAIL SENDER] From: ${safeName} (${safeEmail}) | Phone: ${safePhone}`);
+      console.log(`[DEV MAIL SENDER] Message: ${safeMessage}`);
+      console.log(`[DEV MAIL SENDER] Target Recipient: ${recipientEmail}`);
+      console.log('==================================================\n');
+    },
+    devFallbackMessage: `Contact Form Inquiry from ${safeName} (${safeEmail}) to ${recipientEmail}`,
+    prodErrorMessage: 'Failed to send contact inquiry email.',
+  });
+}
+
+export async function sendTelegramInquiryAlert({
+  name,
+  email,
+  phone = 'N/A',
+  message,
+}: SendContactInquiryParams): Promise<boolean> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return false;
+
+  const text = `📬 <b>New Website Inquiry</b>\n\n<b>Name:</b> ${name}\n<b>Email:</b> ${email}\n<b>Phone:</b> ${phone}\n\n<b>Message:</b>\n${message}`;
+
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export interface SendOrderShippingEmailParams {
+  to: string;
+  orderNumber: string;
+  customerName: string;
+  shippingAddress: string | ShippingAddressObject | null | undefined;
+  items?: Array<{ name: string; qty: number; serials?: string[] }>;
+  trackingNumber?: string;
+  courierName?: string;
+}
+
+export async function sendOrderShippingEmail(params: SendOrderShippingEmailParams): Promise<{ success: boolean; error?: string }> {
+  const safeTo = escapeHtml(params.to);
+  const safeOrderNumber = escapeHtml(params.orderNumber);
+  const safeCustomerName = escapeHtml(params.customerName);
+  const tracking = params.trackingNumber ? escapeHtml(params.trackingNumber) : null;
+  const courier = params.courierName ? escapeHtml(params.courierName) : 'Standard Courier Service';
+
+  let formattedAddress = '';
+  if (typeof params.shippingAddress === 'string') {
+    formattedAddress = escapeHtml(params.shippingAddress);
+  } else if (params.shippingAddress && typeof params.shippingAddress === 'object') {
+    const addr = params.shippingAddress;
+    const parts = [addr.addressLine1, addr.addressLine2, addr.address, addr.city, addr.state, addr.postalCode, addr.country];
+    formattedAddress = parts.filter(Boolean).map((p) => escapeHtml(p as string)).join(', ');
+  }
+
+  const itemsListHtml = (params.items || [])
+    .map((i) => {
+      const serialsText = Array.isArray(i.serials) && i.serials.length > 0
+        ? `<br/><span style="font-size: 12px; color: #2563eb; font-family: monospace;">Serial S/N: ${i.serials.map(escapeHtml).join(', ')}</span>`
+        : '';
+      return `<li style="margin-bottom: 8px;"><strong>${escapeHtml(i.name)}</strong> (Qty: ${i.qty})${serialsText}</li>`;
+    })
+    .join('');
+
+  return sendEmail({
+    to: params.to,
+    subject: `🚚 Your Order #${params.orderNumber} Has Been Shipped! — FTC Electronics`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #111; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
+        <div style="text-align: center; padding-bottom: 20px; border-bottom: 1px solid #e2e8f0;">
+          <h2 style="color: #2563eb; margin: 0;">🚚 Your Order is On Its Way!</h2>
+          <p style="color: #64748b; font-size: 14px; margin-top: 4px;">FTC Electronics Dispatch Confirmation</p>
+        </div>
+
+        <div style="padding: 20px 0;">
+          <p style="font-size: 16px;">Hello <strong>${safeCustomerName}</strong>,</p>
+          <p style="font-size: 14px; color: #334155; line-height: 1.5;">
+            Great news! Your order <strong>#${safeOrderNumber}</strong> has been handed over to our courier partner and is currently on its way to you.
+          </p>
+
+          <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 16px; border-radius: 6px; margin: 20px 0;">
+            <p style="margin: 0 0 8px 0; font-size: 13px; color: #64748b; text-transform: uppercase; font-weight: bold;">Courier Partner</p>
+            <p style="margin: 0; font-size: 15px; font-weight: bold; color: #0f172a;">${courier}</p>
+            ${tracking ? `<p style="margin: 8px 0 0 0; font-size: 14px; color: #334155;"><strong>Tracking Number:</strong> <span style="font-family: monospace; font-weight: bold; color: #2563eb;">${tracking}</span></p>` : ''}
+          </div>
+
+          ${formattedAddress ? `
+            <div style="margin: 20px 0;">
+              <h4 style="margin: 0 0 8px 0; color: #475569; font-size: 13px; text-transform: uppercase;">Shipping Destination</h4>
+              <p style="margin: 0; font-size: 14px; color: #1e293b;">${formattedAddress}</p>
+            </div>
+          ` : ''}
+
+          ${itemsListHtml ? `
+            <div style="margin: 20px 0;">
+              <h4 style="margin: 0 0 8px 0; color: #475569; font-size: 13px; text-transform: uppercase;">Items Shipped</h4>
+              <ul style="margin: 0; padding-left: 20px; font-size: 14px; color: #1e293b;">${itemsListHtml}</ul>
+            </div>
+          ` : ''}
+
+          <p style="font-size: 14px; color: #64748b; margin-top: 24px;">
+            If you have any questions regarding your delivery, please contact our support team.
+          </p>
+        </div>
+
+        <div style="text-align: center; border-top: 1px solid #e2e8f0; padding-top: 16px; margin-top: 20px; font-size: 12px; color: #94a3b8;">
+          © ${new Date().getFullYear()} FTC Electronics. All rights reserved.
+        </div>
+      </div>
+    `,
+    devLog: () => {
+      console.log(`[DEV MAIL SENDER] Shipping notification sent for Order #${safeOrderNumber} to ${safeTo}`);
+    },
+    devFallbackMessage: `Shipping email sent to ${safeTo} for Order #${safeOrderNumber}`,
+    prodErrorMessage: 'Failed to send shipping email.',
+  });
+}
+

@@ -14,6 +14,7 @@ import PosScanTerminal from "@/components/pos/pos-scan-terminal";
 import PosCart from "@/components/pos/pos-cart";
 import PosBillSummary from "@/components/pos/pos-bill-summary";
 import PosPaymentModal from "@/components/pos/pos-payment-modal";
+import { clearAllClientSessions } from "@/lib/clear-client-storage";
 import Link from "next/link";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { validatePosCouponAction } from "@/app/actions/admin";
@@ -51,16 +52,22 @@ export default function PosPage() {
 
   const [currentDate, setCurrentDate] = useState("");
 
-  // Hydrate session & cart state from storage on mount
+  // Hydrate session & cart state from storage on mount & refresh date
   useEffect(() => {
-    setCurrentDate(
-      new Date().toLocaleDateString("en-LK", {
-        weekday: "short",
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      })
-    );
+    const updateDate = () => {
+      setCurrentDate(
+        new Date().toLocaleDateString("en-LK", {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })
+      );
+    };
+
+    updateDate();
+    const dateInterval = setInterval(updateDate, 60000);
+
     const s = getPosSession();
     if (isPosSessionValid(s)) setSession(s);
     setSessionChecked(true);
@@ -81,6 +88,8 @@ export default function PosPage() {
     } catch {
       /* ignore */
     }
+
+    return () => clearInterval(dateInterval);
   }, []);
 
   // Save cart state to localStorage whenever it changes
@@ -347,6 +356,7 @@ export default function PosPage() {
             size="sm"
             onClick={() => {
               clearPosSession();
+              clearAllClientSessions();
               setSession(null);
             }}
             title="Switch cashier"

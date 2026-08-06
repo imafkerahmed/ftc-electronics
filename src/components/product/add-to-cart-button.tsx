@@ -12,7 +12,7 @@ interface AddToCartButtonProps {
 }
 
 export default function AddToCartButton({ product }: AddToCartButtonProps) {
-  const { addItem } = useCart();
+  const { addItem, clearCart } = useCart();
   const router = useRouter();
   const [quantity, setQuantity] = useState(1);
 
@@ -23,6 +23,7 @@ export default function AddToCartButton({ product }: AddToCartButtonProps) {
   };
 
   const handleBuyNow = () => {
+    clearCart();
     addItem(product, quantity);
     router.push('/checkout/shipping');
   };

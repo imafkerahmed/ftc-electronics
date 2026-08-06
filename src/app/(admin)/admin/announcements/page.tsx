@@ -5,6 +5,7 @@ import { Megaphone, Plus, Loader2, CheckCircle, AlertCircle } from 'lucide-react
 import { Button } from '@/components/ui/button';
 import { pbAnnouncements } from '@/lib/pb-collections';
 import { createAnnouncementAction, deleteAnnouncementAction, updateAnnouncementAction, toggleAnnouncementActiveAction } from '@/app/actions/admin';
+import type { PBAnnouncement } from '@/types/admin';
 import { Announcement } from './types';
 import { AnnouncementCard } from './announcement-card';
 import { AnnouncementModal } from './announcement-modal';
@@ -24,6 +25,7 @@ export default function AdminAnnouncementsPage() {
   const [endsAt, setEndsAt] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [removeImage, setRemoveImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Feedback states
@@ -34,8 +36,9 @@ export default function AdminAnnouncementsPage() {
   const loadData = async () => {
     try {
       setLoading(true);
+      setError(null);
       const res = await pbAnnouncements.getAll();
-      setAnnouncements((res?.items || []).map((ann: any) => ({
+      setAnnouncements((res?.items || []).map((ann: PBAnnouncement) => ({
         id: ann.id,
         title: ann.title || 'Untitled Ad',
         image: ann.image || '',
@@ -45,7 +48,8 @@ export default function AdminAnnouncementsPage() {
         imageUrl: pbAnnouncements.getFileUrl(ann),
       })));
     } catch (err: any) {
-      console.error(err);
+      console.error('[AdminAnnouncementsPage] Failed to load announcements:', err);
+      setError(err?.message || 'Failed to load popup announcements from server.');
     } finally {
       setLoading(false);
     }
@@ -63,6 +67,7 @@ export default function AdminAnnouncementsPage() {
     setEndsAt('');
     setSelectedFile(null);
     setImagePreview(null);
+    setRemoveImage(false);
     setError(null);
     setSuccess(null);
     setIsModalOpen(true);
@@ -82,6 +87,7 @@ export default function AdminAnnouncementsPage() {
     setEndsAt(ann.endsAt);
     setSelectedFile(null);
     setImagePreview(ann.imageUrl || null);
+    setRemoveImage(false);
     setError(null);
     setSuccess(null);
     setIsModalOpen(true);
@@ -91,12 +97,19 @@ export default function AdminAnnouncementsPage() {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       setSelectedFile(file);
+      setRemoveImage(false);
       const reader = new FileReader();
       reader.onloadend = () => {
         setImagePreview(reader.result as string);
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const handleClearImage = () => {
+    setSelectedFile(null);
+    setImagePreview(null);
+    setRemoveImage(true);
   };
 
   const handleToggleActive = async (ann: Announcement) => {
@@ -133,11 +146,14 @@ export default function AdminAnnouncementsPage() {
     formData.append('title', title);
     formData.append('link', link);
     formData.append('isActive', editingAnnouncement ? String(editingAnnouncement.isActive) : 'true');
+    formData.append('removeImage', String(removeImage));
+
     if (endsAt) {
-      formData.append('endsAt', new Date(endsAt).toISOString());
+      formData.append('endsAt', endsAt);
     } else {
       formData.append('endsAt', '');
     }
+
     if (selectedFile) {
       formData.append('image', selectedFile);
     }
@@ -259,6 +275,7 @@ export default function AdminAnnouncementsPage() {
         onClose={() => setIsModalOpen(false)}
         onSubmit={handleSubmit}
         handleFileChange={handleFileChange}
+        onClearImage={handleClearImage}
       />
     </div>
   );

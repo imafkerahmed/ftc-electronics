@@ -176,6 +176,8 @@ export default function GeneralSettingsPage() {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     const img = new Image();
+
+    img.onerror = () => showToast('Failed to render the QR code image.', 'error');
     img.onload = () => {
       canvas.width = 1000;
       canvas.height = 1000;
@@ -189,13 +191,21 @@ export default function GeneralSettingsPage() {
         downloadLink.href = pngFile;
         downloadLink.click();
       }
+      URL.revokeObjectURL(objectUrl);
     };
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+
+    const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const objectUrl = URL.createObjectURL(blob);
+    img.src = objectUrl;
   };
 
-  const copyConnectUrl = () => {
-    navigator.clipboard.writeText(connectPageUrl);
-    showToast('Copied digital card URL to clipboard!');
+  const copyConnectUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(connectPageUrl);
+      showToast('Copied digital card URL to clipboard!');
+    } catch {
+      showToast('Failed to copy the URL. Copy it manually.', 'error');
+    }
   };
 
   return (
@@ -552,7 +562,7 @@ export default function GeneralSettingsPage() {
                   </div>
                 </div>
                 <Link
-                  href="/connect"
+                  href="/contact"
                   target="_blank"
                   className="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-600 font-medium transition-colors"
                 >
@@ -568,7 +578,7 @@ export default function GeneralSettingsPage() {
                     value={connectPageUrl}
                     size={135}
                     level="H"
-                    includeMargin={true}
+                    marginSize={4}
                   />
                 </div>
 

@@ -82,9 +82,11 @@ export default function OrdersHistoryPage() {
       ) : (
         <div className="space-y-6">
           {orders.map((order) => {
-            const formattedDate = order.created
-              ? new Date(order.created).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-              : 'N/A';
+            const rawDate = order.created || order.created_at || order.updated || order.date;
+            const parsedDate = rawDate ? new Date(rawDate) : null;
+            const formattedDate = parsedDate && !isNaN(parsedDate.getTime())
+              ? parsedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+              : new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
             const total = typeof order.total === 'number'
               ? order.total
@@ -104,7 +106,7 @@ export default function OrdersHistoryPage() {
                   <div className="flex gap-6">
                     <div>
                       <span className="text-muted-foreground block uppercase font-medium">Order ID</span>
-                      <span className="text-foreground font-bold mt-0.5 block">#{order.order_number || order.id?.slice(-8).toUpperCase()}</span>
+                      <span className="text-foreground font-bold mt-0.5 block">#{order.orderId || order.order_number || order.id?.slice(-8).toUpperCase()}</span>
                     </div>
                     <div>
                       <span className="text-muted-foreground block uppercase font-medium">Date Placed</span>
@@ -123,19 +125,54 @@ export default function OrdersHistoryPage() {
                 </div>
 
                 {/* Items List */}
-                {items.length > 0 && (
-                  <div className="p-4 divide-y divide-border">
-                    {items.map((item, idx) => (
-                      <div key={idx} className="flex justify-between py-3 first:pt-0 last:pb-0 text-sm">
-                        <div>
-                          <h4 className="font-semibold text-foreground">{item.name || item.product_name || 'Product'}</h4>
-                          <p className="text-xs text-muted-foreground mt-0.5">Quantity: {item.qty || item.quantity || 1}</p>
-                        </div>
-                        <span className="font-bold text-foreground">Rs. {((item.price || item.unit_price || 0) * (item.qty || item.quantity || 1)).toLocaleString()}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {items.length > 0 && (() => {
+                  // Consolidate items with same productId or name
+                  const consolidated: any[] = [];
+                  for (const it of items) {
+                    const key = it.productId || it.product || it.id || it.name;
+                    const existing = consolidated.find((x) => (x.productId || x.product || x.id || x.name) === key);
+                    if (existing) {
+                      existing.quantity = (existing.quantity || existing.qty || 1) + (it.quantity || it.qty || 1);
+                    } else {
+                      consolidated.push({ ...it, quantity: it.quantity || it.qty || 1 });
+                    }
+                  }
+
+                  return (
+                    <div className="p-4 divide-y divide-border">
+                      {consolidated.map((item, idx) => {
+                        const serials: string[] = Array.isArray(item.assignedSerials)
+                          ? item.assignedSerials
+                          : Array.isArray(item.assignedUnits)
+                            ? item.assignedUnits.map((u: any) => u.serialNumber || u.barcode).filter(Boolean)
+                            : [];
+
+                        const qty = item.quantity || item.qty || 1;
+                        const itemPrice = item.price || item.unit_price || 0;
+
+                        return (
+                          <div key={idx} className="flex justify-between items-start py-3 first:pt-0 last:pb-0 text-sm">
+                            <div>
+                              <h4 className="font-semibold text-foreground">{item.name || item.product_name || 'Product'}</h4>
+                              <p className="text-xs text-muted-foreground mt-0.5">Quantity: {qty}</p>
+                              {serials.length > 0 && (
+                                <div className="mt-1.5 flex flex-wrap gap-1.5 items-center">
+                                  <span className="text-[11px] text-muted-foreground font-medium">Serial S/N:</span>
+                                  {serials.map((s, sIdx) => (
+                                    <span key={sIdx} className="bg-blue-500/10 text-blue-500 border border-blue-500/20 px-2 py-0.5 rounded text-[10px] font-mono font-bold">
+                                      {s}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            <span className="font-bold text-foreground">Rs. {(itemPrice * qty).toLocaleString()}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
 
                 {/* Tracking Footer */}
                 {order.tracking_number && (

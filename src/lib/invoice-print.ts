@@ -122,7 +122,7 @@ export function getInvoiceHtml(
           .doc-meta-line { font-size: 11px; color: #475569; margin-top: 3px; }
           
           .customer-section { margin-bottom: 24px; border-left: 2px solid #cbd5e1; padding-left: 12px; }
-          .section-label { font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b; tracking: 0.5px; }
+          .section-label { font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px; }
           .customer-name { font-size: 13px; font-weight: 700; color: #0f172a; margin-top: 2px; }
           .customer-detail { font-size: 11px; color: #475569; margin-top: 1px; }
 
@@ -165,6 +165,7 @@ export function getInvoiceHtml(
           <div class="doc-header-right">
             <div class="doc-type-title">${esc(docHeading)}</div>
             <div class="doc-meta-line">#${esc(data.docNumber)} | ${esc(data.date)}</div>
+            ${cfg.showDueDate && data.dueDate ? `<div class="doc-meta-line">Due: ${esc(data.dueDate)}</div>` : ''}
           </div>
         </div>
 
@@ -172,6 +173,7 @@ export function getInvoiceHtml(
           <div class="section-label">Billed To</div>
           <div class="customer-name">${esc(data.customerName || 'Walk-in Customer')}</div>
           ${data.customerCompany ? `<div class="customer-detail">${esc(data.customerCompany)}</div>` : ''}
+          ${data.customerPhone ? `<div class="customer-detail">Tel: ${esc(data.customerPhone)}</div>` : ''}
           ${data.customerAddress ? `<div class="customer-detail">${esc(data.customerAddress)}</div>` : ''}
         </div>
 
@@ -191,8 +193,10 @@ export function getInvoiceHtml(
 
         <div class="bottom-grid">
           <div>
+            ${data.paymentMethod ? `<div class="info-block"><div class="info-block-title">Payment Method</div><div class="info-block-body">${esc(data.paymentMethod)}</div></div>` : ''}
             ${cfg.bankDetailsText ? `<div class="info-block"><div class="info-block-title">Payment Info</div><div class="info-block-body">${esc(cfg.bankDetailsText)}</div></div>` : ''}
-            ${cfg.termsAndConditions ? `<div class="info-block"><div class="info-block-title">Notes</div><div class="info-block-body">${esc(cfg.termsAndConditions)}</div></div>` : ''}
+            ${data.notes ? `<div class="info-block"><div class="info-block-title">Notes / Terms</div><div class="info-block-body">${esc(data.notes)}</div></div>` : ''}
+            ${cfg.termsAndConditions ? `<div class="info-block"><div class="info-block-title">Terms &amp; Conditions</div><div class="info-block-body">${esc(cfg.termsAndConditions)}</div></div>` : ''}
           </div>
           <div>
             <table class="totals-table">
@@ -208,10 +212,15 @@ export function getInvoiceHtml(
         ${cfg.showSignatureBlock ? `<div class="signature-section"><div class="sig-box">Authorized Sign</div><div class="sig-box">Customer Sign</div></div>` : ''}
 
         <script>
-          window.onload = function() {
-            ${cfg.showQrCode ? `try { QRCode.toCanvas(document.getElementById('invoice-qr'), '${data.docNumber}', { width: 80, margin: 0 }); } catch(e) {}` : ''}
+          function initDoc() {
+            ${cfg.showQrCode ? `try { QRCode.toCanvas(document.getElementById('invoice-qr'), ${JSON.stringify(data.docNumber)}, { width: 80, margin: 0 }); } catch(e) {}` : ''}
             ${isPreview ? '' : 'setTimeout(function() { window.print(); }, 700);'}
-          };
+          }
+          if (document.readyState === 'complete') {
+            initDoc();
+          } else {
+            window.addEventListener('load', initDoc);
+          }
         </script>
       </body>
     </html>
@@ -268,7 +277,8 @@ export async function generateInvoicePdfBlob(
 ): Promise<Blob> {
   const html2pdfModule = await import('html2pdf.js');
   const html2pdf = html2pdfModule.default || html2pdfModule;
-  const html = getInvoiceHtml(rawCfg, data, false, title);
+  // Pass true for isPreview to suppress window.print() auto-print dialog
+  const html = getInvoiceHtml(rawCfg, data, true, title);
 
   const iframe = document.createElement('iframe');
   iframe.style.position = 'fixed';
@@ -289,25 +299,27 @@ export async function generateInvoicePdfBlob(
   iframeDoc.write(html);
   iframeDoc.close();
 
-  // Short delay to allow inline styles and images to settle in iframe context
-  await new Promise((resolve) => setTimeout(resolve, 250));
-
-  const originalGetComputedStyle = window.getComputedStyle;
-  try {
-    // Intercept computed styles to replace unsupported lab() / oklch() color spaces with a fallback hex color
-    window.getComputedStyle = function (el, pseudoElt) {
-      const style = originalGetComputedStyle(el, pseudoElt);
-      return new Proxy(style, {
-        get(target, prop) {
-          const val = Reflect.get(target, prop);
-          if (typeof val === 'string' && (val.includes('lab(') || val.includes('oklch('))) {
-            return '#ffffff';
-          }
-          return val;
-        }
-      });
+  // Wait for iframe load & fonts readiness instead of fragile fixed timeout
+  await new Promise<void>((resolve) => {
+    const win = iframe.contentWindow;
+    const checkReady = () => {
+      if (iframeDoc.fonts && iframeDoc.fonts.ready) {
+        iframeDoc.fonts.ready.then(() => resolve()).catch(() => resolve());
+      } else {
+        resolve();
+      }
     };
+    if (iframeDoc.readyState === 'complete') {
+      checkReady();
+    } else if (win) {
+      win.addEventListener('load', checkReady, { once: true });
+      setTimeout(checkReady, 1000);
+    } else {
+      resolve();
+    }
+  });
 
+  try {
     const filename = `${data.docNumber || 'Invoice'}.pdf`;
     const targetElement = iframeDoc.body;
     const opt = {
@@ -327,7 +339,6 @@ export async function generateInvoicePdfBlob(
     const pdfBlob: Blob = await worker.output('blob');
     return pdfBlob;
   } finally {
-    window.getComputedStyle = originalGetComputedStyle;
     if (document.body.contains(iframe)) {
       document.body.removeChild(iframe);
     }
@@ -347,6 +358,6 @@ export async function downloadInvoicePdf(
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 

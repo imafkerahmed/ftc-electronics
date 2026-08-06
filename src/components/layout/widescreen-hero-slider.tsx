@@ -28,7 +28,7 @@ const slides: Slide[] = [
     description:
       "M3 Max Pro speed meets a breathtaking 240Hz OLED color-accurate display.",
     price: "$1,899",
-    image: "/assets/hero-laptop.png",
+    image: "/assets/hero-laptop.webp",
     link: "/products?category=laptops",
     gradient: "from-slate-950 via-slate-900 to-zinc-900",
     glowColor: "rgba(59, 130, 246, 0.12)", // Blue
@@ -41,7 +41,7 @@ const slides: Slide[] = [
     description:
       "Experience pure hybrid noise-cancelling acoustics designed for ultimate focus.",
     price: "$349",
-    image: "/assets/hero-headphones.png",
+    image: "/assets/hero-headphones.webp",
     link: "/products?category=audio",
     gradient: "from-zinc-950 via-neutral-900 to-slate-950",
     glowColor: "rgba(139, 92, 246, 0.12)", // Violet
@@ -54,7 +54,7 @@ const slides: Slide[] = [
     description:
       "Custom gasket mounted chassis combined with ultra-responsive transparent switches.",
     price: "$189",
-    image: "/assets/hero-keyboard.png",
+    image: "/assets/hero-keyboard.webp",
     link: "/products?category=accessories",
     gradient: "from-neutral-950 via-zinc-900 to-neutral-900",
     glowColor: "rgba(245, 158, 11, 0.08)", // Amber
