@@ -131,8 +131,20 @@ export function SiteBrandingProvider({ children }: { children: React.ReactNode }
           city: genSettings?.location?.city || defaultBranding.location.city,
           googleMapsUrl: genSettings?.location?.googleMapsUrl || defaultBranding.location.googleMapsUrl,
         };
-        const logoUrl = persSettings?.logoUrl || '';
-        const darkLogoUrl = persSettings?.darkLogoUrl || '';
+        const basePbUrl = (process.env.NEXT_PUBLIC_POCKETBASE_URL || 'https://ftc-db.codix.site').replace(/\/+$/, '');
+
+        const logoUrl = persSettings?.logoUrl
+          ? (persSettings.logoUrl.startsWith('http') || persSettings.logoUrl.startsWith('/')
+              ? persSettings.logoUrl
+              : `${basePbUrl}/api/files/${persSettings.collectionId || persSettings.collectionName || 'personalization'}/${persSettings.id}/${persSettings.logoUrl}`)
+          : '/loader-logo.webp';
+
+        const darkLogoUrl = persSettings?.darkLogoUrl
+          ? (persSettings.darkLogoUrl.startsWith('http') || persSettings.darkLogoUrl.startsWith('/')
+              ? persSettings.darkLogoUrl
+              : `${basePbUrl}/api/files/${persSettings.collectionId || persSettings.collectionName || 'personalization'}/${persSettings.id}/${persSettings.darkLogoUrl}`)
+          : '';
+
         const faviconUrl = persSettings?.faviconUrl || '';
         const primaryColor = persSettings?.primaryColor || defaultBranding.primaryColor;
         const announcement = persSettings?.announcement || defaultBranding.announcement;

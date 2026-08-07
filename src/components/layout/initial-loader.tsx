@@ -91,19 +91,22 @@ export default function InitialLoader() {
             transition={{ type: "spring", stiffness: 85, damping: 20 }}
             className="flex items-center justify-center"
           >
-            {logoUrl && (
-              <Image
-                src={logoUrl}
-                alt={siteName || "FTC Electronics"}
-                width={480}
-                height={160}
-                priority
-                unoptimized={
-                  !logoUrl.startsWith("http") && !logoUrl.startsWith("/")
-                }
-                className="h-28 sm:h-44 lg:h-56 max-h-64 w-auto max-w-[85vw] object-contain drop-shadow-2xl"
-              />
-            )}
+            {(() => {
+              const activeLogo = logoUrl || "/loader-logo.webp";
+              return (
+                <Image
+                  src={activeLogo}
+                  alt={siteName || "FTC Electronics"}
+                  width={480}
+                  height={160}
+                  priority
+                  unoptimized={
+                    !activeLogo.startsWith("http") && !activeLogo.startsWith("/")
+                  }
+                  className="h-28 sm:h-44 lg:h-56 max-h-64 w-auto max-w-[85vw] object-contain drop-shadow-2xl"
+                />
+              );
+            })()}
           </motion.div>
         </motion.div>
       )}

@@ -549,14 +549,46 @@ export const ROLE_PERMISSIONS: Record<AdminRole, AdminPermissions> = {
 // so the storefront doesn't need to know about PocketBase internals.
 
 /**
+ * Helper to construct clean PocketBase file URLs.
+ * Handles full URLs, relative paths, missing collectionId, and trailing slashes in pbUrl.
+ */
+export function getPbFileUrl(
+  record: { collectionId?: string; collectionName?: string; id?: string } | null | undefined,
+  filename?: string | null,
+  fallback: string = ""
+): string {
+  if (!filename) return fallback;
+  if (
+    filename.startsWith("http://") ||
+    filename.startsWith("https://") ||
+    filename.startsWith("data:") ||
+    filename.startsWith("/")
+  ) {
+    return filename;
+  }
+  const rawBase = process.env.NEXT_PUBLIC_POCKETBASE_URL || "https://ftc-db.codix.site";
+  const base = rawBase.replace(/\/+$/, "");
+  const collection = record?.collectionId || record?.collectionName || "products";
+  const recId = record?.id || "";
+  if (!recId) return fallback;
+  return `${base}/api/files/${collection}/${recId}/${filename}`;
+}
+
+/**
  * Converts a PocketBase product record to the storefront Product type.
  * Handles image URL resolution via the PocketBase file API.
  */
 export function pbProductToProduct(record: PBProduct, pbUrl: string): Product {
-  const imageUrls = (record.images || []).map(
-    (filename) =>
-      `${pbUrl}/api/files/${record.collectionId}/${record.id}/${filename}`,
-  );
+  const rawImages = Array.isArray(record.images)
+    ? record.images
+    : typeof record.images === "string" && record.images
+    ? [record.images]
+    : [];
+
+  const imageUrls = rawImages
+    .filter(Boolean)
+    .map((img) => getPbFileUrl(record, img))
+    .filter(Boolean);
 
   return {
     id: record.id,
@@ -571,7 +603,7 @@ export function pbProductToProduct(record: PBProduct, pbUrl: string): Product {
         ? imageUrls
         : [
             "https://images.unsplash.com/photo-1531403009284-440f080d1e12?q=80&w=600&auto=format&fit=crop",
-          ], // generic placeholder
+          ],
     category: record.expand?.category?.name || record.category,
     brand: record.expand?.brand?.name || record.brand,
     specs: record.specs || {},
@@ -584,13 +616,7 @@ export function pbProductToProduct(record: PBProduct, pbUrl: string): Product {
     createdAt: record.created,
     badges: record.badges || [],
     status: record.status || "draft",
-    bannerImage: record.bannerImage
-      ? record.bannerImage.startsWith("http://") ||
-        record.bannerImage.startsWith("https://") ||
-        record.bannerImage.startsWith("data:")
-        ? record.bannerImage
-        : `${pbUrl}/api/files/${record.collectionId}/${record.id}/${record.bannerImage}`
-      : undefined,
+    bannerImage: getPbFileUrl(record, record.bannerImage) || undefined,
     bannerText: record.bannerText || undefined,
   };
 }
@@ -602,9 +628,7 @@ export function pbCategoryToCategory(
   record: PBCategory,
   pbUrl: string,
 ): Category {
-  const imageUrl = record.image
-    ? `${pbUrl}/api/files/${record.collectionId}/${record.id}/${record.image}`
-    : undefined;
+  const imageUrl = getPbFileUrl(record, record.image) || undefined;
 
   return {
     id: record.id,

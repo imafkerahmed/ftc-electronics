@@ -15,6 +15,7 @@ import HomePageLoaderWrapper from "@/components/layout/home-page-loader-wrapper"
 import ImageParallaxBanner from "@/components/layout/image-parallax-banner";
 import LazyScrollSection from "@/components/layout/lazy-scroll-section";
 import ProductCarouselBlock from "./_components/product-carousel-block";
+import { getPbFileUrl } from "@/types/admin";
 
 // ISR: cache homepage for 60 seconds — huge speed win for repeat visitors.
 // Use /api/revalidate to bust cache after admin content updates.
@@ -143,7 +144,7 @@ export default async function StoreHomePage() {
     .filter((b: any) => b.show_in_strip === true && b.logo)
     .map((b: any) => ({
       name: b.name,
-      src: `${pbUrl}/api/files/${b.collectionId}/${b.id}/${b.logo}`,
+      src: getPbFileUrl(b, b.logo),
       width: 110,
       height: 44,
     }));
