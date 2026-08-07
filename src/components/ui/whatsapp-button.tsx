@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { useSiteBranding } from "@/components/providers/site-branding-provider";
 
+import { useUiStore } from "@/store/use-ui-store";
+
 interface WhatsAppButtonProps {
   phoneNumber?: string;
   message?: string;
@@ -15,6 +17,7 @@ export default function WhatsAppButton({
   const [mounted, setMounted] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
   const branding = useSiteBranding();
+  const isStickyBuyBarVisible = useUiStore((state) => state.isStickyBuyBarVisible);
 
   useEffect(() => {
     setMounted(true);
@@ -32,15 +35,17 @@ export default function WhatsAppButton({
     phoneNumber ||
     branding?.contactInfo?.whatsapp ||
     branding?.contactInfo?.phone ||
-    "+94 77 123 4567";
+    "+94 76 666 4566";
 
   const cleanPhone = rawPhone.replace(/[^0-9]/g, "");
   const encodedMessage = encodeURIComponent(message);
   const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodedMessage}`;
 
+  const bottomClass = isStickyBuyBarVisible ? "bottom-[84px]" : "bottom-6";
+
   return (
     <div
-      className="fixed bottom-6 right-6 z-50 flex items-center group pointer-events-auto"
+      className={`fixed ${bottomClass} right-6 z-50 flex items-center group pointer-events-auto transition-all duration-300 ease-out`}
       onMouseEnter={() => setShowTooltip(true)}
       onMouseLeave={() => setShowTooltip(false)}
     >

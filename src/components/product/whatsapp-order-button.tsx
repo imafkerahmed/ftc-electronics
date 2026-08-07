@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
+import { useSiteBranding } from '@/components/providers/site-branding-provider';
 
 interface WhatsAppOrderButtonProps {
   productName: string;
@@ -12,14 +13,22 @@ interface WhatsAppOrderButtonProps {
 export default function WhatsAppOrderButton({
   productName,
   productPrice,
-  phoneNumber = '94771234567', // Standard Sri Lankan mobile format (94 for LK country code)
+  phoneNumber,
 }: WhatsAppOrderButtonProps) {
   const [mounted, setMounted] = useState(false);
+  const branding = useSiteBranding();
 
   useEffect(() => {
-     
     setMounted(true);
   }, []);
+
+  const rawPhone =
+    phoneNumber ||
+    branding?.contactInfo?.whatsapp ||
+    branding?.contactInfo?.phone ||
+    '94766664566';
+
+  const targetPhone = rawPhone.replace(/[^0-9]/g, '');
 
   if (!mounted) {
     return (
@@ -36,7 +45,7 @@ export default function WhatsAppOrderButton({
   const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
   const message = `Hi FTC Electronics! I'm interested in ordering the "${productName}" priced at ${productPrice}. Here is the product link: ${currentUrl}`;
   const encodedMessage = encodeURIComponent(message);
-  const whatsappUrl = `https://wa.me/${phoneNumber.replace(/[^0-9]/g, '')}?text=${encodedMessage}`;
+  const whatsappUrl = `https://wa.me/${targetPhone}?text=${encodedMessage}`;
 
   return (
     <a

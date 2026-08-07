@@ -5,6 +5,7 @@ interface UiStore {
   isMobileNavOpen: boolean;
   isSearchOpen: boolean;
   hasIntroPlayed: boolean;
+  isStickyBuyBarVisible: boolean;
   setCartDrawerOpen: (isOpen: boolean) => void;
   toggleCartDrawer: () => void;
   setMobileNavOpen: (isOpen: boolean) => void;
@@ -12,6 +13,7 @@ interface UiStore {
   setSearchOpen: (isOpen: boolean) => void;
   toggleSearch: () => void;
   setIntroPlayed: (played: boolean) => void;
+  setStickyBuyBarVisible: (visible: boolean) => void;
   closeAll: () => void;
 }
 
@@ -20,6 +22,7 @@ export const useUiStore = create<UiStore>((set) => ({
   isMobileNavOpen: false,
   isSearchOpen: false,
   hasIntroPlayed: false,
+  isStickyBuyBarVisible: false,
 
   setCartDrawerOpen: (isOpen) => set({ isCartDrawerOpen: isOpen }),
   toggleCartDrawer: () => set((state) => ({ isCartDrawerOpen: !state.isCartDrawerOpen })),
@@ -31,6 +34,7 @@ export const useUiStore = create<UiStore>((set) => ({
   toggleSearch: () => set((state) => ({ isSearchOpen: !state.isSearchOpen })),
 
   setIntroPlayed: (played) => set({ hasIntroPlayed: played }),
+  setStickyBuyBarVisible: (visible) => set({ isStickyBuyBarVisible: visible }),
 
   closeAll: () =>
     set({

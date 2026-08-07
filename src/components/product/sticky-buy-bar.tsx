@@ -7,6 +7,8 @@ import { Product } from '@/types/product';
 import { formatPrice } from '@/lib/utils';
 import { useCart } from '@/hooks/use-cart';
 
+import { useUiStore } from '@/store/use-ui-store';
+
 interface StickyBuyBarProps {
   product: Product;
 }
@@ -15,20 +17,22 @@ export default function StickyBuyBar({ product }: StickyBuyBarProps) {
   const [isVisible, setIsVisible] = useState(false);
   const [addedAnimation, setAddedAnimation] = useState(false);
   const { addItem } = useCart();
+  const setStickyBuyBarVisible = useUiStore((state) => state.setStickyBuyBarVisible);
 
   useEffect(() => {
     const handleScroll = () => {
-      // Show when user scrolls past 450px
-      if (window.scrollY > 450) {
-        setIsVisible(true);
-      } else {
-        setIsVisible(false);
-      }
+      const visible = window.scrollY > 450;
+      setIsVisible(visible);
+      setStickyBuyBarVisible(visible);
     };
 
+    handleScroll();
     window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      setStickyBuyBarVisible(false);
+    };
+  }, [setStickyBuyBarVisible]);
 
   if (!isVisible) return null;
 
@@ -43,7 +47,7 @@ export default function StickyBuyBar({ product }: StickyBuyBarProps) {
   };
 
   return (
-    <div className="fixed bottom-0 inset-x-0 z-40 bg-card/95 backdrop-blur-md border-t border-border p-3 sm:p-4 shadow-2xl transition-all duration-300 animate-in slide-in-from-bottom">
+    <div className="fixed bottom-0 inset-x-0 z-40 bg-card border-t border-border p-3 sm:p-4 shadow-2xl transition-all duration-300 animate-in slide-in-from-bottom">
       <div className="mx-auto max-w-7xl px-4 flex items-center justify-between gap-4">
         {/* Left: Thumbnail & Title */}
         <div className="flex items-center gap-3 min-w-0">
