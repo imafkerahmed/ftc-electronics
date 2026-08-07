@@ -275,8 +275,11 @@ export default function Navbar() {
   return (
     <>
       {/* Dynamic Announcement Bar */}
-      {showBanner && (
-        <div className="bg-gradient-to-r from-blue-700 via-indigo-600 to-blue-700 text-white text-xs font-semibold py-2 px-4 transition-all duration-300 relative z-50 shadow-sm border-b border-white/10">
+      {showBanner && announcement?.show !== false && (
+        <div
+          style={announcement?.bgColor ? { backgroundColor: announcement.bgColor } : undefined}
+          className="bg-gradient-to-r from-blue-700 via-indigo-600 to-blue-700 text-white text-xs font-semibold py-2 px-4 transition-all duration-300 relative z-50 shadow-sm border-b border-white/10"
+        >
           <div className="max-w-7xl mx-auto flex items-center justify-between">
             <div className="flex-1 text-center truncate px-4">
               <AnimatePresence mode="wait">

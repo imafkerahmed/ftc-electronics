@@ -17,7 +17,9 @@ export default function AnnouncementModal() {
   const pathname = usePathname();
 
   useEffect(() => {
-    const isMounted = true;
+    let isMounted = true;
+    let timer: NodeJS.Timeout;
+
     async function checkAnnouncement() {
       try {
         const activeList = await pbAnnouncements.getActive();
@@ -31,10 +33,12 @@ export default function AnnouncementModal() {
             setAnnouncement(activeAd);
             setImageUrl(pbAnnouncements.getFileUrl(activeAd));
             
-            // If we are on the homepage and the intro preloader is playing, wait for it to finish
             const isHomepage = pathname === '/';
             if (isHomepage && !hasIntroPlayed) {
-              setIsOpen(false);
+              // Wait for initial page loader to finish (~2 seconds) then show modal
+              timer = setTimeout(() => {
+                if (isMounted) setIsOpen(true);
+              }, 2100);
             } else {
               setIsOpen(true);
             }
@@ -46,6 +50,11 @@ export default function AnnouncementModal() {
     }
 
     void checkAnnouncement();
+
+    return () => {
+      isMounted = false;
+      if (timer) clearTimeout(timer);
+    };
   }, [hasIntroPlayed, pathname]);
 
   const handleClose = () => {

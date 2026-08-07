@@ -4,10 +4,13 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "motion/react";
 
+import { useUiStore } from "@/store/use-ui-store";
+
 export default function InitialLoader() {
   const [isVisible, setIsVisible] = useState(true);
   const [minTimerDone, setMinTimerDone] = useState(false);
   const [windowLoaded, setWindowLoaded] = useState(false);
+  const setIntroPlayed = useUiStore((state) => state.setIntroPlayed);
 
   // Lock body scroll while loader is active
   useEffect(() => {
@@ -38,9 +41,10 @@ export default function InitialLoader() {
   useEffect(() => {
     if (minTimerDone && windowLoaded) {
       setIsVisible(false);
+      setIntroPlayed(true);
       document.body.style.overflow = "";
     }
-  }, [minTimerDone, windowLoaded]);
+  }, [minTimerDone, windowLoaded, setIntroPlayed]);
 
   // Cleanup body overflow on unmount
   useEffect(() => {
