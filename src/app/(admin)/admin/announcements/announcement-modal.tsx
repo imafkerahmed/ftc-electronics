@@ -53,20 +53,25 @@ export function AnnouncementModal({
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   // Focus management: Trap focus inside modal & handle Escape key
   useEffect(() => {
     if (!isOpen) return;
 
     previousFocusRef.current = document.activeElement as HTMLElement;
-    setTimeout(() => {
+    const focusTimer = setTimeout(() => {
       titleInputRef.current?.focus();
     }, 50);
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -91,10 +96,11 @@ export function AnnouncementModal({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => {
+      clearTimeout(focusTimer);
       window.removeEventListener('keydown', handleKeyDown);
       previousFocusRef.current?.focus();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

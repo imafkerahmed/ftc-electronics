@@ -125,7 +125,7 @@ export default function ProductCard({ product }: ProductCardProps) {
 
         {/* Hover Add to Cart Button (Positioned over image stage outside Link) */}
         {!isOutOfStock && (
-          <div className="absolute top-[calc(60%-1.5rem)] inset-x-5 z-20 opacity-0 translate-y-3 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 ease-out pointer-events-auto">
+          <div className="absolute top-[calc(60%-1.5rem)] inset-x-5 z-20 opacity-0 translate-y-3 group-hover:opacity-100 group-hover:translate-y-0 focus-within:opacity-100 transition-all duration-300 ease-out pointer-events-none group-hover:pointer-events-auto focus-within:pointer-events-auto">
             <button
               type="button"
               onClick={handleAddToCart}

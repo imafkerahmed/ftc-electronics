@@ -5,8 +5,37 @@ import { Package, Truck, CheckCircle2, Clock, Loader2, AlertCircle } from 'lucid
 import { Button } from '@/components/ui/button';
 import { getCustomerOrdersAction } from '@/app/actions/auth';
 
+interface CustomerOrderItem {
+  id?: string;
+  productId?: string;
+  product?: string;
+  name?: string;
+  product_name?: string;
+  quantity?: number;
+  qty?: number;
+  price?: number;
+  unit_price?: number;
+  assignedSerials?: string[];
+  assignedUnits?: Array<{ serialNumber?: string; barcode?: string }>;
+}
+
+interface CustomerOrder {
+  id: string;
+  orderId?: string;
+  order_number?: string;
+  created?: string;
+  created_at?: string;
+  updated?: string;
+  date?: string;
+  total?: number;
+  totalAmount?: number;
+  status?: string;
+  items?: CustomerOrderItem[];
+  tracking_number?: string;
+}
+
 export default function OrdersHistoryPage() {
-  const [orders, setOrders] = useState<any[]>([]);
+  const [orders, setOrders] = useState<CustomerOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,8 +50,8 @@ export default function OrdersHistoryPage() {
           // Show error inline — do NOT redirect, avoids crash loop
           setError(res.error || 'Could not load orders. Please try again.');
         }
-      } catch (err: any) {
-        setError(err?.message || 'An unexpected error occurred.');
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'An unexpected error occurred.');
       } finally {
         setLoading(false);
       }
@@ -82,11 +111,14 @@ export default function OrdersHistoryPage() {
       ) : (
         <div className="space-y-6">
           {orders.map((order) => {
-            const rawDate = order.created || order.created_at || order.updated || order.date;
-            const parsedDate = rawDate ? new Date(rawDate) : null;
-            const formattedDate = parsedDate && !isNaN(parsedDate.getTime())
+            const parsedDate = [order.created, order.created_at, order.updated, order.date]
+              .filter((val): val is string => val != null)
+              .map((val) => new Date(val))
+              .find((d) => !Number.isNaN(d.getTime()));
+
+            const formattedDate = parsedDate
               ? parsedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-              : new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+              : 'Date unavailable';
 
             const total = typeof order.total === 'number'
               ? order.total
@@ -94,7 +126,7 @@ export default function OrdersHistoryPage() {
                 ? order.totalAmount
                 : 0;
 
-            const items: any[] = Array.isArray(order.items) ? order.items : [];
+            const items: CustomerOrderItem[] = Array.isArray(order.items) ? order.items : [];
 
             return (
               <div
@@ -126,13 +158,22 @@ export default function OrdersHistoryPage() {
 
                 {/* Items List */}
                 {items.length > 0 && (() => {
-                  // Consolidate items with same productId or name
-                  const consolidated: any[] = [];
+                  // Consolidate items with same productId or name and aggregate serial numbers
+                  const consolidated: CustomerOrderItem[] = [];
                   for (const it of items) {
                     const key = it.productId || it.product || it.id || it.name;
                     const existing = consolidated.find((x) => (x.productId || x.product || x.id || x.name) === key);
                     if (existing) {
                       existing.quantity = (existing.quantity || existing.qty || 1) + (it.quantity || it.qty || 1);
+                      // Aggregate and deduplicate assignedSerials
+                      const existingSerials = Array.isArray(existing.assignedSerials) ? existing.assignedSerials : [];
+                      const newSerials = Array.isArray(it.assignedSerials) ? it.assignedSerials : [];
+                      existing.assignedSerials = Array.from(new Set([...existingSerials, ...newSerials]));
+
+                      // Aggregate assignedUnits
+                      const existingUnits = Array.isArray(existing.assignedUnits) ? existing.assignedUnits : [];
+                      const newUnits = Array.isArray(it.assignedUnits) ? it.assignedUnits : [];
+                      existing.assignedUnits = [...existingUnits, ...newUnits];
                     } else {
                       consolidated.push({ ...it, quantity: it.quantity || it.qty || 1 });
                     }
@@ -141,10 +182,10 @@ export default function OrdersHistoryPage() {
                   return (
                     <div className="p-4 divide-y divide-border">
                       {consolidated.map((item, idx) => {
-                        const serials: string[] = Array.isArray(item.assignedSerials)
+                        const serials: string[] = Array.isArray(item.assignedSerials) && item.assignedSerials.length > 0
                           ? item.assignedSerials
                           : Array.isArray(item.assignedUnits)
-                            ? item.assignedUnits.map((u: any) => u.serialNumber || u.barcode).filter(Boolean)
+                            ? item.assignedUnits.map((u) => u.serialNumber || u.barcode).filter((s): s is string => Boolean(s))
                             : [];
 
                         const qty = item.quantity || item.qty || 1;
@@ -184,7 +225,7 @@ export default function OrdersHistoryPage() {
                       variant="ghost"
                       size="sm"
                       onClick={() => {
-                        window.open(`https://www.17track.net/en/track?nums=${encodeURIComponent(order.tracking_number)}`, '_blank', 'noopener,noreferrer');
+                        window.open(`https://www.17track.net/en/track?nums=${encodeURIComponent(order.tracking_number!)}`, '_blank', 'noopener,noreferrer');
                       }}
                       className="h-8 text-muted-foreground hover:text-foreground hover:bg-muted border border-border"
                     >

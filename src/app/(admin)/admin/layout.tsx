@@ -90,11 +90,29 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           setPendingOrdersCount(res.notifications.filter((n) => n.type === 'order').length);
           setNewInquiriesCount(res.notifications.filter((n) => n.type === 'inquiry').length);
         }
-      } catch {}
+      } catch (err) {
+        console.error('[AdminLayout] Failed to load notifications:', err);
+      }
     }
-    void loadAlerts();
-    const interval = setInterval(() => void loadAlerts(), 30000);
-    return () => clearInterval(interval);
+
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (interval) return;
+      void loadAlerts();
+      interval = setInterval(() => void loadAlerts(), 30000);
+    };
+    const stop = () => {
+      if (interval) clearInterval(interval);
+      interval = null;
+    };
+    const onVisibility = () => (document.hidden ? stop() : start());
+
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      stop();
+    };
   }, []);
 
   const handleLogout = async () => {
@@ -201,8 +219,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
               // Single link
               const active = isActive(item.href!);
-              const hasOrderAlert = item.name === 'Orders' && pendingOrdersCount > 0;
-              const hasInquiryAlert = item.name === 'Customer Inquiries' && newInquiriesCount > 0;
+              const hasOrderAlert = item.href === '/admin/orders' && pendingOrdersCount > 0;
+              const hasInquiryAlert = item.href === '/admin/inquiries' && newInquiriesCount > 0;
               const hasAlert = hasOrderAlert || hasInquiryAlert;
 
               return (

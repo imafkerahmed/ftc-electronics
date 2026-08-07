@@ -37,6 +37,17 @@ export default function AdminInquiriesPage() {
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [selectedInquiry, setSelectedInquiry] = useState<PBContactInquiry | null>(null);
   const [adminNotesInput, setAdminNotesInput] = useState('');
+
+  useEffect(() => {
+    if (!selectedInquiry) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedInquiry(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedInquiry]);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -115,26 +126,31 @@ export default function AdminInquiriesPage() {
   const resolvedCount = inquiries.filter((i) => i.status === 'resolved').length;
 
   const exportCSV = () => {
+    const sanitize = (v: string) => {
+      const s = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+      return `"${s.replace(/"/g, '""')}"`;
+    };
     const headers = ['ID', 'Date', 'Name', 'Email', 'Phone', 'Message', 'Status', 'Notes'];
     const rows = filteredInquiries.map((i) => [
       i.id,
       new Date(i.created).toLocaleString('en-US', { timeZone: 'Asia/Colombo' }),
-      `"${i.name.replace(/"/g, '""')}"`,
-      `"${i.email.replace(/"/g, '""')}"`,
-      `"${(i.phone || '').replace(/"/g, '""')}"`,
-      `"${i.message.replace(/"/g, '""')}"`,
+      sanitize(i.name),
+      sanitize(i.email),
+      sanitize(i.phone || ''),
+      sanitize(i.message),
       i.status,
-      `"${(i.notes || '').replace(/"/g, '""')}"`,
+      sanitize(i.notes || ''),
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const csvContent = [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+    const blobUrl = URL.createObjectURL(new Blob([csvContent], { type: 'text/csv;charset=utf-8;' }));
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
+    link.setAttribute('href', blobUrl);
     link.setAttribute('download', `customer_inquiries_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(blobUrl);
   };
 
   const openDetailsModal = (inquiry: PBContactInquiry) => {
@@ -216,110 +232,100 @@ export default function AdminInquiriesPage() {
         </div>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row gap-4 justify-between items-stretch sm:items-center bg-card p-4 rounded-2xl border border-border shadow-sm">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+      {/* Filter & Search Bar */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-card p-4 rounded-2xl border border-border">
+        <div className="relative w-full sm:w-80">
+          <Search className="h-4 w-4 absolute left-3 top-3 text-muted-foreground" />
           <Input
-            type="text"
-            placeholder="Search by name, email, phone or message content..."
+            placeholder="Search by name, email, phone or message..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 text-xs"
+            className="pl-9 text-xs h-10 rounded-xl bg-background"
           />
         </div>
 
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-          <span className="text-xs text-muted-foreground font-semibold mr-1 flex items-center gap-1">
-            <Filter className="h-3.5 w-3.5" /> Filter:
+        <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto text-xs">
+          <span className="text-muted-foreground font-semibold flex items-center gap-1 shrink-0">
+            <Filter className="h-3.5 w-3.5" /> Status:
           </span>
-          {[
-            { id: 'all', label: 'All' },
-            { id: 'new', label: 'New' },
-            { id: 'in-progress', label: 'In Progress' },
-            { id: 'resolved', label: 'Resolved' },
-          ].map((tab) => (
+          {['all', 'new', 'in-progress', 'resolved'].map((st) => (
             <button
-              key={tab.id}
-              onClick={() => setSelectedStatus(tab.id)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                selectedStatus === tab.id
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+              key={st}
+              onClick={() => setSelectedStatus(st)}
+              className={`px-3 py-1.5 rounded-xl font-semibold capitalize transition-all shrink-0 cursor-pointer ${
+                selectedStatus === st
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
               }`}
             >
-              {tab.label}
+              {st}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Main Table */}
-      <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
+      {/* Table Container */}
+      <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
         {loading ? (
-          <div className="p-12 text-center space-y-3">
+          <div className="p-16 text-center space-y-3">
             <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto" />
-            <p className="text-xs text-muted-foreground">Loading customer inquiries...</p>
+            <p className="text-xs text-muted-foreground">Loading inquiries database...</p>
           </div>
         ) : filteredInquiries.length === 0 ? (
-          <div className="p-12 text-center space-y-3">
-            <MessageSquare className="h-10 w-10 text-muted-foreground/40 mx-auto" />
-            <h3 className="text-sm font-bold">No Inquiries Found</h3>
-            <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-              {searchQuery || selectedStatus !== 'all'
-                ? 'No messages match your search filter criteria.'
-                : 'Customer inquiries submitted via the website contact form will appear here automatically.'}
-            </p>
+          <div className="p-16 text-center space-y-3">
+            <MessageSquare className="h-10 w-10 text-muted-foreground/30 mx-auto" />
+            <p className="text-sm font-semibold text-foreground">No inquiries found</p>
+            <p className="text-xs text-muted-foreground">Try adjusting your search or status filter.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-border bg-muted/30 text-muted-foreground font-bold uppercase tracking-wider">
-                  <th className="py-3 px-4">Date &amp; Time</th>
-                  <th className="py-3 px-4">Customer Details</th>
-                  <th className="py-3 px-4">Message Snippet</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
+            <table className="w-full text-left text-xs">
+              <thead className="bg-muted/40 text-muted-foreground border-b border-border uppercase text-[10px] font-bold tracking-wider">
+                <tr>
+                  <th className="py-3.5 px-4">Customer</th>
+                  <th className="py-3.5 px-4">Contact</th>
+                  <th className="py-3.5 px-4">Message Snippet</th>
+                  <th className="py-3.5 px-4">Date</th>
+                  <th className="py-3.5 px-4">Status</th>
+                  <th className="py-3.5 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {filteredInquiries.map((inquiry) => (
-                  <tr key={inquiry.id} className="hover:bg-muted/20 transition-colors group">
-                    <td className="py-3.5 px-4 whitespace-nowrap text-muted-foreground">
-                      <div className="font-semibold text-foreground">
-                        {new Date(inquiry.created).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })}
-                      </div>
-                      <div className="text-[11px]">
-                        {new Date(inquiry.created).toLocaleTimeString('en-US', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </div>
-                    </td>
-
+                  <tr key={inquiry.id} className="hover:bg-muted/20 transition-colors">
                     <td className="py-3.5 px-4">
                       <div className="font-bold text-foreground">{inquiry.name}</div>
-                      <div className="text-blue-500 hover:underline">
-                        <a href={`mailto:${inquiry.email}`}>{inquiry.email}</a>
+                    </td>
+
+                    <td className="py-3.5 px-4 space-y-0.5">
+                      <div className="font-mono text-foreground/90">
+                        <a href={`mailto:${encodeURIComponent(inquiry.email)}`} className="hover:underline">
+                          {inquiry.email}
+                        </a>
                       </div>
                       {inquiry.phone && (
-                        <div className="text-muted-foreground text-[11px] mt-0.5">Phone: {inquiry.phone}</div>
+                        <div className="text-muted-foreground text-[11px]">{inquiry.phone}</div>
                       )}
                     </td>
 
                     <td className="py-3.5 px-4 max-w-xs">
-                      <p className="line-clamp-2 text-foreground/90 leading-relaxed">{inquiry.message}</p>
+                      <p className="line-clamp-2 text-muted-foreground text-[11px] leading-relaxed">
+                        {inquiry.message}
+                      </p>
+                    </td>
+
+                    <td className="py-3.5 px-4 text-muted-foreground whitespace-nowrap">
+                      {new Date(inquiry.created).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })}
                     </td>
 
                     <td className="py-3.5 px-4 whitespace-nowrap">
                       {inquiry.status === 'new' && (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-500 border border-sky-500/20 font-bold text-[11px]">
-                          <span className="h-1.5 w-1.5 rounded-full bg-sky-500 animate-ping" /> New
+                          <AlertCircle className="h-3 w-3" /> New
                         </span>
                       )}
                       {inquiry.status === 'in-progress' && (
@@ -346,7 +352,7 @@ export default function AdminInquiriesPage() {
                         </Button>
 
                         <a
-                          href={`mailto:${inquiry.email}?subject=RE: Inquiry to FTC Electronics&body=%0A%0A--- Original Inquiry ---%0AFrom: ${inquiry.name}%0AMessage: ${encodeURIComponent(inquiry.message)}`}
+                          href={`mailto:${encodeURIComponent(inquiry.email)}?subject=${encodeURIComponent('RE: Inquiry to FTC Electronics')}&body=${encodeURIComponent(`\n\n--- Original Inquiry ---\nFrom: ${inquiry.name}\nMessage: ${inquiry.message}`)}`}
                           target="_blank"
                           rel="noreferrer"
                         >
@@ -381,13 +387,23 @@ export default function AdminInquiriesPage() {
 
       {/* Details View Modal */}
       {selectedInquiry && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-card border border-border rounded-3xl max-w-2xl w-full p-6 sm:p-8 space-y-6 shadow-xl relative animate-in fade-in zoom-in-95 duration-200">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setSelectedInquiry(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="inquiry-dialog-title"
+            className="bg-card border border-border rounded-3xl max-w-2xl w-full p-6 sm:p-8 space-y-6 shadow-xl relative animate-in fade-in zoom-in-95 duration-200"
+          >
             {/* Modal Header */}
             <div className="flex items-start justify-between border-b border-border pb-4">
               <div>
                 <span className="text-xs font-bold text-blue-500 uppercase tracking-widest">Inquiry Details</span>
-                <h3 className="text-xl font-bold text-foreground mt-0.5">{selectedInquiry.name}</h3>
+                <h3 id="inquiry-dialog-title" className="text-xl font-bold text-foreground mt-0.5">{selectedInquiry.name}</h3>
                 <p className="text-xs text-muted-foreground">
                   Received on {new Date(selectedInquiry.created).toLocaleString('en-US', { timeZone: 'Asia/Colombo' })}
                 </p>
@@ -409,7 +425,7 @@ export default function AdminInquiriesPage() {
                   <Mail className="h-3.5 w-3.5 text-blue-500" /> Email Address
                 </span>
                 <div className="font-bold text-foreground">
-                  <a href={`mailto:${selectedInquiry.email}`} className="hover:underline">
+                  <a href={`mailto:${encodeURIComponent(selectedInquiry.email)}`} className="hover:underline">
                     {selectedInquiry.email}
                   </a>
                 </div>
@@ -492,7 +508,7 @@ export default function AdminInquiriesPage() {
               </div>
 
               <a
-                href={`mailto:${selectedInquiry.email}?subject=RE: Inquiry to FTC Electronics&body=%0A%0A--- Original Inquiry ---%0AFrom: ${selectedInquiry.name}%0AMessage: ${encodeURIComponent(selectedInquiry.message)}`}
+                href={`mailto:${encodeURIComponent(selectedInquiry.email)}?subject=${encodeURIComponent('RE: Inquiry to FTC Electronics')}&body=${encodeURIComponent(`\n\n--- Original Inquiry ---\nFrom: ${selectedInquiry.name}\nMessage: ${selectedInquiry.message}`)}`}
                 target="_blank"
                 rel="noreferrer"
               >

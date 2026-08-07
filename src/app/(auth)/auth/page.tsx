@@ -4,6 +4,7 @@ import React, { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { loginAction } from '@/app/actions/auth';
+import { isValidSafeRedirect } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -38,7 +39,8 @@ function AuthForm() {
       const result = await loginAction(formData);
 
       if (result.success) {
-        let destination = redirectParam;
+        const safeRedirect = isValidSafeRedirect(redirectParam) ? redirectParam : null;
+        let destination = safeRedirect;
         if (!destination) {
           if (result.role && result.role !== 'customer') {
             destination = '/admin/dashboard';
@@ -52,8 +54,8 @@ function AuthForm() {
       } else {
         setError(result.error || 'Invalid email or password.');
       }
-    } catch (err: any) {
-      setError(err.message || 'An error occurred during authentication.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An error occurred during authentication.');
     } finally {
       setLoading(false);
     }
@@ -83,12 +85,13 @@ function AuthForm() {
           )}
 
           <div className="space-y-1.5">
-            <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            <label htmlFor="auth-email" className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
               Email Address
             </label>
             <div className="relative">
               <Mail className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
+                id="auth-email"
                 type="email"
                 placeholder="name@example.com"
                 value={email}
@@ -102,7 +105,7 @@ function AuthForm() {
 
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              <label htmlFor="auth-password" className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                 Password
               </label>
               <Link
@@ -115,6 +118,7 @@ function AuthForm() {
             <div className="relative">
               <KeyRound className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
+                id="auth-password"
                 type={showPassword ? 'text' : 'password'}
                 placeholder="••••••••"
                 value={password}
@@ -125,6 +129,7 @@ function AuthForm() {
               />
               <button
                 type="button"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >

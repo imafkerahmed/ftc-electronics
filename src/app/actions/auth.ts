@@ -1107,7 +1107,8 @@ export async function getCurrentUserSessionAction(): Promise<{
         postalCode = parsed.postalCode || '';
         country = parsed.country || 'Sri Lanka';
       } catch {
-        // use raw string
+        // Stored value is malformed JSON — clear raw JSON text from addressLine1
+        addressLine1 = '';
       }
     }
 
@@ -1175,24 +1176,56 @@ export async function updateUserProfilePageAction(data: {
       return { success: false, error: 'Not authenticated.' };
     }
 
-    const fullName = `${data.firstName || ''} ${data.lastName || ''}`.trim() || data.name || 'Customer';
+    const existingNameParts = (record.name || '').trim().split(' ');
+    const existingFirstName = existingNameParts[0] || '';
+    const existingLastName = existingNameParts.slice(1).join(' ') || '';
 
-    const addressObject = {
-      addressLine1: data.addressLine1 || '',
-      addressLine2: data.addressLine2 || '',
-      city: data.city || '',
-      state: data.state || '',
-      postalCode: data.postalCode || '',
-      country: data.country || 'Sri Lanka',
-    };
-    const addressJson = JSON.stringify(addressObject);
+    const finalFirstName = data.firstName !== undefined ? data.firstName : (data.name ? data.name.split(' ')[0] : existingFirstName);
+    const finalLastName = data.lastName !== undefined ? data.lastName : (data.name ? data.name.split(' ').slice(1).join(' ') : existingLastName);
+    const fullName = `${finalFirstName} ${finalLastName}`.trim() || record.name || 'Customer';
+
+    const hasAddressInput =
+      data.addressLine1 !== undefined ||
+      data.addressLine2 !== undefined ||
+      data.city !== undefined ||
+      data.state !== undefined ||
+      data.postalCode !== undefined ||
+      data.country !== undefined ||
+      data.address !== undefined;
+
+    const payload: Record<string, string> = { name: fullName };
+    if (data.phone !== undefined) {
+      payload.phone = data.phone;
+    }
+
+    if (hasAddressInput) {
+      if (typeof data.address === 'string' && data.address.trim().length > 0) {
+        payload.address = data.address.trim();
+      } else {
+        let existingAddr: Record<string, string> = {};
+        if (record.address) {
+          try {
+            existingAddr = typeof record.address === 'string' && record.address.startsWith('{')
+              ? JSON.parse(record.address)
+              : { addressLine1: record.address };
+          } catch {
+            existingAddr = { addressLine1: record.address };
+          }
+        }
+
+        payload.address = JSON.stringify({
+          addressLine1: data.addressLine1 ?? existingAddr.addressLine1 ?? '',
+          addressLine2: data.addressLine2 ?? existingAddr.addressLine2 ?? '',
+          city: data.city ?? existingAddr.city ?? '',
+          state: data.state ?? existingAddr.state ?? '',
+          postalCode: data.postalCode ?? existingAddr.postalCode ?? '',
+          country: data.country ?? existingAddr.country ?? 'Sri Lanka',
+        });
+      }
+    }
 
     // Perform update on the authenticated client instance to enforce PB policy security rules
-    await pb.collection('users').update(record.id, {
-      name: fullName,
-      phone: data.phone || '',
-      address: addressJson,
-    });
+    await pb.collection('users').update(record.id, payload);
 
     // Also update the name cookie so navbar avatar reflects new name
     cookieStore.set('pb_auth_name', encodeURIComponent(fullName), {
@@ -1255,18 +1288,15 @@ export async function getCustomerOrdersAction(): Promise<{
     } catch (filterErr) {
       console.warn('[getCustomerOrdersAction] Order query error:', filterErr);
       try {
-        // Fallback search without adminPb.filter wrapper
+        // Narrower fallback search matching only on user relation
         records = await adminPb.collection('orders').getFullList({
+          filter: adminPb.filter('user = {:userId}', { userId: record.id }),
           sort: '-created',
         });
-        records = records.filter(
-          (o) =>
-            o.customer?.email === userEmail ||
-            o.shippingAddress?.email === userEmail ||
-            o.user === record.id ||
-            o.customer?.userId === record.id
-        );
-      } catch {}
+      } catch (fallbackErr) {
+        console.error('[getCustomerOrdersAction] Fallback query failed:', fallbackErr);
+        return { success: false, orders: [], error: 'Failed to load orders.' };
+      }
     }
 
     return { success: true, orders: records };

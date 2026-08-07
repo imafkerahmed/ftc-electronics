@@ -298,7 +298,11 @@ export default function PosPaymentModal({
                     const orderNo = completedSaleId ? `FTC-POS-${completedSaleId.slice(-6).toUpperCase()}` : '';
                     const itemsStr = cart.map(i => `• ${i.productName} x${i.quantity} - ${fmt(i.lineTotal, currency)}`).join('%0A');
                     const text = `*FTC Electronics*%0AReceipt for Order *${orderNo}*%0A*Date:* ${new Date().toLocaleDateString()}%0A*Total:* ${fmt(billData.total, currency)}%0A%0A*Items:*%0A${itemsStr}%0A%0AThank you for shopping with us!`;
-                    window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
+                    window.open(
+                      `https://wa.me/${cleanPhone}?text=${text}`,
+                      '_blank',
+                      'noopener,noreferrer'
+                    );
                   }
                 }}
                 className="h-10 rounded-xl text-xs flex items-center justify-center gap-1.5"

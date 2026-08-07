@@ -1,6 +1,29 @@
 import { getAdminPb } from '@/lib/pb-admin';
 import { sendOrderInvoiceEmail } from '@/lib/email';
 
+interface OrderItemRecord {
+  name?: string;
+  quantity?: number;
+  qty?: number;
+  price?: number;
+  unitPrice?: number;
+  discount?: number;
+}
+
+interface OrderRecord {
+  id: string;
+  orderId?: string;
+  customer?: { email?: string; name?: string };
+  customerEmail?: string;
+  customerName?: string;
+  email?: string;
+  total?: number;
+  shippingAddress?: string;
+  items?: OrderItemRecord[];
+  paymentDetails?: { method?: string; status?: string };
+  isPaid?: boolean;
+}
+
 /**
  * Helper to fetch order details, load store print config, and send order invoice/confirmation email.
  * Can be called by checkout actions, webhooks, or admin actions when payment is confirmed.
@@ -8,14 +31,15 @@ import { sendOrderInvoiceEmail } from '@/lib/email';
 export async function sendInvoiceEmailForOrder(orderId: string): Promise<{ success: boolean; error?: string }> {
   try {
     const adminPb = await getAdminPb();
-    let order: any = null;
+    let order: OrderRecord | null = null;
 
-    // Try by PocketBase record ID first, then by human-readable orderId field
+    // Try by PocketBase record ID first, then by human-readable orderId field with secure filter binding
     try {
-      order = await adminPb.collection('orders').getOne(orderId);
+      order = await adminPb.collection('orders').getOne<OrderRecord>(orderId);
     } catch {
       try {
-        order = await adminPb.collection('orders').getFirstListItem(`orderId = "${orderId}"`);
+        const filter = adminPb.filter('orderId = {:orderId}', { orderId });
+        order = await adminPb.collection('orders').getFirstListItem<OrderRecord>(filter);
       } catch {
         console.error('[sendInvoiceEmailForOrder] Could not find order:', orderId);
         return { success: false, error: 'Order not found' };
@@ -47,13 +71,13 @@ export async function sendInvoiceEmailForOrder(orderId: string): Promise<{ succe
         storeEmail = config.headerEmail || storeEmail;
         storeAddress = config.headerAddress || storeAddress;
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.warn('[sendInvoiceEmailForOrder] Failed to load store print config:', err);
     }
 
-    let items = [];
+    let items: Array<{ name: string; qty: number; unitPrice: number; discount: number }> = [];
     if (Array.isArray(order.items) && order.items.length > 0) {
-      items = order.items.map((item: any) => ({
+      items = order.items.map((item) => ({
         name: item.name || 'Order Item',
         qty: item.quantity || item.qty || 1,
         unitPrice: item.price || item.unitPrice || 0,
@@ -82,14 +106,14 @@ export async function sendInvoiceEmailForOrder(orderId: string): Promise<{ succe
     });
 
     if (emailResult.success) {
-      console.log(`[sendInvoiceEmailForOrder] ✅ Confirmation email sent for order ${order.orderId || order.id} to ${customerEmail}`);
+      console.log(`[sendInvoiceEmailForOrder] ✅ Confirmation email sent for order #${order.orderId || order.id}`);
     } else {
-      console.error(`[sendInvoiceEmailForOrder] ❌ Failed sending email for order ${order.orderId || order.id}:`, emailResult.error);
+      console.error(`[sendInvoiceEmailForOrder] ❌ Failed sending email for order #${order.orderId || order.id}:`, emailResult.error);
     }
 
     return emailResult;
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('[sendInvoiceEmailForOrder] Error:', err);
-    return { success: false, error: err.message || 'Failed to send order email' };
+    return { success: false, error: err instanceof Error ? err.message : 'Failed to send order email' };
   }
 }

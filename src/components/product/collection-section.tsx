@@ -39,11 +39,13 @@ export default function CollectionSection({
   const isInView = useInView(containerRef, { once: true, amount: 0.1 });
 
   const [extractedColor, setExtractedColor] = useState<string | null>(null);
-  const [isMobileExpanded, setIsMobileExpanded] = useState(false);
 
   // Calculate mobile products display limit based on mobileRows setting (2 products per grid row on mobile)
   const mobileMaxCount =
     mobileRows && mobileRows > 0 ? mobileRows * 2 : undefined;
+
+  const mobilePageSize = mobileMaxCount || 4;
+  const mobilePageCount = Math.max(1, Math.ceil(products.length / mobilePageSize));
 
   useEffect(() => {
     if (!brandLogo) {
@@ -118,6 +120,13 @@ export default function CollectionSection({
   // Mobile pagination state
   const [mobilePageIndex, setMobilePageIndex] = useState(0);
 
+  // Clamp pagination index when mobilePageCount changes
+  useEffect(() => {
+    setMobilePageIndex((current) =>
+      Math.min(current, Math.max(0, mobilePageCount - 1))
+    );
+  }, [mobilePageCount]);
+
   const displayLimit = rows ? rows * 5 : limit || 5;
 
   // Navigation button states
@@ -175,13 +184,13 @@ export default function CollectionSection({
         dotBg: "bg-red-500",
         dotPing: "bg-red-400 dark:bg-red-500",
         navHover:
-          "hover:border-red-500/40 hover:text-red-500 dark:hover:border-red-400/40 dark:hover:text-red-450 hover:bg-red-500/5 dark:hover:bg-red-500/5",
+          "hover:border-red-500/40 hover:text-red-500 dark:hover:border-red-400/40 dark:hover:text-red-400 hover:bg-red-500/5 dark:hover:bg-red-500/5",
         defaultSubtitle: "Limited Stocks & Deals",
         sectionTag: "🔥 SPECIAL OFFERS",
       };
     } else if (titleLower.includes("new") || titleLower.includes("arrival")) {
       return {
-        themeColor: "purple" as const,
+        themeColor: "emerald" as const,
         accentClass: "text-emerald-600 dark:text-emerald-400",
         sectionBg:
           "bg-gradient-to-b from-emerald-500/8 via-emerald-500/3 to-transparent dark:from-emerald-950/40 dark:via-neutral-900/60 dark:to-neutral-950 border-y-2 border-emerald-500/30 dark:border-emerald-800/40",
@@ -192,7 +201,7 @@ export default function CollectionSection({
         dotBg: "bg-emerald-500",
         dotPing: "bg-emerald-400 dark:bg-emerald-500",
         navHover:
-          "hover:border-emerald-500/40 hover:text-emerald-500 dark:hover:border-emerald-400/40 dark:hover:text-emerald-450 hover:bg-emerald-500/5 dark:hover:bg-emerald-500/5",
+          "hover:border-emerald-500/40 hover:text-emerald-500 dark:hover:border-emerald-400/40 dark:hover:text-emerald-400 hover:bg-emerald-500/5 dark:hover:bg-emerald-500/5",
         defaultSubtitle: "Fresh Releases",
         sectionTag: "✨ JUST ARRIVED",
       };
@@ -213,7 +222,7 @@ export default function CollectionSection({
         dotBg: "bg-blue-500",
         dotPing: "bg-blue-400 dark:bg-blue-500",
         navHover:
-          "hover:border-blue-500/40 hover:text-blue-500 dark:hover:border-blue-400/40 dark:hover:text-blue-450 hover:bg-blue-500/5 dark:hover:bg-blue-500/5",
+          "hover:border-blue-500/40 hover:text-blue-500 dark:hover:border-blue-400/40 dark:hover:text-blue-400 hover:bg-blue-500/5 dark:hover:bg-blue-500/5",
         defaultSubtitle: "Official Store Products",
         sectionTag: "⭐ BRAND HIGHLIGHT",
       };
@@ -231,7 +240,7 @@ export default function CollectionSection({
       dotBg: "bg-blue-500",
       dotPing: "bg-blue-400 dark:bg-blue-500",
       navHover:
-        "hover:border-blue-500/40 hover:text-blue-500 dark:hover:border-blue-400/40 dark:hover:text-blue-450 hover:bg-blue-500/5 dark:hover:bg-blue-500/5",
+        "hover:border-blue-500/40 hover:text-blue-500 dark:hover:border-blue-400/40 dark:hover:text-blue-400 hover:bg-blue-500/5 dark:hover:bg-blue-500/5",
       defaultSubtitle: "Curated Selection",
       sectionTag: "📦 FEATURED COLLECTION",
     };
@@ -343,66 +352,62 @@ export default function CollectionSection({
                 {renderTitle(title)}
               </h2>
 
-              {/* Side-by-side < > buttons (Mobile Only) */}
-              <div className="flex sm:hidden items-center gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isCarouselMode) {
-                      handleScroll("left");
-                    } else {
-                      setMobilePageIndex((prev) => Math.max(0, prev - 1));
+              {/* Side-by-side < > buttons (Mobile Only — shown when paginated or scrolling) */}
+              {layout !== "grid" && (
+                <div className="flex sm:hidden items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isCarouselMode) {
+                        handleScroll("left");
+                      } else {
+                        setMobilePageIndex((prev) => Math.max(0, prev - 1));
+                      }
+                    }}
+                    disabled={
+                      isCarouselMode ? !canScrollLeft : mobilePageIndex === 0
                     }
-                  }}
-                  disabled={
-                    isCarouselMode ? !canScrollLeft : mobilePageIndex === 0
-                  }
-                  className={`h-8 w-8 rounded-full border flex items-center justify-center transition-all cursor-pointer ${
-                    (isCarouselMode ? canScrollLeft : mobilePageIndex > 0)
-                      ? "border-neutral-300 bg-white text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 hover:scale-105 active:scale-95 shadow-xs"
-                      : "border-neutral-200 dark:border-neutral-800 text-neutral-300 dark:text-neutral-700 opacity-40 cursor-not-allowed"
-                  }`}
-                  aria-label="Previous Page"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
+                    className={`h-8 w-8 rounded-full border flex items-center justify-center transition-all cursor-pointer ${
+                      (isCarouselMode ? canScrollLeft : mobilePageIndex > 0)
+                        ? "border-neutral-300 bg-white text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 hover:scale-105 active:scale-95 shadow-xs"
+                        : "border-neutral-200 dark:border-neutral-800 text-neutral-300 dark:text-neutral-700 opacity-40 cursor-not-allowed"
+                    }`}
+                    aria-label="Previous Page"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isCarouselMode) {
-                      handleScroll("right");
-                    } else {
-                      setMobilePageIndex((prev) =>
-                        Math.min(
-                          Math.ceil(products.length / (mobileMaxCount || 4)) -
-                            1,
-                          prev + 1,
-                        ),
-                      );
-                    }
-                  }}
-                  disabled={
-                    isCarouselMode
-                      ? !canScrollRight
-                      : mobilePageIndex >=
-                        Math.ceil(products.length / (mobileMaxCount || 4)) - 1
-                  }
-                  className={`h-8 w-8 rounded-full border flex items-center justify-center transition-all cursor-pointer ${
-                    (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isCarouselMode) {
+                        handleScroll("right");
+                      } else {
+                        setMobilePageIndex((prev) =>
+                          Math.min(mobilePageCount - 1, prev + 1),
+                        );
+                      }
+                    }}
+                    disabled={
                       isCarouselMode
-                        ? canScrollRight
-                        : mobilePageIndex <
-                          Math.ceil(products.length / (mobileMaxCount || 4)) - 1
-                    )
-                      ? "border-neutral-300 bg-white text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 hover:scale-105 active:scale-95 shadow-xs"
-                      : "border-neutral-200 dark:border-neutral-800 text-neutral-300 dark:text-neutral-700 opacity-40 cursor-not-allowed"
-                  }`}
-                  aria-label="Next Page"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
+                        ? !canScrollRight
+                        : mobilePageIndex >= mobilePageCount - 1
+                    }
+                    className={`h-8 w-8 rounded-full border flex items-center justify-center transition-all cursor-pointer ${
+                      (
+                        isCarouselMode
+                          ? canScrollRight
+                          : mobilePageIndex < mobilePageCount - 1
+                      )
+                        ? "border-neutral-300 bg-white text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 hover:scale-105 active:scale-95 shadow-xs"
+                        : "border-neutral-200 dark:border-neutral-800 text-neutral-300 dark:text-neutral-700 opacity-40 cursor-not-allowed"
+                    }`}
+                    aria-label="Next Page"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Description & Explore All Button Below Topic Row */}
@@ -474,8 +479,8 @@ export default function CollectionSection({
               >
                 {products
                   .slice(
-                    mobilePageIndex * (mobileMaxCount || 4),
-                    (mobilePageIndex + 1) * (mobileMaxCount || 4),
+                    mobilePageIndex * mobilePageSize,
+                    (mobilePageIndex + 1) * mobilePageSize,
                   )
                   .map((product, idx) => (
                     <div key={product.id || idx} className="h-full">

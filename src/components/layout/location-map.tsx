@@ -5,6 +5,35 @@ import { MapPin, Phone, Mail, Clock, ExternalLink, MessageCircle } from "lucide-
 import { motion } from "motion/react";
 import { pbSiteSettings } from "@/lib/pb-collections";
 
+interface SiteGeneralSettings {
+  location?: {
+    address?: string;
+    city?: string;
+    googleMapsUrl?: string;
+  };
+  contactInfo?: {
+    phone?: string;
+    email?: string;
+    whatsapp?: string;
+  };
+  storeHoursCopy?: Array<{ days: string; time: string }> | string;
+}
+
+interface SiteContactSettings {
+  address?: string;
+  city?: string;
+  phone?: string;
+  email?: string;
+  googleMapsLink?: string;
+  whatsappLink?: string;
+  hours?: Array<{ days: string; time: string }> | string;
+}
+
+interface DbSettings {
+  gen?: SiteGeneralSettings | null;
+  con?: SiteContactSettings | null;
+}
+
 interface LocationMapProps {
   settings?: {
     address?: string;
@@ -18,14 +47,14 @@ interface LocationMapProps {
 }
 
 export default function LocationMap({ settings: propSettings }: LocationMapProps) {
-  const [dbSettings, setDbSettings] = useState<any>(null);
+  const [dbSettings, setDbSettings] = useState<DbSettings | null>(null);
 
   useEffect(() => {
     async function loadMapSettings() {
       try {
         const [gen, con] = await Promise.all([
-          pbSiteSettings.get<any>("general").catch(() => null),
-          pbSiteSettings.get<any>("contact").catch(() => null),
+          pbSiteSettings.get<SiteGeneralSettings>("general").catch(() => null),
+          pbSiteSettings.get<SiteContactSettings>("contact").catch(() => null),
         ]);
         setDbSettings({ gen, con });
       } catch {}
@@ -64,9 +93,8 @@ export default function LocationMap({ settings: propSettings }: LocationMapProps
     "";
 
   const getCleanMapUrl = (url: string, searchAddress: string) => {
-    if (!url || !url.trim()) {
-      return `https://maps.google.com/maps?q=${encodeURIComponent(searchAddress)}&output=embed`;
-    }
+    const fallback = `https://maps.google.com/maps?q=${encodeURIComponent(searchAddress)}&output=embed`;
+    if (!url || !url.trim()) return fallback;
     let trimmed = url.trim();
     if (trimmed.includes("<iframe") || trimmed.startsWith("<iframe")) {
       const match = trimmed.match(/src=["']([^"']+)["']/);
@@ -74,10 +102,16 @@ export default function LocationMap({ settings: propSettings }: LocationMapProps
         trimmed = match[1];
       }
     }
-    if (trimmed.includes("google.com/maps/embed") || trimmed.includes("output=embed")) {
-      return trimmed;
+    try {
+      const parsed = new URL(trimmed);
+      const allowedHosts = ["www.google.com", "google.com", "maps.google.com"];
+      if (parsed.protocol === "https:" && allowedHosts.includes(parsed.hostname)) {
+        return parsed.toString();
+      }
+    } catch {
+      // invalid URL — use fallback below
     }
-    return `https://maps.google.com/maps?q=${encodeURIComponent(searchAddress)}&output=embed`;
+    return fallback;
   };
 
   const cleanGoogleMapsLink = getCleanMapUrl(rawMapsLink, fullAddress);
@@ -88,9 +122,10 @@ export default function LocationMap({ settings: propSettings }: LocationMapProps
     dbSettings?.con?.whatsappLink ||
     "+94 77 123 4567";
 
-  const formattedWhatsapp = rawWhatsapp.startsWith("http")
-    ? rawWhatsapp
-    : `https://wa.me/${rawWhatsapp.replace(/[^0-9]/g, "")}`;
+  const whatsappValue = String(rawWhatsapp ?? "");
+  const formattedWhatsapp = whatsappValue.startsWith("http")
+    ? whatsappValue
+    : `https://wa.me/${whatsappValue.replace(/[^0-9]/g, "")}`;
 
   const rawHours =
     propSettings?.hours ||
@@ -112,11 +147,12 @@ export default function LocationMap({ settings: propSettings }: LocationMapProps
     phone,
     email,
     hours: formattedHours,
-    googleMapsLink: rawMapsLink && !rawMapsLink.includes("<iframe") ? rawMapsLink : `https://maps.google.com/?q=${encodeURIComponent(fullAddress)}`,
+    googleMapsLink: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`,
     whatsappLink: formattedWhatsapp,
   };
 
-  const iframeSrc = cleanGoogleMapsLink ||
+  const iframeSrc =
+    cleanGoogleMapsLink ||
     "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3960.7984670691077!2d79.8482!3d6.9147!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3ae259410f545199%3A0xa6ec07c3905cfb6e!2sGalle%20Rd%2C%20Colombo!5e0!3m2!1sen!2slk!4v1700000000000!5m2!1sen!2slk";
 
   const contactItems = [
@@ -206,6 +242,7 @@ export default function LocationMap({ settings: propSettings }: LocationMapProps
               <iframe
                 title="Store Location Map"
                 src={iframeSrc}
+                sandbox="allow-scripts allow-same-origin allow-popups"
                 width="100%"
                 height="100%"
                 style={{ border: 0, minHeight: '420px' }}
@@ -226,7 +263,6 @@ export default function LocationMap({ settings: propSettings }: LocationMapProps
             className="lg:col-span-5 h-full"
           >
             <div className="h-full rounded-2xl border border-white/8 bg-white/4 backdrop-blur-md p-6 sm:p-7 flex flex-col gap-6">
-
 
               {/* Contact details */}
               <div className="flex flex-col gap-4">

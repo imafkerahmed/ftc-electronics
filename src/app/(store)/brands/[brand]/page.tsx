@@ -93,6 +93,8 @@ export default async function BrandPage({ params }: PageProps) {
                   src={brand.logo}
                   alt={`${displayName} logo`}
                   fill
+                  sizes="(min-width: 1024px) 288px, (min-width: 640px) 224px, 96px"
+                  unoptimized={brand.logo.startsWith("http")}
                   className="object-contain"
                   priority
                 />

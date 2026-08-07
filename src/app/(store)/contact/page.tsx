@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'motion/react';
 import {
   Mail,
@@ -29,6 +29,97 @@ import {
   faXTwitter,
   faViber,
 } from '@fortawesome/free-brands-svg-icons';
+
+const STATIC_SOCIAL_PLATFORMS = [
+  {
+    key: 'instagram',
+    name: 'Instagram',
+    handle: '@ftcelectronics',
+    icon: faInstagram,
+    defaultUrl: 'https://instagram.com/ftcelectronics',
+    gradient: 'from-pink-500 to-fuchsia-600',
+    ring: 'ring-pink-500/30',
+    iconColor: 'text-pink-500',
+    bg: 'bg-pink-500/8 hover:bg-pink-500/15',
+  },
+  {
+    key: 'facebook',
+    name: 'Facebook',
+    handle: 'FTC Electronics',
+    icon: faFacebook,
+    defaultUrl: 'https://facebook.com/ftcelectronics',
+    gradient: 'from-blue-500 to-blue-700',
+    ring: 'ring-blue-500/30',
+    iconColor: 'text-blue-500',
+    bg: 'bg-blue-500/8 hover:bg-blue-500/15',
+  },
+  {
+    key: 'tiktok',
+    name: 'TikTok',
+    handle: '@ftcelectronics',
+    icon: faTiktok,
+    defaultUrl: 'https://tiktok.com/@ftcelectronics',
+    gradient: 'from-neutral-700 to-neutral-900',
+    ring: 'ring-neutral-400/30',
+    iconColor: 'text-foreground',
+    bg: 'bg-neutral-500/8 hover:bg-neutral-500/15',
+  },
+  {
+    key: 'youtube',
+    name: 'YouTube',
+    handle: 'FTC Electronics',
+    icon: faYoutube,
+    defaultUrl: 'https://youtube.com/@ftcelectronics',
+    gradient: 'from-red-500 to-rose-700',
+    ring: 'ring-red-500/30',
+    iconColor: 'text-red-500',
+    bg: 'bg-red-500/8 hover:bg-red-500/15',
+  },
+  {
+    key: 'telegram',
+    name: 'Telegram',
+    handle: '@ftcelectronics',
+    icon: faTelegram,
+    defaultUrl: 'https://t.me/ftcelectronics',
+    gradient: 'from-sky-400 to-cyan-600',
+    ring: 'ring-sky-400/30',
+    iconColor: 'text-sky-500',
+    bg: 'bg-sky-500/8 hover:bg-sky-500/15',
+  },
+  {
+    key: 'linkedin',
+    name: 'LinkedIn',
+    handle: 'FTC Electronics',
+    icon: faLinkedin,
+    defaultUrl: 'https://linkedin.com/company/ftcelectronics',
+    gradient: 'from-blue-600 to-sky-700',
+    ring: 'ring-blue-600/30',
+    iconColor: 'text-blue-600',
+    bg: 'bg-blue-600/8 hover:bg-blue-600/15',
+  },
+  {
+    key: 'twitter',
+    name: 'X',
+    handle: '@ftcelectronics',
+    icon: faXTwitter,
+    defaultUrl: 'https://x.com/ftcelectronics',
+    gradient: 'from-neutral-600 to-neutral-800',
+    ring: 'ring-neutral-400/30',
+    iconColor: 'text-foreground/80',
+    bg: 'bg-neutral-500/8 hover:bg-neutral-500/15',
+  },
+  {
+    key: 'viber',
+    name: 'Viber',
+    handle: 'FTC Electronics',
+    icon: faViber,
+    defaultUrl: 'https://viber.com',
+    gradient: 'from-purple-500 to-violet-700',
+    ring: 'ring-purple-500/30',
+    iconColor: 'text-purple-500',
+    bg: 'bg-purple-500/8 hover:bg-purple-500/15',
+  },
+] as const;
 
 export default function ContactPage() {
   const [settings, setSettings] = useState<any>(null);
@@ -67,95 +158,43 @@ export default function ContactPage() {
   const city = settings?.location?.city || 'Colombo';
   const googleMapsUrl = settings?.location?.googleMapsUrl || 'https://maps.google.com';
 
-  const socialLinks = settings?.socialLinks || {};
-  const getSocialInfo = (val: any, defaultUrl: string) => {
-    if (!val) return { enabled: false, url: defaultUrl };
-    if (typeof val === 'string') return { enabled: val.trim().length > 0, url: val.trim() || defaultUrl };
-    return { enabled: val.enabled === true, url: (val.url && val.url.trim()) || defaultUrl };
-  };
+  const socialLinks = settings?.socialLinks;
 
-  const allSocials = [
-    {
-      name: 'Instagram',
-      handle: '@ftcelectronics',
-      icon: faInstagram,
-      data: getSocialInfo(socialLinks.instagram, 'https://instagram.com/ftcelectronics'),
-      gradient: 'from-pink-500 to-fuchsia-600',
-      ring: 'ring-pink-500/30',
-      iconColor: 'text-pink-500',
-      bg: 'bg-pink-500/8 hover:bg-pink-500/15',
-    },
-    {
-      name: 'Facebook',
-      handle: 'FTC Electronics',
-      icon: faFacebook,
-      data: getSocialInfo(socialLinks.facebook, 'https://facebook.com/ftcelectronics'),
-      gradient: 'from-blue-500 to-blue-700',
-      ring: 'ring-blue-500/30',
-      iconColor: 'text-blue-500',
-      bg: 'bg-blue-500/8 hover:bg-blue-500/15',
-    },
-    {
-      name: 'TikTok',
-      handle: '@ftcelectronics',
-      icon: faTiktok,
-      data: getSocialInfo(socialLinks.tiktok, 'https://tiktok.com/@ftcelectronics'),
-      gradient: 'from-neutral-700 to-neutral-900',
-      ring: 'ring-neutral-400/30',
-      iconColor: 'text-foreground',
-      bg: 'bg-neutral-500/8 hover:bg-neutral-500/15',
-    },
-    {
-      name: 'YouTube',
-      handle: 'FTC Electronics',
-      icon: faYoutube,
-      data: getSocialInfo(socialLinks.youtube, 'https://youtube.com/@ftcelectronics'),
-      gradient: 'from-red-500 to-rose-700',
-      ring: 'ring-red-500/30',
-      iconColor: 'text-red-500',
-      bg: 'bg-red-500/8 hover:bg-red-500/15',
-    },
-    {
-      name: 'Telegram',
-      handle: '@ftcelectronics',
-      icon: faTelegram,
-      data: getSocialInfo(socialLinks.telegram, 'https://t.me/ftcelectronics'),
-      gradient: 'from-sky-400 to-cyan-600',
-      ring: 'ring-sky-400/30',
-      iconColor: 'text-sky-500',
-      bg: 'bg-sky-500/8 hover:bg-sky-500/15',
-    },
-    {
-      name: 'LinkedIn',
-      handle: 'FTC Electronics',
-      icon: faLinkedin,
-      data: getSocialInfo(socialLinks.linkedin, 'https://linkedin.com/company/ftcelectronics'),
-      gradient: 'from-blue-600 to-sky-700',
-      ring: 'ring-blue-600/30',
-      iconColor: 'text-blue-600',
-      bg: 'bg-blue-600/8 hover:bg-blue-600/15',
-    },
-    {
-      name: 'X',
-      handle: '@ftcelectronics',
-      icon: faXTwitter,
-      data: getSocialInfo(socialLinks.twitter, 'https://x.com/ftcelectronics'),
-      gradient: 'from-neutral-600 to-neutral-800',
-      ring: 'ring-neutral-400/30',
-      iconColor: 'text-foreground/80',
-      bg: 'bg-neutral-500/8 hover:bg-neutral-500/15',
-    },
-    {
-      name: 'Viber',
-      handle: 'FTC Electronics',
-      icon: faViber,
-      data: getSocialInfo(socialLinks.viber, 'https://viber.com'),
-      gradient: 'from-purple-500 to-violet-700',
-      ring: 'ring-purple-500/30',
-      iconColor: 'text-purple-500',
-      bg: 'bg-purple-500/8 hover:bg-purple-500/15',
-    },
-  ].filter((s) => s.data.enabled && Boolean(s.data.url?.trim()));
+  const allSocials = useMemo(() => {
+    const toHttpsUrl = (value: unknown): string | undefined => {
+      if (typeof value !== 'string' || !value.trim()) return undefined;
+      try {
+        const url = new URL(value.trim());
+        return url.protocol === 'https:' ? url.href : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+
+    const getSocialInfo = (val: unknown, defaultUrl: string) => {
+      if (!val) return { enabled: false, url: defaultUrl };
+      if (typeof val === 'string') {
+        const url = toHttpsUrl(val);
+        return { enabled: Boolean(url), url: url ?? '' };
+      }
+      if (typeof val !== 'object' || Array.isArray(val)) {
+        return { enabled: false, url: defaultUrl };
+      }
+
+      const { enabled, url } = val as { enabled?: unknown; url?: unknown };
+      const resolvedUrl =
+        typeof url === 'string' && url.trim() ? toHttpsUrl(url) : defaultUrl;
+      return { enabled: enabled === true && Boolean(resolvedUrl), url: resolvedUrl ?? '' };
+    };
+
+    return STATIC_SOCIAL_PLATFORMS.map((platform) => {
+      const val = socialLinks ? socialLinks[platform.key] : undefined;
+      return {
+        ...platform,
+        data: getSocialInfo(val, platform.defaultUrl),
+      };
+    }).filter((s) => s.data.enabled && Boolean(s.data.url?.trim()));
+  }, [socialLinks]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -268,7 +307,7 @@ export default function ContactPage() {
               <div className="p-6 text-center space-y-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl">
                 <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto" />
                 <h4 className="text-sm font-bold text-foreground">Message Sent Successfully!</h4>
-                <p className="text-xs text-muted-foreground">Thank you for reaching out to {siteName}. A copy has been delivered to support and recorded in system logs.</p>
+                <p className="text-xs text-muted-foreground">Thank you for reaching out to {siteName}. Our support team has received your message and will reply soon.</p>
                 <button
                   type="button"
                   onClick={() => setFormSent(false)}

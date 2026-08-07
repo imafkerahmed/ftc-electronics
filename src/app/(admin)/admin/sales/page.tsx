@@ -409,7 +409,11 @@ export default function AdminSalesTrackerPage() {
       const itemsStr = items.map(i => `• ${i.product_name} x${i.quantity} - ${fmt(i.line_total)}`).join('\n');
       const text = `*FTC Electronics*\nInvoice Document: *${docNumber}*\n*Date:* ${formattedDate}\n*Total:* ${fmt(sale.total)}\n\n*Items:*\n${itemsStr}\n\n📄 *Invoice PDF document (${fileName}) has been downloaded to your device.* Please attach it to this chat!\nThank you for shopping with us!`;
 
-      window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`, '_blank');
+      window.open(
+        `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`,
+        '_blank',
+        'noopener,noreferrer'
+      );
 
       setWorkflowMessage({
         type: 'success',

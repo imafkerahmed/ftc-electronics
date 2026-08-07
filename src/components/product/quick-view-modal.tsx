@@ -121,18 +121,12 @@ export default function QuickViewModal({ product, isOpen, onClose }: QuickViewMo
 
               {/* Price & Installment */}
               <div className="mt-4 flex flex-col gap-1.5">
-                {hasDiscount ? (
-                  <>
-                    <span className="text-2xl font-black text-foreground">
-                      {formatPrice(activePrice, currency)}
-                    </span>
-                    <span className="text-xs font-medium text-muted-foreground line-through">
-                      {formatPrice(product.price, currency)}
-                    </span>
-                  </>
-                ) : (
-                  <span className="text-2xl font-black text-foreground">
-                    {formatPrice(activePrice, currency)}
+                <span className="text-2xl font-black text-foreground">
+                  {formatPrice(activePrice, currency)}
+                </span>
+                {hasDiscount && (
+                  <span className="text-xs font-medium text-muted-foreground line-through">
+                    {formatPrice(product.price, currency)}
                   </span>
                 )}
 

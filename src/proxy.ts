@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { type AdminRole, ADMIN_ROLES } from '@/types/admin';
+import { isValidSafeRedirect } from '@/lib/utils';
 
 // ─── Route Permission Matrix ────────────────────────────────────────────────
 // Defines which roles can access which admin routes.
@@ -230,9 +231,14 @@ export async function proxy(request: NextRequest) {
     return addSecurityHeaders(response);
   }
 
-  // 4. If already logged in and trying to visit login/auth page → redirect to appropriate landing page
+  // 4. If already logged in and trying to visit login/auth page → redirect to requested destination or appropriate landing page
   if (pathname === '/admin/login' || pathname === '/auth') {
     if (hasValidToken) {
+      const requested = request.nextUrl.searchParams.get('redirect');
+      const safeRedirect = isValidSafeRedirect(requested) ? requested : null;
+      if (safeRedirect && (isAdminUser || !safeRedirect.startsWith('/admin'))) {
+        return NextResponse.redirect(new URL(safeRedirect, request.url));
+      }
       if (isAdminUser) {
         const dashboardUrl = new URL('/admin/dashboard', request.url);
         return NextResponse.redirect(dashboardUrl);

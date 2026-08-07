@@ -74,7 +74,7 @@ export default function Footer() {
           {/* Social icons + Digital Card link + Back to top */}
           <div className="flex items-center gap-3">
             <Link
-              href="/connect"
+              href="/contact"
               className="h-9 px-3.5 rounded-xl border border-blue-500/20 bg-blue-500/10 hover:bg-blue-500/20 text-xs font-semibold text-blue-400 hover:text-white flex items-center gap-1.5 transition-all duration-250 hover:scale-105"
               title="Digital Visiting Card & QR Link Hub"
             >

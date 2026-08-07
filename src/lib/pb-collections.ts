@@ -1527,15 +1527,34 @@ export const pbQuotations = {
 
 // ─── Contact Inquiries Collection ──────────────────────────────────────────────
 
+let contactInquiriesReady = false;
+
 export const pbContactInquiries = {
   /**
    * Ensures that the 'contact_inquiries' collection exists in PocketBase.
    */
   async ensureCollection(): Promise<boolean> {
+    if (contactInquiriesReady) return true;
     try {
       const adminPb = await getAdminPb();
       try {
-        await adminPb.collections.getOne("contact_inquiries");
+        const collection = await adminPb.collections.getOne("contact_inquiries");
+        if (
+          collection.listRule !== null ||
+          collection.viewRule !== null ||
+          collection.createRule !== null ||
+          collection.updateRule !== null ||
+          collection.deleteRule !== null
+        ) {
+          await adminPb.collections.update(collection.id, {
+            listRule: null,
+            viewRule: null,
+            createRule: null,
+            updateRule: null,
+            deleteRule: null,
+          });
+        }
+        contactInquiriesReady = true;
         return true;
       } catch {
         // Create collection if missing
@@ -1552,12 +1571,14 @@ export const pbContactInquiries = {
             { name: "notes", type: "text", required: false },
             { name: "read", type: "bool", required: false },
           ],
-          listRule: "",
-          viewRule: "",
-          createRule: "",
-          updateRule: "",
-          deleteRule: "",
+          // Superuser-only access; all server code uses the admin client.
+          listRule: null,
+          viewRule: null,
+          createRule: null,
+          updateRule: null,
+          deleteRule: null,
         });
+        contactInquiriesReady = true;
         return true;
       }
     } catch (err) {

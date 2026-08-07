@@ -1044,11 +1044,13 @@ export default function AdminQuotationsPage() {
                           const term = item.name.toLowerCase().trim();
                           const suggestions =
                             focusedLineItemIndex === idx && term.length >= 1
-                              ? allProducts.filter(
-                                  (p) =>
-                                    p.name.toLowerCase().includes(term) ||
-                                    (p.slug && p.slug.toLowerCase().includes(term))
-                                )
+                              ? allProducts
+                                  .filter(
+                                    (p) =>
+                                      p.name.toLowerCase().includes(term) ||
+                                      (p.slug && p.slug.toLowerCase().includes(term))
+                                  )
+                                  .slice(0, 8)
                               : [];
 
                           const selectProduct = (prod: Product) => {
@@ -1069,6 +1071,15 @@ export default function AdminQuotationsPage() {
                               <Input
                                 placeholder="Product name or description"
                                 value={item.name}
+                                role="combobox"
+                                aria-expanded={suggestions.length > 0}
+                                aria-controls={`quote-line-item-suggestions-${idx}`}
+                                aria-autocomplete="list"
+                                aria-activedescendant={
+                                  activeSuggestionIdx >= 0
+                                    ? `quote-line-item-option-${idx}-${activeSuggestionIdx}`
+                                    : undefined
+                                }
                                 onChange={(e) => {
                                   handleUpdateLineItem(idx, 'name', e.target.value);
                                   setActiveSuggestionIdx(-1);
@@ -1105,6 +1116,7 @@ export default function AdminQuotationsPage() {
                                     e.preventDefault();
                                     selectProduct(suggestions[activeSuggestionIdx]);
                                   } else if (e.key === 'Escape') {
+                                    e.stopPropagation();
                                     setFocusedLineItemIndex(null);
                                     setActiveSuggestionIdx(-1);
                                   }
@@ -1124,13 +1136,13 @@ export default function AdminQuotationsPage() {
                                       <button
                                         type="button"
                                         key={prod.id}
+                                        id={`quote-line-item-option-${idx}-${sIdx}`}
                                         role="option"
                                         aria-selected={isSelected}
                                         onMouseDown={(e) => {
                                           e.preventDefault();
                                           selectProduct(prod);
                                         }}
-                                        onClick={() => selectProduct(prod)}
                                         className={`w-full text-left px-3 py-2 text-[11px] transition-colors flex justify-between items-center rounded-lg cursor-pointer ${
                                           isSelected ? 'bg-amber-500/15 font-bold' : 'hover:bg-muted/70'
                                         }`}

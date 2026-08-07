@@ -41,7 +41,8 @@ export function clearAllClientSessions() {
       if (
         key &&
         (key.startsWith('ftc') ||
-          key.startsWith('pos') ||
+          key.startsWith('pos_') ||
+          key.startsWith('ftc_pos') ||
           key.startsWith('pb_') ||
           key.startsWith('pocketbase'))
       ) {

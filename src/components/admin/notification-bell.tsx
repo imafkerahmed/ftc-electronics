@@ -9,10 +9,8 @@ import {
   FileText,
   AlertTriangle,
   CheckCheck,
-  ChevronRight,
   RefreshCw,
   X,
-  ExternalLink,
 } from 'lucide-react';
 import { getAdminNotificationsAction, type AdminNotification } from '@/app/actions/admin';
 
@@ -31,7 +29,7 @@ export default function AdminNotificationBell() {
         setNotifications(res.notifications);
         setUnreadCount(res.unreadCount || 0);
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.warn('Failed to load notifications:', err);
     } finally {
       setLoading(false);
@@ -68,6 +66,7 @@ export default function AdminNotificationBell() {
   const getTimeAgo = (timestamp: string) => {
     try {
       const date = new Date(timestamp);
+      if (Number.isNaN(date.getTime())) return '';
       const now = new Date();
       const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000);
       if (diffSec < 60) return 'Just now';
@@ -91,6 +90,14 @@ export default function AdminNotificationBell() {
         return <AlertTriangle className="h-4 w-4 text-amber-500" />;
     }
   };
+
+  const filterTabs = [
+    { id: 'all', label: 'All' },
+    { id: 'inquiry', label: 'Inquiries' },
+    { id: 'order', label: 'Orders' },
+    { id: 'quotation', label: 'Quotations' },
+    { id: 'stock', label: 'Stock' },
+  ] as const;
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -136,6 +143,7 @@ export default function AdminNotificationBell() {
               <button
                 onClick={() => setIsOpen(false)}
                 className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted"
+                aria-label="Close notifications"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -144,16 +152,11 @@ export default function AdminNotificationBell() {
 
           {/* Filter Pills */}
           <div className="flex items-center gap-1 p-2 bg-muted/10 border-b border-border overflow-x-auto text-[11px]">
-            {[
-              { id: 'all', label: 'All' },
-              { id: 'inquiry', label: 'Inquiries' },
-              { id: 'order', label: 'Orders' },
-              { id: 'quotation', label: 'Quotations' },
-              { id: 'stock', label: 'Stock' },
-            ].map((tab) => (
+            {filterTabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveFilter(tab.id as any)}
+                onClick={() => setActiveFilter(tab.id)}
+                aria-pressed={activeFilter === tab.id}
                 className={`px-2.5 py-1 rounded-lg font-semibold whitespace-nowrap transition-colors ${
                   activeFilter === tab.id
                     ? 'bg-blue-600 text-white shadow-xs'
@@ -205,37 +208,6 @@ export default function AdminNotificationBell() {
               ))
             )}
           </div>
-
-          {/* Popover Footer */}
-          {(() => {
-            const footerTarget = (() => {
-              switch (activeFilter) {
-                case 'order':
-                  return { label: 'View Orders', href: '/admin/orders' };
-                case 'quotation':
-                  return { label: 'View Quotations', href: '/admin/quotations' };
-                case 'stock':
-                  return { label: 'View Inventory', href: '/admin/inventory' };
-                case 'inquiry':
-                  return { label: 'View Inquiries', href: '/admin/inquiries' };
-                default:
-                  return { label: 'View Inquiries', href: '/admin/inquiries' };
-              }
-            })();
-
-            return (
-              <div className="p-2.5 border-t border-border bg-muted/20 flex items-center justify-between text-[11px]">
-                <span className="text-muted-foreground">{filtered.length} alert{filtered.length === 1 ? '' : 's'}</span>
-                <Link
-                  href={footerTarget.href}
-                  onClick={() => setIsOpen(false)}
-                  className="text-blue-500 font-bold hover:underline inline-flex items-center gap-1"
-                >
-                  {footerTarget.label} <ChevronRight className="h-3 w-3" />
-                </Link>
-              </div>
-            );
-          })()}
         </div>
       )}
     </div>

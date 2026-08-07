@@ -17,10 +17,16 @@ import {
   CheckCircle,
   Copy,
   ImageIcon,
+  Lock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { uploadPaymentSlipAction, confirmPayHereReturnAction } from '@/app/actions/checkout';
+import {
+  uploadPaymentSlipAction,
+  confirmPayHereReturnAction,
+  verifyOrderForSlipUploadAction,
+} from '@/app/actions/checkout';
 import { useCartStore } from '@/store/use-cart-store';
+import { BANK_DETAILS } from '@/lib/bank-details';
 
 type PaymentMethod = 'payhere' | 'bank_transfer' | 'cash_pickup' | 'cash_delivery';
 
@@ -39,18 +45,12 @@ const PAYMENT_METHOD_CONFIG = {
   cash_delivery: { icon: Bike, label: 'Cash on Delivery', color: 'text-amber-500', bgColor: 'bg-amber-500/10', borderColor: 'border-amber-500/25' },
 };
 
-const BANK_DETAILS = [
-  ['Bank', 'Commercial Bank of Ceylon'],
-  ['Account Name', 'FTC Electronics'],
-  ['Account No.', '8001234567'],
-  ['Branch', 'Colombo 03'],
-  ['Branch Code', '003'],
-];
-
 export default function OrderConfirmationPage() {
   const searchParams = useSearchParams();
   const [orderInfo, setOrderInfo] = useState<OrderInfo | null>(null);
+  const [notFound, setNotFound] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [payhereStatus, setPayhereStatus] = useState<'pending' | 'success' | 'failed' | null>(null);
 
   // Slip upload state
   const [slipFile, setSlipFile] = useState<File | null>(null);
@@ -61,32 +61,62 @@ export default function OrderConfirmationPage() {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    // Wipe cart items state and localStorage on order confirmation
-    useCartStore.getState().clearCart();
+  const [isAuthorizedForSlip, setIsAuthorizedForSlip] = useState(false);
 
+  useEffect(() => {
     const orderNumberParam = searchParams.get('order') || searchParams.get('order_id');
     const methodParam = (searchParams.get('method') || 'bank_transfer') as PaymentMethod;
 
-    if (orderNumberParam) {
-      if (methodParam === 'payhere') {
-        void confirmPayHereReturnAction(orderNumberParam);
-      }
+    if (!orderNumberParam) {
+      setNotFound(true);
+      return;
+    }
 
-      try {
-        const raw = sessionStorage.getItem('ftc_last_order');
-        if (raw) {
-          const stored = JSON.parse(raw);
-          if (stored.orderNumber === orderNumberParam) {
-            setOrderInfo({ ...stored, paymentMethod: methodParam });
-            return;
-          }
+    setNotFound(false);
+
+    if (methodParam === 'payhere') {
+      setPayhereStatus('pending');
+      confirmPayHereReturnAction(orderNumberParam).then((res) => {
+        if (res.success) {
+          setPayhereStatus('success');
+          useCartStore.getState().clearCart();
+        } else {
+          setPayhereStatus('failed');
         }
-      } catch { /* ignore */ }
-      setOrderInfo({ orderNumber: orderNumberParam, orderId: '', paymentMethod: methodParam, customerEmail: '', total: 0 });
+      });
     } else {
-      const randomNum = Math.floor(10000 + Math.random() * 90000);
-      setOrderInfo({ orderNumber: `ORD-${randomNum}`, orderId: '', paymentMethod: 'bank_transfer', customerEmail: '', total: 0 });
+      // Clear cart only after validating that a valid order reference exists
+      useCartStore.getState().clearCart();
+    }
+
+    let hasLocalSession = false;
+    try {
+      const raw = sessionStorage.getItem('ftc_last_order');
+      if (raw) {
+        const stored = JSON.parse(raw);
+        if (stored.orderNumber === orderNumberParam) {
+          setOrderInfo({ ...stored, paymentMethod: methodParam });
+          setIsAuthorizedForSlip(true);
+          hasLocalSession = true;
+        }
+      }
+    } catch { /* ignore */ }
+
+    if (!hasLocalSession) {
+      verifyOrderForSlipUploadAction(orderNumberParam).then((res) => {
+        if (res.success && res.order) {
+          setOrderInfo({
+            orderNumber: res.order.orderNumber,
+            orderId: res.order.orderId,
+            paymentMethod: (res.order.paymentMethod || methodParam) as PaymentMethod,
+            customerEmail: res.order.customerEmail,
+            total: res.order.total,
+          });
+          setIsAuthorizedForSlip(res.isAuthorized);
+        } else {
+          setNotFound(true);
+        }
+      });
     }
   }, [searchParams]);
 
@@ -128,7 +158,6 @@ export default function OrderConfirmationPage() {
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
     if (file) processFile(file);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
@@ -143,6 +172,7 @@ export default function OrderConfirmationPage() {
     formData.append('slip', slipFile);
     formData.append('orderNumber', orderInfo.orderNumber);
     if (orderInfo.orderId) formData.append('orderId', orderInfo.orderId);
+    if (orderInfo.customerEmail) formData.append('customerEmail', orderInfo.customerEmail);
 
     const result = await uploadPaymentSlipAction(formData);
     setUploading(false);
@@ -155,6 +185,32 @@ export default function OrderConfirmationPage() {
     }
   };
 
+  if (notFound) {
+    return (
+      <div className="max-w-md mx-auto text-center space-y-4 py-16 text-foreground">
+        <div className="h-14 w-14 bg-amber-500/10 border border-amber-500/30 rounded-full flex items-center justify-center text-amber-500 mx-auto">
+          <AlertCircle className="h-8 w-8" />
+        </div>
+        <h1 className="text-xl font-bold">Order Reference Not Found</h1>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          No valid order parameter was provided in the link. Please check your account history or order confirmation email.
+        </p>
+        <div className="pt-2 flex justify-center gap-3">
+          <Link href="/account/orders">
+            <Button className="bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white">
+              View Your Orders
+            </Button>
+          </Link>
+          <Link href="/">
+            <Button variant="outline" className="text-xs font-semibold">
+              Return Home
+            </Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   if (!orderInfo) {
     return (
       <div className="max-w-xl mx-auto flex items-center justify-center py-20">
@@ -166,9 +222,23 @@ export default function OrderConfirmationPage() {
   const methodCfg = PAYMENT_METHOD_CONFIG[orderInfo.paymentMethod] || PAYMENT_METHOD_CONFIG.bank_transfer;
   const MethodIcon = methodCfg.icon;
   const isBankTransfer = orderInfo.paymentMethod === 'bank_transfer';
+  const isPayHere = orderInfo.paymentMethod === 'payhere';
 
   return (
     <div className="max-w-2xl mx-auto space-y-5">
+      {/* PayHere Verification Status Alert */}
+      {isPayHere && payhereStatus === 'failed' && (
+        <div className="flex items-start gap-3 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-400 text-xs leading-relaxed">
+          <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+          <div>
+            <span className="font-bold block mb-0.5">Online Payment Status Unconfirmed</span>
+            <span>
+              We haven&apos;t received payment confirmation from PayHere yet. If you completed payment, your status will update automatically once verified.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Success Header */}
       <div className="bg-card border border-border rounded-xl p-8 text-center space-y-4 text-foreground">
         <div className="flex justify-center">
@@ -181,6 +251,8 @@ export default function OrderConfirmationPage() {
           <p className="text-sm text-muted-foreground mt-1">
             {isBankTransfer
               ? 'Your order is reserved. Please complete the bank transfer to confirm.'
+              : isPayHere && payhereStatus !== 'success'
+              ? 'Your order record was created. Awaiting payment verification.'
               : 'Your order has been confirmed and is being prepared.'}
           </p>
         </div>
@@ -245,77 +317,90 @@ export default function OrderConfirmationPage() {
           </div>
 
           {/* Slip Upload */}
-          <div className="p-5 space-y-4">
-            <div className="flex items-center gap-2 flex-wrap">
-              <Upload className="h-4 w-4" />
-              <h2 className="text-sm font-bold">Upload Payment Slip</h2>
-              <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">Optional but recommended</span>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Upload your bank transfer receipt so we can verify and process your order faster.
-              A link to upload later was also sent to your email — so no need to worry if you close this page.
-            </p>
-
-            {!slipFile ? (
-              <div
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200 ${
-                  isDragging ? 'border-blue-500 bg-blue-500/5' : 'border-border hover:border-muted-foreground/40 hover:bg-muted/20'
-                }`}
-              >
-                <ImageIcon className="h-8 w-8 text-muted-foreground/50 mx-auto mb-2" />
-                <p className="text-xs font-medium text-foreground">Drop your slip here, or click to browse</p>
-                <p className="text-[10px] text-muted-foreground mt-1">Supports JPG, PNG, WEBP, PDF — max 10MB</p>
-                <input ref={fileInputRef} type="file" accept="image/*,application/pdf" onChange={handleFileChange} className="hidden" />
+          {isAuthorizedForSlip ? (
+            <div className="p-5 space-y-4">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Upload className="h-4 w-4" />
+                <h2 className="text-sm font-bold">Upload Payment Slip</h2>
+                <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">Optional but recommended</span>
               </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="relative rounded-xl overflow-hidden border border-border bg-muted/30">
-                  {slipPreview ? (
-                    <img src={slipPreview} alt="Payment slip preview" className="w-full max-h-64 object-contain" />
-                  ) : (
-                    <div className="flex items-center gap-3 p-4">
-                      <div className="h-10 w-10 bg-red-500/10 rounded-lg flex items-center justify-center">
-                        <ImageIcon className="h-5 w-5 text-red-400" />
+              <p className="text-xs text-muted-foreground">
+                Upload your bank transfer receipt so we can verify and process your order faster.
+                A link to upload later was also sent to your email — so no need to worry if you close this page.
+              </p>
+
+              {!slipFile ? (
+                <div
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200 ${
+                    isDragging ? 'border-blue-500 bg-blue-500/5' : 'border-border hover:border-muted-foreground/40 hover:bg-muted/20'
+                  }`}
+                >
+                  <ImageIcon className="h-8 w-8 text-muted-foreground/50 mx-auto mb-2" />
+                  <p className="text-xs font-medium text-foreground">Drop your slip here, or click to browse</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">Supports JPG, PNG, WEBP, PDF — max 10MB</p>
+                  <input ref={fileInputRef} type="file" accept="image/*,application/pdf" onChange={handleFileChange} className="hidden" />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="relative rounded-xl overflow-hidden border border-border bg-muted/30">
+                    {slipPreview ? (
+                      <img src={slipPreview} alt="Payment slip preview" className="w-full max-h-64 object-contain" />
+                    ) : (
+                      <div className="flex items-center gap-3 p-4">
+                        <div className="h-10 w-10 bg-red-500/10 rounded-lg flex items-center justify-center">
+                          <ImageIcon className="h-5 w-5 text-red-400" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-semibold text-foreground">{slipFile.name}</div>
+                          <div className="text-[10px] text-muted-foreground">{(slipFile.size / 1024).toFixed(1)} KB</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="text-xs font-semibold text-foreground">{slipFile.name}</div>
-                        <div className="text-[10px] text-muted-foreground">{(slipFile.size / 1024).toFixed(1)} KB</div>
-                      </div>
+                    )}
+                    <button
+                      onClick={() => { setSlipFile(null); setSlipPreview(null); setUploadError(null); }}
+                      className="absolute top-2 right-2 h-6 w-6 bg-card/80 border border-border rounded-full flex items-center justify-center hover:bg-red-500/10 transition-colors cursor-pointer"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+
+                  {uploadError && (
+                    <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/25 rounded-lg text-red-400 text-xs">
+                      <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                      <span>{uploadError}</span>
                     </div>
                   )}
-                  <button
-                    onClick={() => { setSlipFile(null); setSlipPreview(null); setUploadError(null); }}
-                    className="absolute top-2 right-2 h-6 w-6 bg-card/80 border border-border rounded-full flex items-center justify-center hover:bg-red-500/10 transition-colors cursor-pointer"
+
+                  <Button
+                    onClick={handleUpload}
+                    disabled={uploading}
+                    className="w-full h-10 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm cursor-pointer transition-colors rounded-xl disabled:opacity-50"
                   >
-                    <X className="h-3 w-3" />
-                  </button>
+                    {uploading ? (
+                      <span className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Uploading...</span>
+                    ) : (
+                      <span className="flex items-center gap-2"><Upload className="h-4 w-4" />Submit Payment Slip</span>
+                    )}
+                  </Button>
                 </div>
-
-                {uploadError && (
-                  <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/25 rounded-lg text-red-400 text-xs">
-                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                    <span>{uploadError}</span>
-                  </div>
-                )}
-
-                <Button
-                  onClick={handleUpload}
-                  disabled={uploading}
-                  className="w-full h-10 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm cursor-pointer transition-colors rounded-xl disabled:opacity-50"
-                >
-                  {uploading ? (
-                    <span className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Uploading...</span>
-                  ) : (
-                    <span className="flex items-center gap-2"><Upload className="h-4 w-4" />Submit Payment Slip</span>
-                  )}
-                </Button>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          ) : (
+            <div className="p-5 text-center space-y-3 bg-muted/20">
+              <Lock className="h-5 w-5 text-muted-foreground mx-auto" />
+              <p className="text-xs font-bold text-foreground">Sign in to Upload Payment Slip</p>
+              <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+                To upload a bank transfer slip for this order, please log in to the account used during purchase.
+              </p>
+              <Link href={`/auth?redirect=${encodeURIComponent(`/checkout/confirmation?order=${orderInfo.orderNumber}&method=bank_transfer`)}`}>
+                <Button variant="outline" className="text-xs font-semibold mt-1">Log In to Account</Button>
+              </Link>
+            </div>
+          )}
         </div>
       )}
 
@@ -330,11 +415,16 @@ export default function OrderConfirmationPage() {
         </div>
       )}
 
-      {/* COD / Pickup Info */}
+      {/* COD / Pickup / Online Payment Info */}
       {!isBankTransfer && (
         <div className={`${methodCfg.bgColor} ${methodCfg.borderColor} border rounded-xl p-5 text-xs space-y-2`}>
           <p className={`font-bold uppercase tracking-widest text-[10px] ${methodCfg.color}`}>What Happens Next</p>
-          {orderInfo.paymentMethod === 'cash_pickup' ? (
+          {isPayHere && payhereStatus !== 'success' ? (
+            <>
+              <p className="text-foreground font-medium">Awaiting payment verification.</p>
+              <p className="text-muted-foreground">Once PayHere confirms your payment, our team will process and dispatch your order. If you were charged, your order status will update automatically after confirmation.</p>
+            </>
+          ) : orderInfo.paymentMethod === 'cash_pickup' ? (
             <>
               <p className="text-foreground font-medium">Our team is preparing your order.</p>
               <p className="text-muted-foreground">You will receive a call when your order is ready for collection. Please bring your order confirmation and the exact cash amount.</p>

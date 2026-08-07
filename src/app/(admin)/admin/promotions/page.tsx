@@ -147,6 +147,16 @@ export default function AdminPromotionsPage() {
       return;
     }
 
+    if (type === 'percentage' && parseFloat(value) > 100) {
+      setError('Percentage discount cannot exceed 100.');
+      return;
+    }
+
+    if (new Date(endDate) < new Date(startDate)) {
+      setError('End date must be on or after the start date.');
+      return;
+    }
+
     if (minOrderValue && parseFloat(minOrderValue) < 0) {
       setError('Minimum order value cannot be negative.');
       return;
@@ -378,7 +388,15 @@ export default function AdminPromotionsPage() {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-foreground/80 block">Discount Value *</label>
-                  <Input type="number" min="0" step="0.01" value={value} onChange={(e) => setValue(e.target.value)} required />
+                  <Input
+                    type="number"
+                    min="0"
+                    max={type === 'percentage' ? 100 : undefined}
+                    step="0.01"
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    required
+                  />
                 </div>
               </div>
 

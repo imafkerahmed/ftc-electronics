@@ -1451,9 +1451,11 @@ export async function markOrderAsReturnedAction(id: string, reason = 'Returned /
 
     // 2. Release all serial units linked to this order back to 'available' status
     try {
-      const filterStr = order.orderId ? `orderId = "${order.id}" || orderId = "${order.orderId}"` : `orderId = "${order.id}"`;
       const linkedUnits = await adminPb.collection('stock_management').getFullList({
-        filter: filterStr,
+        filter: adminPb.filter('orderId = {:recId} || orderId = {:orderNo}', {
+          recId: order.id,
+          orderNo: order.orderId || order.id,
+        }),
       });
 
       for (const unit of linkedUnits) {

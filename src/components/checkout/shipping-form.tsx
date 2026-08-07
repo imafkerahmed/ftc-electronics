@@ -26,12 +26,17 @@ export default function ShippingForm() {
   const [loggedInUser, setLoggedInUser] = useState<{ name: string; email: string } | null>(null);
 
   useEffect(() => {
+    let isMounted = true;
+
     async function loadUserOrSession() {
       // 1. Check if user already typed in shipping form during this checkout session
       try {
         const stored = sessionStorage.getItem('ftc_checkout_shipping');
         if (stored) {
-          setFormData(JSON.parse(stored));
+          const parsed = JSON.parse(stored) as Partial<ShippingAddress>;
+          if (isMounted) {
+            setFormData((prev) => ({ ...prev, ...parsed }));
+          }
           return;
         }
       } catch { /* ignore */ }
@@ -39,6 +44,8 @@ export default function ShippingForm() {
       // 2. Fetch logged-in user profile from session if available
       try {
         const res = await getCurrentUserSessionAction();
+        if (!isMounted) return;
+
         if (res.success && res.user) {
           const u = res.user;
           const nameParts = (u.name || '').trim().split(' ');
@@ -68,6 +75,9 @@ export default function ShippingForm() {
     }
 
     void loadUserOrSession();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -102,135 +112,152 @@ export default function ShippingForm() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label htmlFor="firstName" className="block text-xs text-muted-foreground mb-2">First Name</label>
+      {/* Name Fields */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label htmlFor="shipping-firstname" className="text-xs font-semibold text-muted-foreground">First Name *</label>
           <Input
-            id="firstName"
+            id="shipping-firstname"
             name="firstName"
             required
-            value={formData.firstName}
+            value={formData.firstName || ''}
             onChange={handleChange}
-            className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
+            placeholder="John"
+            className="h-10 bg-background border-border text-xs"
           />
         </div>
-        <div>
-          <label htmlFor="lastName" className="block text-xs text-muted-foreground mb-2">Last Name</label>
+        <div className="space-y-1.5">
+          <label htmlFor="shipping-lastname" className="text-xs font-semibold text-muted-foreground">Last Name *</label>
           <Input
-            id="lastName"
+            id="shipping-lastname"
             name="lastName"
             required
-            value={formData.lastName}
+            value={formData.lastName || ''}
             onChange={handleChange}
-            className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
+            placeholder="Doe"
+            className="h-10 bg-background border-border text-xs"
           />
         </div>
       </div>
 
-      <div>
-        <label htmlFor="email" className="block text-xs text-muted-foreground mb-2">Email Address</label>
-        <Input
-          id="email"
-          name="email"
-          type="email"
-          required
-          value={formData.email}
-          onChange={handleChange}
-          className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
-        />
-      </div>
-
-      <div>
-        <label htmlFor="addressLine1" className="block text-xs text-muted-foreground mb-2">Address Line 1</label>
-        <Input
-          id="addressLine1"
-          name="addressLine1"
-          required
-          value={formData.addressLine1}
-          onChange={handleChange}
-          className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
-        />
-      </div>
-
-      <div>
-        <label htmlFor="addressLine2" className="block text-xs text-muted-foreground mb-2">Address Line 2 (Optional)</label>
-        <Input
-          id="addressLine2"
-          name="addressLine2"
-          value={formData.addressLine2}
-          onChange={handleChange}
-          className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
-        />
-      </div>
-
-      <div className="grid grid-cols-3 gap-4">
-        <div className="col-span-2 sm:col-span-1">
-          <label htmlFor="city" className="block text-xs text-muted-foreground mb-2">City</label>
+      {/* Contact Fields */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label htmlFor="shipping-email" className="text-xs font-semibold text-muted-foreground">Email Address *</label>
           <Input
-            id="city"
-            name="city"
+            id="shipping-email"
+            name="email"
+            type="email"
             required
-            value={formData.city}
+            value={formData.email || ''}
             onChange={handleChange}
-            className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
+            placeholder="john@example.com"
+            className="h-10 bg-background border-border text-xs"
           />
         </div>
-        <div>
-          <label htmlFor="state" className="block text-xs text-muted-foreground mb-2">State / Prov</label>
+        <div className="space-y-1.5">
+          <label htmlFor="shipping-phone" className="text-xs font-semibold text-muted-foreground">Phone Number *</label>
           <Input
-            id="state"
-            name="state"
-            required
-            value={formData.state}
-            onChange={handleChange}
-            className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
-          />
-        </div>
-        <div>
-          <label htmlFor="postalCode" className="block text-xs text-muted-foreground mb-2">Postal Code</label>
-          <Input
-            id="postalCode"
-            name="postalCode"
-            required
-            value={formData.postalCode}
-            onChange={handleChange}
-            className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label htmlFor="phone" className="block text-xs text-muted-foreground mb-2">Phone Number</label>
-          <Input
-            id="phone"
+            id="shipping-phone"
             name="phone"
             type="tel"
             required
-            value={formData.phone}
+            value={formData.phone || ''}
             onChange={handleChange}
-            className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
-          />
-        </div>
-        <div>
-          <label htmlFor="country" className="block text-xs text-muted-foreground mb-2">Country</label>
-          <Input
-            id="country"
-            name="country"
-            required
-            value={formData.country}
-            onChange={handleChange}
-            className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
+            placeholder="+94 77 123 4567"
+            className="h-10 bg-background border-border text-xs"
           />
         </div>
       </div>
 
-      <Button
-        type="submit"
-        className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-semibold cursor-pointer transition-colors"
-      >
-        Continue to Payment
-      </Button>
+      {/* Address Line 1 */}
+      <div className="space-y-1.5">
+        <label htmlFor="shipping-address1" className="text-xs font-semibold text-muted-foreground">Street Address *</label>
+        <Input
+          id="shipping-address1"
+          name="addressLine1"
+          required
+          value={formData.addressLine1 || ''}
+          onChange={handleChange}
+          placeholder="123 Tech Street, Suite A"
+          className="h-10 bg-background border-border text-xs"
+        />
+      </div>
+
+      {/* Address Line 2 */}
+      <div className="space-y-1.5">
+        <label htmlFor="shipping-address2" className="text-xs font-semibold text-muted-foreground">Apartment, suite, unit, etc. (optional)</label>
+        <Input
+          id="shipping-address2"
+          name="addressLine2"
+          value={formData.addressLine2 || ''}
+          onChange={handleChange}
+          placeholder="Floor 2, Apt 4B"
+          className="h-10 bg-background border-border text-xs"
+        />
+      </div>
+
+      {/* City, State, Postal Code */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="space-y-1.5">
+          <label htmlFor="shipping-city" className="text-xs font-semibold text-muted-foreground">City *</label>
+          <Input
+            id="shipping-city"
+            name="city"
+            required
+            value={formData.city || ''}
+            onChange={handleChange}
+            placeholder="Colombo"
+            className="h-10 bg-background border-border text-xs"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label htmlFor="shipping-state" className="text-xs font-semibold text-muted-foreground">District / Province *</label>
+          <Input
+            id="shipping-state"
+            name="state"
+            required
+            value={formData.state || ''}
+            onChange={handleChange}
+            placeholder="Western Province"
+            className="h-10 bg-background border-border text-xs"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label htmlFor="shipping-postalcode" className="text-xs font-semibold text-muted-foreground">Postal Code *</label>
+          <Input
+            id="shipping-postalcode"
+            name="postalCode"
+            required
+            value={formData.postalCode || ''}
+            onChange={handleChange}
+            placeholder="00300"
+            className="h-10 bg-background border-border text-xs"
+          />
+        </div>
+      </div>
+
+      {/* Country */}
+      <div className="space-y-1.5">
+        <label htmlFor="shipping-country" className="text-xs font-semibold text-muted-foreground">Country</label>
+        <Input
+          id="shipping-country"
+          name="country"
+          readOnly
+          value={formData.country || 'Sri Lanka'}
+          className="h-10 bg-muted border-border text-xs text-muted-foreground cursor-not-allowed"
+        />
+      </div>
+
+      {/* Submit Button */}
+      <div className="pt-2">
+        <Button
+          type="submit"
+          className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs uppercase tracking-wider cursor-pointer rounded-xl transition-colors"
+        >
+          Continue to Payment
+        </Button>
+      </div>
     </form>
   );
 }

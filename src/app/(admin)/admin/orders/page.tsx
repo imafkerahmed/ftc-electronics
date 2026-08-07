@@ -3,12 +3,28 @@
 import React, { useState, useEffect, useTransition } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { updateOrderStatusAction, markOrderAsPaidAction, getAdminOrdersAction, getReceiptPrintPresetsAction, sendOrderInvoiceEmailAction, markOrderAsReturnedAction } from '@/app/actions/admin';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  updateOrderStatusAction,
+  markOrderAsPaidAction,
+  getAdminOrdersAction,
+  getReceiptPrintPresetsAction,
+  sendOrderInvoiceEmailAction,
+  markOrderAsReturnedAction,
+} from '@/app/actions/admin';
 import { DEFAULT_RECEIPT_CONFIG, normalizeReceiptConfig, type ReceiptPrintConfig } from '@/types/receipt-config';
 import { printReceipt } from '@/lib/receipt-print';
 import { printInvoice, resolveInvoiceConfig, type InvoiceData } from '@/lib/invoice-print';
 import { Loader2, CheckCircle, AlertCircle, ShoppingBag, Printer, FileText, Mail, Search, Truck, Check, CheckCircle2, RotateCcw, X } from 'lucide-react';
 import ShipFulfillmentModal from '@/components/admin/ship-fulfillment-modal';
+import type { OrderStatus } from '@/types/order';
 
 interface OrderItem {
   name: string;
@@ -25,12 +41,26 @@ interface Order {
   total: number;
   paymentStatus: 'paid' | 'pending';
   paymentMethod: string;
-  shippingStatus: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+  shippingStatus: OrderStatus;
   date: string;
   rawItems: OrderItem[];
 }
 
 type TabFilter = 'all' | 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+
+const collectSerials = (item: OrderItem): string[] => {
+  const serials: string[] = [];
+  if (Array.isArray(item.assignedSerials) && item.assignedSerials.length > 0) {
+    serials.push(...item.assignedSerials);
+  }
+  if (Array.isArray(item.assignedUnits) && item.assignedUnits.length > 0) {
+    item.assignedUnits.forEach((u) => {
+      const val = u.serialNumber || u.barcode;
+      if (val && !serials.includes(val)) serials.push(val);
+    });
+  }
+  return serials;
+};
 
 const getFallbackInvoiceDate = (orderDate?: string) => {
   return orderDate || new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -47,7 +77,7 @@ export default function AdminOrdersPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
   const [selectedFulfillOrderId, setSelectedFulfillOrderId] = useState<string | null>(null);
-  
+
   // Confirmation Modals State
   const [deliverConfirmOrder, setDeliverConfirmOrder] = useState<{ id: string; orderId: string } | null>(null);
   const [returnConfirmOrder, setReturnConfirmOrder] = useState<{ id: string; orderId: string } | null>(null);
@@ -89,8 +119,8 @@ export default function AdminOrdersPage() {
               email: o.customer?.email || o.expand?.user?.email || o.email || 'guest@example.com',
               total: o.total || o.totalAmount || 0,
               paymentStatus: o.isPaid ? 'paid' : 'pending',
-              paymentMethod: o.paymentDetails?.method || o.paymentMethod || 'bank_transfer',
-              shippingStatus: (o.status || 'pending') as Order['shippingStatus'],
+              paymentMethod: o.paymentDetails?.method || o.paymentMethod || 'Unknown',
+              shippingStatus: (o.status || 'pending') as OrderStatus,
               date: dateStr,
               rawItems: Array.isArray(o.items) ? o.items : [],
             };
@@ -191,17 +221,7 @@ export default function AdminOrdersPage() {
     const invoiceItems =
       order.rawItems && order.rawItems.length > 0
         ? order.rawItems.map((item) => {
-            const serialsList: string[] = [];
-            if (Array.isArray(item.assignedSerials) && item.assignedSerials.length > 0) {
-              serialsList.push(...item.assignedSerials);
-            }
-            if (Array.isArray(item.assignedUnits) && item.assignedUnits.length > 0) {
-              item.assignedUnits.forEach((u) => {
-                const val = u.serialNumber || u.barcode;
-                if (val && !serialsList.includes(val)) serialsList.push(val);
-              });
-            }
-
+            const serialsList = collectSerials(item);
             return {
               name: item.name || `Product Item`,
               qty: item.quantity || 1,
@@ -259,9 +279,16 @@ export default function AdminOrdersPage() {
           </span>
         );
       case 'cancelled':
+      case 'refunded':
         return (
           <span className="bg-red-500/10 text-red-500 border border-red-500/20 px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider">
-            Cancelled / Returned
+            {order.shippingStatus === 'refunded' ? 'Refunded' : 'Cancelled / Returned'}
+          </span>
+        );
+      case 'pending_payment':
+        return (
+          <span className="bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider">
+            Pending Payment
           </span>
         );
       default:
@@ -273,13 +300,15 @@ export default function AdminOrdersPage() {
     }
   };
 
-  const getPaymentMethodLabel = (method: string) => {
+  const getPaymentMethodLabel = (method?: string) => {
+    if (!method || method === 'Unknown') return 'Unknown';
     switch (method) {
       case 'bank_transfer':
         return '🏦 Bank Transfer';
       case 'cash_pickup':
         return '📦 Cash on Pickup';
       case 'cash_delivery':
+      case 'cod':
         return '🛵 Cash on Delivery';
       case 'stripe':
       case 'payhere':
@@ -291,19 +320,19 @@ export default function AdminOrdersPage() {
 
   const counts = {
     all: orders.length,
-    pending: orders.filter((o) => o.shippingStatus === 'pending' || o.paymentStatus === 'pending').length,
+    pending: orders.filter((o) => o.paymentStatus === 'pending' && o.shippingStatus !== 'cancelled').length,
     processing: orders.filter((o) => (o.shippingStatus === 'processing' || o.shippingStatus === 'pending') && o.paymentStatus === 'paid').length,
     shipped: orders.filter((o) => o.shippingStatus === 'shipped').length,
     delivered: orders.filter((o) => o.shippingStatus === 'delivered').length,
-    cancelled: orders.filter((o) => o.shippingStatus === 'cancelled').length,
+    cancelled: orders.filter((o) => o.shippingStatus === 'cancelled' || o.shippingStatus === 'refunded').length,
   };
 
   const filteredOrders = orders.filter((o) => {
-    if (activeTab === 'pending' && !(o.shippingStatus === 'pending' || o.paymentStatus === 'pending')) return false;
+    if (activeTab === 'pending' && (o.paymentStatus !== 'pending' || o.shippingStatus === 'cancelled')) return false;
     if (activeTab === 'processing' && !((o.shippingStatus === 'processing' || o.shippingStatus === 'pending') && o.paymentStatus === 'paid')) return false;
     if (activeTab === 'shipped' && o.shippingStatus !== 'shipped') return false;
     if (activeTab === 'delivered' && o.shippingStatus !== 'delivered') return false;
-    if (activeTab === 'cancelled' && o.shippingStatus !== 'cancelled') return false;
+    if (activeTab === 'cancelled' && o.shippingStatus !== 'cancelled' && o.shippingStatus !== 'refunded') return false;
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -443,7 +472,7 @@ export default function AdminOrdersPage() {
                             size="sm"
                             variant="secondary"
                             onClick={() => handleMarkPaid(order.id)}
-                            disabled={isPending}
+                            disabled={isPending || sendingEmailId === order.id}
                             className="h-8 text-[11px] font-semibold text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/10 cursor-pointer"
                           >
                             <Check className="h-3 w-3 mr-1" />
@@ -456,6 +485,7 @@ export default function AdminOrdersPage() {
                           <Button
                             size="sm"
                             onClick={() => setSelectedFulfillOrderId(order.id)}
+                            disabled={isPending}
                             className="h-8 text-[11px] font-semibold bg-blue-600 hover:bg-blue-500 text-white cursor-pointer"
                           >
                             <Truck className="h-3 w-3 mr-1" />
@@ -469,7 +499,7 @@ export default function AdminOrdersPage() {
                             size="sm"
                             variant="secondary"
                             onClick={() => setDeliverConfirmOrder({ id: order.id, orderId: order.orderId })}
-                            disabled={isPending}
+                            disabled={isPending || sendingEmailId === order.id}
                             className="h-8 text-[11px] font-semibold text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/10 cursor-pointer"
                             title="Confirm package has been delivered to customer"
                           >
@@ -478,8 +508,8 @@ export default function AdminOrdersPage() {
                           </Button>
                         )}
 
-                        {/* Mark Returned / Restock button */}
-                        {order.shippingStatus !== 'cancelled' && (
+                        {/* Mark Returned / Restock button — restricted to paid orders that consumed inventory stock */}
+                        {order.paymentStatus === 'paid' && order.shippingStatus !== 'cancelled' && (
                           <Button
                             size="sm"
                             variant="outline"
@@ -487,7 +517,7 @@ export default function AdminOrdersPage() {
                               setReturnReason('Customer unreachable / Package returned');
                               setReturnConfirmOrder({ id: order.id, orderId: order.orderId });
                             }}
-                            disabled={isPending}
+                            disabled={isPending || sendingEmailId === order.id}
                             className="h-8 text-[11px] font-semibold text-rose-400 border border-rose-500/30 hover:bg-rose-500/10 cursor-pointer"
                             title="Mark package returned, restore inventory stock & release assigned serial numbers"
                           >
@@ -509,7 +539,7 @@ export default function AdminOrdersPage() {
                           size="sm"
                           variant="outline"
                           onClick={() => handleSendEmail(order)}
-                          disabled={sendingEmailId === order.id || isPending || !order.email || order.email === 'guest@example.com'}
+                          disabled={sendingEmailId === order.id || !order.email || order.email === 'guest@example.com'}
                           className="h-8 text-[11px] font-semibold flex items-center gap-1 cursor-pointer border-border hover:bg-muted text-blue-400 border-blue-500/30 disabled:opacity-40"
                           title={order.email && order.email !== 'guest@example.com' ? 'Send tax invoice via email to customer' : 'Customer email not configured'}
                         >
@@ -523,42 +553,28 @@ export default function AdminOrdersPage() {
                             const receiptItems =
                               order.rawItems && order.rawItems.length > 0
                                 ? order.rawItems.map((item) => {
-                                    const serialsList: string[] = [];
-                                    if (Array.isArray(item.assignedSerials) && item.assignedSerials.length > 0) {
-                                      serialsList.push(...item.assignedSerials);
-                                    }
-                                    if (Array.isArray(item.assignedUnits) && item.assignedUnits.length > 0) {
-                                      item.assignedUnits.forEach((u) => {
-                                        const val = u.serialNumber || u.barcode;
-                                        if (val && !serialsList.includes(val)) serialsList.push(val);
-                                      });
-                                    }
-                                    const serialSuffix = serialsList.length > 0 ? ` (S/N: ${serialsList.join(', ')})` : '';
-
+                                    const serialsList = collectSerials(item);
                                     return {
-                                      name: `${item.name || 'Product Item'}${serialSuffix}`,
-                                      qty: item.quantity || 1,
+                                      name: serialsList.length > 0 ? `${item.name || 'Product Item'} (S/N: ${serialsList.join(', ')})` : item.name || 'Product Item',
                                       unitPrice: item.price || 0,
+                                      qty: item.quantity || 1,
+                                      lineTotal: (item.price || 0) * (item.quantity || 1),
                                     };
                                   })
-                                : [{ name: `Order ${order.orderId}`, qty: 1, unitPrice: order.total }];
+                                : [{ name: `Order ${order.orderId}`, unitPrice: order.total, qty: 1, lineTotal: order.total }];
 
-                            printReceipt(
-                              defaultReceiptConfig,
-                              {
-                                orderNumber: order.orderId,
-                                date: order.date,
-                                customerName: order.email,
-                                items: receiptItems,
-                                subtotal: order.total,
-                                total: order.total,
-                                paymentMethod: order.paymentStatus === 'paid' ? 'Paid' : 'Pending',
-                              },
-                              `Receipt \u2014 ${order.orderId}`
-                            );
+                            printReceipt(defaultReceiptConfig, {
+                              orderNumber: order.orderId,
+                              customerName: order.email,
+                              date: getFallbackInvoiceDate(order.date),
+                              items: receiptItems,
+                              subtotal: order.total,
+                              total: order.total,
+                              paymentMethod: getPaymentMethodLabel(order.paymentMethod),
+                            });
                           }}
-                          className="h-8 text-[11px] font-semibold flex items-center gap-1 cursor-pointer border-border hover:bg-muted"
-                          title="Print thermal receipt"
+                          className="h-8 text-[11px] font-semibold flex items-center gap-1 cursor-pointer border-border hover:bg-muted text-emerald-400 border-emerald-500/30"
+                          title="Print Thermal 80mm/58mm Receipt"
                         >
                           <Printer className="h-3 w-3" /> Receipt
                         </Button>
@@ -572,12 +588,12 @@ export default function AdminOrdersPage() {
         </div>
       </div>
 
-      {/* Ship & Fulfill Modal */}
+      {/* Serial Assignment & Shipping Fulfillment Modal */}
       {selectedFulfillOrderId && (
         <ShipFulfillmentModal
-          isOpen={Boolean(selectedFulfillOrderId)}
-          orderId={selectedFulfillOrderId}
+          isOpen={!!selectedFulfillOrderId}
           onClose={() => setSelectedFulfillOrderId(null)}
+          orderId={selectedFulfillOrderId}
           onSuccess={(msg) => {
             setSuccess(msg);
             loadData();
@@ -586,110 +602,94 @@ export default function AdminOrdersPage() {
       )}
 
       {/* Confirm Delivery Dialog Modal */}
-      {deliverConfirmOrder && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4 animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <h3 className="font-bold text-lg text-foreground flex items-center gap-2">
-                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-                Confirm Order Delivery
-              </h3>
-              <button
-                onClick={() => setDeliverConfirmOrder(null)}
-                className="text-muted-foreground hover:text-foreground transition-colors p-1"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Are you sure order <strong className="text-foreground font-mono">#{deliverConfirmOrder.orderId}</strong> has been successfully delivered to the customer?
-            </p>
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-border">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setDeliverConfirmOrder(null)}
-                className="text-xs"
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                onClick={confirmMarkDelivered}
-                disabled={isPending}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs"
-              >
-                {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1" />}
-                Yes, Mark as Delivered
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Dialog open={!!deliverConfirmOrder} onOpenChange={(open) => !open && setDeliverConfirmOrder(null)}>
+        <DialogContent className="max-w-md bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="text-emerald-500 flex items-center gap-2 text-lg font-bold">
+              <CheckCircle2 className="h-5 w-5" />
+              Confirm Order Delivery
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground leading-relaxed pt-1">
+              Are you sure order <strong className="text-foreground font-mono">#{deliverConfirmOrder?.orderId}</strong> has been successfully delivered to the customer?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="pt-4 border-t border-border flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDeliverConfirmOrder(null)}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={confirmMarkDelivered}
+              disabled={isPending}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs"
+            >
+              {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1" />}
+              Yes, Mark as Delivered
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Confirm Return & Restock Dialog Modal */}
-      {returnConfirmOrder && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4 animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <h3 className="font-bold text-lg text-rose-500 flex items-center gap-2">
-                <RotateCcw className="h-5 w-5 text-rose-500" />
-                Confirm Order Return & Restock
-              </h3>
-              <button
-                onClick={() => setReturnConfirmOrder(null)}
-                className="text-muted-foreground hover:text-foreground transition-colors p-1"
-              >
-                <X className="h-5 w-5" />
-              </button>
+      <Dialog open={!!returnConfirmOrder} onOpenChange={(open) => !open && setReturnConfirmOrder(null)}>
+        <DialogContent className="max-w-md bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="text-rose-500 flex items-center gap-2 text-lg font-bold">
+              <RotateCcw className="h-5 w-5" />
+              Confirm Order Return & Restock
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground leading-relaxed pt-1">
+              You are marking order <strong className="text-foreground font-mono">#{returnConfirmOrder?.orderId}</strong> as <strong>Returned</strong>.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg space-y-1 text-xs text-rose-400">
+              <p className="font-semibold">Automatic Actions:</p>
+              <ul className="list-disc list-inside space-y-0.5 text-[11px] text-muted-foreground">
+                <li>Restores product stock counts (<span className="text-foreground font-mono">+qty</span>).</li>
+                <li>Releases assigned serial numbers back to <span className="text-emerald-400 font-semibold">Available</span> stock.</li>
+                <li>Updates order status to <span className="text-rose-400 font-semibold">Cancelled / Returned</span>.</li>
+              </ul>
             </div>
 
-            <div className="space-y-3">
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                You are marking order <strong className="text-foreground font-mono">#{returnConfirmOrder.orderId}</strong> as <strong>Returned</strong>.
-              </p>
-              <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg space-y-1 text-xs text-rose-400">
-                <p className="font-semibold">Automatic Actions:</p>
-                <ul className="list-disc list-inside space-y-0.5 text-[11px] text-muted-foreground">
-                  <li>Restores product stock counts (<span className="text-foreground font-mono">+qty</span>).</li>
-                  <li>Releases assigned serial numbers back to <span className="text-emerald-400 font-semibold">Available</span> stock.</li>
-                  <li>Updates order status to <span className="text-rose-400 font-semibold">Cancelled / Returned</span>.</li>
-                </ul>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[11px] font-semibold text-muted-foreground">Return Reason / Notes:</label>
-                <Input
-                  value={returnReason}
-                  onChange={(e) => setReturnReason(e.target.value)}
-                  placeholder="e.g. Customer unreachable / Package returned"
-                  className="h-8 bg-background border-border text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-border">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setReturnConfirmOrder(null)}
-                className="text-xs"
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                onClick={confirmMarkReturned}
-                disabled={isPending}
-                className="bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs"
-              >
-                {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RotateCcw className="h-3.5 w-3.5 mr-1" />}
-                Confirm Return & Restock
-              </Button>
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold text-muted-foreground">Return Reason / Notes:</label>
+              <Input
+                value={returnReason}
+                onChange={(e) => setReturnReason(e.target.value)}
+                placeholder="e.g. Customer unreachable / Package returned"
+                className="h-8 bg-background border-border text-xs"
+              />
             </div>
           </div>
-        </div>
-      )}
+
+          <DialogFooter className="pt-4 border-t border-border flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setReturnConfirmOrder(null)}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={confirmMarkReturned}
+              disabled={isPending}
+              className="bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs"
+            >
+              {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RotateCcw className="h-3.5 w-3.5 mr-1" />}
+              Confirm Return & Restock
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

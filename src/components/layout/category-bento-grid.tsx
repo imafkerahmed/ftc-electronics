@@ -14,7 +14,6 @@ import {
   Plug,
   X,
   ChevronRight,
-  Layers,
 } from "lucide-react";
 
 interface CategoryCard {
@@ -22,7 +21,7 @@ interface CategoryCard {
   title: string;
   description: string;
   href: string;
-  count: string;
+  count?: string;
   icon: React.ReactNode;
   glowColor: string;
   hoverColor: string;
@@ -135,32 +134,52 @@ export default function CategoryBentoGrid({
 
     const title = slotConfig?.title || matchedCategory?.name || def.title;
 
-    const slug = (slotConfig?.slug || matchedCategory?.slug || def.href.replace("/products/","").replace("/products?category=","")).toLowerCase();
-    const href = slug.startsWith("/") ? slug : `/products?category=${slug}`;
+    // Keep slug verbatim to avoid breaking case-sensitive category URLs
+    const rawSlug =
+      slotConfig?.slug ||
+      matchedCategory?.slug ||
+      def.href.replace("/products/", "").replace("/products?category=", "");
+    const href = rawSlug.startsWith("/") ? rawSlug : `/products?category=${rawSlug}`;
 
     const count = matchedCategory
       ? `${matchedCategory.productCount || 0}+ Products`
       : def.count;
 
-    // Detect theme & icon based on title or slug keywords
-    const searchText = `${title} ${slug}`.toLowerCase();
+    // Detect theme & icon based on title or slug keywords (normalized for search)
+    const searchText = `${title} ${rawSlug}`.toLowerCase();
 
-    // Default matching description based on category topic
-    const defaultDescription = searchText.includes("phone") || searchText.includes("mobile")
-      ? "Flagship Mobile Devices & Ecosystem Docks"
-      : searchText.includes("power") || searchText.includes("battery") || searchText.includes("charge")
-      ? "High-Capacity Fast Charging & Portable Power"
-      : searchText.includes("care") || searchText.includes("personal") || searchText.includes("groom")
-      ? "Smart Personal Care & Wellness Essentials"
-      : searchText.includes("accessor") || searchText.includes("cable") || searchText.includes("gadget")
-      ? "Essential Cables, Adapters & Daily Gear"
-      : searchText.includes("key")
-      ? "Custom Mechanical & Tactile Layouts"
-      : searchText.includes("audio") || searchText.includes("head") || searchText.includes("speaker")
-      ? "Studio Quality ANC & Wireless Sound"
-      : searchText.includes("laptop") || searchText.includes("comp") || searchText.includes("mac")
-      ? "High-Performance Workstations & Ultrabooks"
-      : def.description;
+    // Unified topic categorization logic
+    let topic: 'phone' | 'power' | 'care' | 'accessor' | 'key' | 'audio' | 'laptop' = 'laptop';
+    if (searchText.includes("phone") || searchText.includes("mobile")) {
+      topic = 'phone';
+    } else if (searchText.includes("power") || searchText.includes("battery") || searchText.includes("charge")) {
+      topic = 'power';
+    } else if (searchText.includes("care") || searchText.includes("personal") || searchText.includes("groom")) {
+      topic = 'care';
+    } else if (searchText.includes("accessor") || searchText.includes("cable") || searchText.includes("gadget")) {
+      topic = 'accessor';
+    } else if (searchText.includes("key")) {
+      topic = 'key';
+    } else if (searchText.includes("audio") || searchText.includes("head") || searchText.includes("speaker")) {
+      topic = 'audio';
+    } else if (searchText.includes("laptop") || searchText.includes("comp") || searchText.includes("mac")) {
+      topic = 'laptop';
+    }
+
+    const defaultDescription =
+      topic === 'phone'
+        ? "Flagship Mobile Devices & Ecosystem Docks"
+        : topic === 'power'
+        ? "High-Capacity Fast Charging & Portable Power"
+        : topic === 'care'
+        ? "Smart Personal Care & Wellness Essentials"
+        : topic === 'accessor'
+        ? "Essential Cables, Adapters & Daily Gear"
+        : topic === 'key'
+        ? "Custom Mechanical & Tactile Layouts"
+        : topic === 'audio'
+        ? "Studio Quality ANC & Wireless Sound"
+        : "High-Performance Workstations & Ultrabooks";
 
     const description =
       slotConfig?.description ||
@@ -168,39 +187,72 @@ export default function CategoryBentoGrid({
       matchedCategory?.tagline ||
       defaultDescription;
 
-    let theme = {
-      label: slotConfig?.label || (searchText.includes("phone") || searchText.includes("mobile") ? "SMARTPHONES" : searchText.includes("power") || searchText.includes("battery") || searchText.includes("charge") ? "POWER BANKS" : searchText.includes("care") || searchText.includes("personal") || searchText.includes("groom") ? "PERSONAL CARE" : searchText.includes("accessor") || searchText.includes("cable") || searchText.includes("gadget") ? "ACCESSORIES" : searchText.includes("key") ? "KEYBOARDS" : searchText.includes("audio") || searchText.includes("head") || searchText.includes("speaker") ? "AUDIO" : searchText.includes("laptop") || searchText.includes("comp") || searchText.includes("mac") ? "LAPTOPS" : def.label),
-      icon: searchText.includes("phone") || searchText.includes("mobile") ? (
-        <Smartphone className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-emerald-400" strokeWidth={1.0} />
-      ) : searchText.includes("power") || searchText.includes("battery") || searchText.includes("charge") ? (
-        <BatteryCharging className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-amber-400" strokeWidth={1.0} />
-      ) : searchText.includes("care") || searchText.includes("personal") || searchText.includes("groom") ? (
-        <Sparkles className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-cyan-400" strokeWidth={1.0} />
-      ) : searchText.includes("accessor") || searchText.includes("cable") || searchText.includes("gadget") ? (
-        <Plug className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-pink-400" strokeWidth={1.0} />
-      ) : searchText.includes("key") ? (
-        <Keyboard className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-purple-400" strokeWidth={1.0} />
-      ) : searchText.includes("audio") || searchText.includes("head") || searchText.includes("speaker") ? (
-        <Headphones className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-rose-400" strokeWidth={1.0} />
-      ) : (
-        <Laptop className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-blue-400" strokeWidth={1.0} />
-      ),
-      glowColor: searchText.includes("phone") ? "rgba(16,185,129,0.35)" : searchText.includes("power") ? "rgba(245,158,11,0.35)" : searchText.includes("care") ? "rgba(6,182,212,0.35)" : searchText.includes("accessor") ? "rgba(236,72,153,0.35)" : searchText.includes("key") ? "rgba(168,85,247,0.3)" : searchText.includes("audio") ? "rgba(244,63,94,0.3)" : "rgba(59,130,246,0.3)",
-      hoverColor: searchText.includes("phone") ? "group-hover:text-emerald-400" : searchText.includes("power") ? "group-hover:text-amber-400" : searchText.includes("care") ? "group-hover:text-cyan-400" : searchText.includes("accessor") ? "group-hover:text-pink-400" : searchText.includes("key") ? "group-hover:text-purple-400" : searchText.includes("audio") ? "group-hover:text-rose-400" : "group-hover:text-blue-400",
-      tagColor: searchText.includes("phone") ? "bg-emerald-500/90 text-white border-emerald-400/30" : searchText.includes("power") ? "bg-amber-500/90 text-white border-amber-400/30" : searchText.includes("care") ? "bg-cyan-500/90 text-white border-cyan-400/30" : searchText.includes("accessor") ? "bg-pink-500/90 text-white border-pink-400/30" : searchText.includes("key") ? "bg-purple-500/90 text-white border-purple-400/30" : searchText.includes("audio") ? "bg-rose-500/90 text-white border-rose-400/30" : "bg-blue-500/90 text-white border-blue-400/30",
+    const themeMap = {
+      phone: {
+        label: "SMARTPHONES",
+        icon: <Smartphone className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-emerald-400" strokeWidth={1.0} />,
+        glowColor: "rgba(16,185,129,0.35)",
+        hoverColor: "group-hover:text-emerald-400",
+        tagColor: "bg-emerald-500/90 text-white border-emerald-400/30",
+      },
+      power: {
+        label: "POWER BANKS",
+        icon: <BatteryCharging className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-amber-400" strokeWidth={1.0} />,
+        glowColor: "rgba(245,158,11,0.35)",
+        hoverColor: "group-hover:text-amber-400",
+        tagColor: "bg-amber-500/90 text-white border-amber-400/30",
+      },
+      care: {
+        label: "PERSONAL CARE",
+        icon: <Sparkles className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-cyan-400" strokeWidth={1.0} />,
+        glowColor: "rgba(6,182,212,0.35)",
+        hoverColor: "group-hover:text-cyan-400",
+        tagColor: "bg-cyan-500/90 text-white border-cyan-400/30",
+      },
+      accessor: {
+        label: "ACCESSORIES",
+        icon: <Plug className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-pink-400" strokeWidth={1.0} />,
+        glowColor: "rgba(236,72,153,0.35)",
+        hoverColor: "group-hover:text-pink-400",
+        tagColor: "bg-pink-500/90 text-white border-pink-400/30",
+      },
+      key: {
+        label: "KEYBOARDS",
+        icon: <Keyboard className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-purple-400" strokeWidth={1.0} />,
+        glowColor: "rgba(168,85,247,0.3)",
+        hoverColor: "group-hover:text-purple-400",
+        tagColor: "bg-purple-500/90 text-white border-purple-400/30",
+      },
+      audio: {
+        label: "AUDIO",
+        icon: <Headphones className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-rose-400" strokeWidth={1.0} />,
+        glowColor: "rgba(244,63,94,0.3)",
+        hoverColor: "group-hover:text-rose-400",
+        tagColor: "bg-rose-500/90 text-white border-rose-400/30",
+      },
+      laptop: {
+        label: "LAPTOPS",
+        icon: <Laptop className="w-12 h-12 sm:w-28 lg:w-36 sm:h-28 lg:h-36 text-blue-400" strokeWidth={1.0} />,
+        glowColor: "rgba(59,130,246,0.3)",
+        hoverColor: "group-hover:text-blue-400",
+        tagColor: "bg-blue-500/90 text-white border-blue-400/30",
+      },
     };
+
+    const selectedTheme = themeMap[topic];
+    const labelText = slotConfig?.label || selectedTheme.label;
 
     return {
       ...def,
-      label: theme.label.toUpperCase(),
+      label: labelText.toUpperCase(),
       title,
       description,
       href,
       count,
-      icon: theme.icon,
-      glowColor: theme.glowColor,
-      hoverColor: theme.hoverColor,
-      tagColor: theme.tagColor,
+      icon: selectedTheme.icon,
+      glowColor: selectedTheme.glowColor,
+      hoverColor: selectedTheme.hoverColor,
+      tagColor: selectedTheme.tagColor,
     };
   });
 

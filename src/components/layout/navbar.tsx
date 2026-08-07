@@ -59,7 +59,7 @@ export default function Navbar() {
   const router = useRouter();
 
   const pathname = usePathname();
-  const shouldPlayIntro = pathname === "/" && !hasIntroPlayed;
+  const shouldPlayIntro = pathname === "/" && !hasIntroPlayed && Boolean(logoUrl);
 
   const [isIntroActive, setIsIntroActive] = useState(shouldPlayIntro);
   const [showOverlay, setShowOverlay] = useState(shouldPlayIntro);
@@ -86,7 +86,7 @@ export default function Navbar() {
         // Read avatar
         const avatarMatch = document.cookie.match(/pb_auth_avatar=([^;]+)/);
         setUserAvatar(avatarMatch ? decodeURIComponent(avatarMatch[1]) : "");
- 
+
         // If avatar isn't cached but indicator is active, perform a quick fallback check for avatar url
         if (!avatarMatch) {
           try {
@@ -135,7 +135,7 @@ export default function Navbar() {
         const raw = sessionStorage.getItem(NAV_CACHE_KEY);
         if (raw) {
           const { cats, brs, ts } = JSON.parse(raw) as { cats: any[]; brs: any[]; ts: number };
-          if (Date.now() - ts < NAV_CACHE_TTL_MS) {
+          if (Array.isArray(cats) && Array.isArray(brs) && Number.isFinite(ts) && Date.now() - ts < NAV_CACHE_TTL_MS) {
             setCategories(cats.filter((c: any) => c.isActive !== false));
             setBrands(brs);
             setDataLoaded(true);
@@ -169,11 +169,13 @@ export default function Navbar() {
         console.error("Failed to load navbar brands:", brsResult.reason);
       }
 
-      // Write to cache
-      try {
-        sessionStorage.setItem(NAV_CACHE_KEY, JSON.stringify({ cats, brs, ts: Date.now() }));
-      } catch {
-        // quota exceeded or unavailable — skip
+      // Write to cache only when both fetches succeeded
+      if (catsResult.status === "fulfilled" && brsResult.status === "fulfilled") {
+        try {
+          sessionStorage.setItem(NAV_CACHE_KEY, JSON.stringify({ cats, brs, ts: Date.now() }));
+        } catch {
+          // quota exceeded or unavailable — skip
+        }
       }
 
       setDataLoaded(true);
@@ -181,37 +183,40 @@ export default function Navbar() {
     void fetchData();
   }, []);
 
-
   const activeAnnouncements = announcement?.text
     ? [announcement.text, ...defaultAnnouncements]
     : defaultAnnouncements;
 
   useEffect(() => {
-    if (shouldPlayIntro) {
-      document.body.style.overflow = "hidden";
-
-      const frame = requestAnimationFrame(() => {
-        setIsIntroActive(true);
-        setShowOverlay(true);
-      });
-
-      const timer1 = setTimeout(() => {
-        setIsIntroActive(false);
-        document.body.style.overflow = "";
-        setIntroPlayed(true);
-      }, 1500);
-
-      const timer2 = setTimeout(() => {
-        setShowOverlay(false);
-      }, 2000);
-
-      return () => {
-        cancelAnimationFrame(frame);
-        clearTimeout(timer1);
-        clearTimeout(timer2);
-        document.body.style.overflow = "";
-      };
+    if (!shouldPlayIntro) {
+      setIsIntroActive(false);
+      setShowOverlay(false);
+      return;
     }
+
+    document.body.style.overflow = "hidden";
+
+    const frame = requestAnimationFrame(() => {
+      setIsIntroActive(true);
+      setShowOverlay(true);
+    });
+
+    const timer1 = setTimeout(() => {
+      setIsIntroActive(false);
+      document.body.style.overflow = "";
+    }, 1500);
+
+    const timer2 = setTimeout(() => {
+      setShowOverlay(false);
+      setIntroPlayed(true);
+    }, 2000);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      document.body.style.overflow = "";
+    };
   }, [shouldPlayIntro, setIntroPlayed]);
 
   useEffect(() => {
@@ -249,132 +254,111 @@ export default function Navbar() {
 
   const brandSubItems =
     brands.length > 0
-      ? brands.map((b) => ({ label: b.name, link: `/brands/${b.slug}` }))
+      ? brands.map((b) => ({
+          label: b.name,
+          link: `/products?brand=${b.slug}`,
+        }))
       : !dataLoaded
         ? [
-            { label: "Apple", link: "/brands/apple" },
-            { label: "Samsung", link: "/brands/samsung" },
-            { label: "Sony", link: "/brands/sony" },
-            { label: "Bose", link: "/brands/bose" },
-            { label: "Asus", link: "/brands/asus" },
+            { label: "Apple", link: "/products?brand=apple" },
+            { label: "Samsung", link: "/products?brand=samsung" },
+            { label: "Anker", link: "/products?brand=anker" },
+            { label: "Asus", link: "/products?brand=asus" },
           ]
         : [];
 
-  const menuItems = [
+  const navItems = [
     { label: "Home", link: "/" },
     {
-      label: "Categories",
+      label: "Shop All",
       link: "/products",
+    },
+    {
+      label: "Categories",
+      link: "/categories",
       subItems: categorySubItems,
     },
     {
       label: "Brands",
-      link: "/products",
+      link: "/brands",
       subItems: brandSubItems,
     },
-    { label: "On Sale", link: "/deals" },
-    { label: "About", link: "/about" },
-    { label: "Contact", link: "/contact" },
+    { label: "Contact Us", link: "/contact" },
   ];
 
   return (
     <>
-      {/* ── Announcement Banner ── */}
-      <AnimatePresence>
-        {showBanner && announcement?.show !== false && !isIntroActive && (
-          <motion.div
-            initial={{ scaleY: 0, opacity: 0 }}
-            animate={{ scaleY: 1, opacity: 1 }}
-            exit={{ scaleY: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            style={{ backgroundColor: announcement?.bgColor || undefined, transformOrigin: 'top' }}
-            className="w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 text-white text-xs font-semibold z-50 relative overflow-hidden"
-          >
-            <div className="relative flex items-center justify-center h-9 px-10">
-              {/* Animated shimmer layer */}
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full animate-[shimmer_3s_infinite]" />
-
-              {/* Cycling announcement text */}
+      {/* Dynamic Announcement Bar */}
+      {showBanner && (
+        <div className="bg-gradient-to-r from-blue-700 via-indigo-600 to-blue-700 text-white text-xs font-semibold py-2 px-4 transition-all duration-300 relative z-50 shadow-sm border-b border-white/10">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            <div className="flex-1 text-center truncate px-4">
               <AnimatePresence mode="wait">
                 <motion.span
                   key={announcementIdx}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
-                  transition={{ duration: 0.35 }}
-                  className="flex items-center gap-2 tracking-wide text-center"
+                  transition={{ duration: 0.3 }}
+                  className="inline-block tracking-wide font-medium"
                 >
                   {activeAnnouncements[announcementIdx]}
                 </motion.span>
               </AnimatePresence>
-
-              {/* Close button */}
-              <button
-                onClick={() => setShowBanner(false)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-white/20 transition-colors cursor-pointer"
-                aria-label="Close banner"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            <button
+              onClick={() => setShowBanner(false)}
+              className="text-white/80 hover:text-white transition-colors p-1 rounded-full hover:bg-white/10 shrink-0"
+              aria-label="Dismiss Announcement"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
-      {/* ── Main Navigation Header ── */}
+      {/* Main Glassmorphic Sticky Header */}
       <header
         className={cn(
-          "sticky top-0 z-50 w-full border-b backdrop-blur-sm transition-all duration-200",
-          isIntroActive
-            ? "border-transparent bg-transparent backdrop-blur-none"
-            : isScrolled
-              ? "border-border/80 bg-background/95 shadow-sm shadow-black/5"
-              : "border-border/40 bg-background/80",
+          "sticky top-0 z-40 w-full transition-all duration-300 border-b border-border/40",
+          isScrolled
+            ? "bg-background/80 backdrop-blur-xl shadow-lg border-border/80"
+            : "bg-background/95 backdrop-blur-md"
         )}
       >
-        {/* Subtle bottom glow line when scrolled */}
-        <div
-          className={cn(
-            "absolute bottom-0 left-0 right-0 h-[1px] transition-opacity duration-500",
-            isScrolled ? "opacity-100" : "opacity-0",
-          )}
-          style={{
-            background:
-              "linear-gradient(90deg, transparent, rgba(59,130,246,0.4) 40%, rgba(99,102,241,0.4) 60%, transparent)",
-          }}
-        />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between gap-2 sm:gap-4">
+          {/* Left: Menu & Search */}
+          <div className="flex items-center space-x-1 sm:space-x-3">
+            {/* React Bits StaggeredMenu Overlay Trigger */}
+            <div className="relative flex items-center justify-center">
+              <StaggeredMenu
+                position="left"
+                items={navItems}
+                displaySocials={true}
+                displayItemNumbering={true}
+                closeOnClickAway={true}
+                menuButtonColor="#3b82f6"
+                openMenuButtonColor="#ef4444"
+                accentColor="#3b82f6"
+                onMenuOpen={() => setMobileNavOpen(true)}
+                onMenuClose={closeMobileNav}
+              />
+            </div>
 
-        <div className="relative flex h-16 w-full items-center justify-between px-4 sm:px-6 lg:px-8">
-          {/* Left Side: Menu + Search */}
-          <motion.div
-            initial={{ opacity: 1 }}
-            animate={{ opacity: 1 }}
-            className="flex items-center pl-10 sm:pl-12 lg:pl-16"
-          >
-            <StaggeredMenu
-              position="left"
-              isFixed={true}
-              className="z-[60]"
-              menuButtonColor="#000"
-              openMenuButtonColor="#000"
-              accentColor="#3b82f6"
-              colors={["#f3f4f6", "#3b82f6"]}
-              items={menuItems}
-              displayItemNumbering={false}
-            />
+            {/* Quick Search Trigger */}
             <Button
               variant="ghost"
               size="icon"
               onClick={handleSearchClick}
-              className="text-muted-foreground hover:text-foreground hover:bg-muted/50 h-9 w-9 rounded-lg transition-all duration-200"
-              aria-label="Open Search Overlay"
+              className="text-muted-foreground hover:text-foreground hover:bg-muted/50 h-9 w-9 rounded-lg"
+              aria-label="Search Products"
             >
               <Search className="h-5 w-5" />
             </Button>
-          </motion.div>
+          </div>
 
-          {/* Center: Brand Logo */}
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
+          {/* Center: Brand Logo / Title */}
+          <div className="flex-1 flex justify-center items-center">
             <Link
               href="/"
               onClick={closeMobileNav}
@@ -382,35 +366,35 @@ export default function Navbar() {
             >
               {!isIntroActive && (
                 <>
-                  <motion.span
-                    transition={{ type: "spring", stiffness: 80, damping: 20 }}
-                    className="relative text-blue-600 font-black text-xl sm:text-2xl"
-                  >
-                    FTC
-                  </motion.span>
-                  <motion.span
-                    transition={{ type: "spring", stiffness: 80, damping: 20 }}
-                    className="text-muted-foreground font-light hidden sm:inline-block"
-                  >
-                    |
-                  </motion.span>
-                  <motion.span
-                    transition={{ type: "spring", stiffness: 80, damping: 20 }}
-                    className="text-xs uppercase tracking-widest text-foreground/80 hidden sm:inline-block"
-                  >
-                    Electronics
-                  </motion.span>
+                  {logoUrl ? (
+                    <Image
+                      src={logoUrl}
+                      alt={siteName || "FTC Electronics"}
+                      width={160}
+                      height={40}
+                      unoptimized={logoUrl.startsWith("http")}
+                      className="h-7 sm:h-9 w-auto max-w-[140px] sm:max-w-[180px] object-contain drop-shadow-sm transition-transform duration-200 group-hover:scale-105"
+                    />
+                  ) : (
+                    <>
+                      <span className="relative text-blue-600 font-black text-xl sm:text-2xl">
+                        FTC
+                      </span>
+                      <span className="text-muted-foreground font-light hidden sm:inline-block">
+                        |
+                      </span>
+                      <span className="text-xs uppercase tracking-widest text-foreground/80 hidden sm:inline-block">
+                        Electronics
+                      </span>
+                    </>
+                  )}
                 </>
               )}
             </Link>
           </div>
 
           {/* Right: Utility Icons */}
-          <motion.div
-            initial={{ opacity: 1 }}
-            animate={{ opacity: 1 }}
-            className="flex items-center space-x-1 sm:space-x-2"
-          >
+          <div className="flex items-center space-x-1 sm:space-x-2">
             {/* Account — profile avatar if logged in, icon if not */}
             <button
               type="button"
@@ -431,7 +415,7 @@ export default function Navbar() {
                     alt="User Avatar"
                     width={32}
                     height={32}
-                    unoptimized={!userAvatar.startsWith("http") && !userAvatar.startsWith("/")}
+                    unoptimized={userAvatar.startsWith("http")}
                     onError={() => setUserAvatar("")}
                     className="h-8 w-8 rounded-full object-cover shadow-md ring-2 ring-background hover:scale-105 transition-transform duration-200"
                   />
@@ -490,7 +474,7 @@ export default function Navbar() {
                 </motion.span>
               )}
             </Button>
-          </motion.div>
+          </div>
         </div>
 
         {/* Search Overlay */}
@@ -514,9 +498,12 @@ export default function Navbar() {
                 transition={{ type: "spring", stiffness: 80, damping: 20 }}
                 className="flex flex-col items-center justify-center p-4"
               >
-                <img
+                <Image
                   src={logoUrl}
                   alt={siteName || "FTC Electronics"}
+                  width={256}
+                  height={256}
+                  unoptimized={logoUrl.startsWith("http")}
                   className="h-32 sm:h-44 lg:h-52 max-h-64 w-auto max-w-[85vw] object-contain drop-shadow-2xl"
                 />
               </motion.div>

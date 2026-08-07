@@ -5,6 +5,7 @@ import { getAdminPb, writeAuditLog } from '@/lib/pb-admin';
 import { checkPermission } from '@/app/actions/admin';
 import { sendOrderShippingEmail } from '@/lib/email';
 import { pbOrders } from '@/lib/pb-collections';
+import type { ShippingAddress } from '@/types/order';
 
 export interface AvailableUnitInfo {
   id: string;
@@ -27,7 +28,7 @@ export interface OrderFulfillmentDetails {
   orderNumber: string;
   customerName: string;
   customerEmail: string;
-  shippingAddress: any;
+  shippingAddress: string | Partial<ShippingAddress> | null;
   items: OrderFulfillmentItem[];
 }
 
@@ -62,7 +63,9 @@ export async function getAvailableUnitsForOrderAction(orderId: string): Promise<
       order = await adminPb.collection('orders').getOne(orderId);
     } catch {
       try {
-        order = await adminPb.collection('orders').getFirstListItem(`orderId = "${orderId}"`);
+        order = await adminPb
+          .collection('orders')
+          .getFirstListItem(adminPb.filter('orderId = {:orderId}', { orderId }));
       } catch {
         return { success: false, error: 'Order not found.' };
       }
@@ -80,9 +83,11 @@ export async function getAvailableUnitsForOrderAction(orderId: string): Promise<
       let availableUnits: AvailableUnitInfo[] = [];
       if (productId) {
         try {
-          // Query units matching product and available/reserved OR linked to this order by order.id or order.orderId
           const units = await adminPb.collection('stock_management').getFullList({
-            filter: `product = "${productId}" && (status = "available" || status = "reserved" || orderId = "${recordIdStr}" || orderId = "${orderIdStr}")`,
+            filter: adminPb.filter(
+              'product = {:productId} && (status = "available" || orderId = {:recordId} || orderId = {:orderNo})',
+              { productId, recordId: recordIdStr, orderNo: orderIdStr }
+            ),
           });
 
           availableUnits = units.map((u: any) => ({
@@ -130,7 +135,7 @@ export async function getAvailableUnitsForOrderAction(orderId: string): Promise<
         orderNumber: order.orderId || order.id,
         customerName,
         customerEmail,
-        shippingAddress: order.shippingAddress,
+        shippingAddress: order.shippingAddress || null,
         items: fulfillmentItems,
       },
     };
@@ -160,24 +165,53 @@ export async function shipOrderWithSerialsAction(payload: SerialAssignmentPayloa
     }
 
     const itemsRaw = Array.isArray(order.items) ? order.items : [];
-    let totalRequiredQty = 0;
+
+    // 1. Validate per-productId assignment count against required item quantities
+    const requiredQtyByProduct = new Map<string, number>();
     for (const i of itemsRaw) {
-      totalRequiredQty += i.quantity || i.qty || 1;
+      const pId = i.productId || i.product || i.id || '';
+      const qty = i.quantity || i.qty || 1;
+      if (pId) {
+        requiredQtyByProduct.set(pId, (requiredQtyByProduct.get(pId) || 0) + qty);
+      }
     }
 
-    if (payload.assignments.length < totalRequiredQty) {
+    const assignedQtyByProduct = new Map<string, number>();
+    for (const a of payload.assignments) {
+      if (a.productId) {
+        assignedQtyByProduct.set(a.productId, (assignedQtyByProduct.get(a.productId) || 0) + 1);
+      }
+    }
+
+    for (const [pId, reqQty] of requiredQtyByProduct.entries()) {
+      const assignedQty = assignedQtyByProduct.get(pId) || 0;
+      if (assignedQty !== reqQty) {
+        return {
+          success: false,
+          error: `Mismatched serial assignments for product ID ${pId}. Required: ${reqQty}, Assigned: ${assignedQty}.`,
+        };
+      }
+    }
+
+    // 2. Reject duplicate unitId values in assignment payload
+    const realUnitIds = payload.assignments
+      .map((a) => a.unitId)
+      .filter((u) => u && !u.startsWith('custom_'));
+    if (new Set(realUnitIds).size !== realUnitIds.length) {
       return {
         success: false,
-        error: `Please assign serial numbers for all ${totalRequiredQty} required unit(s). Currently assigned: ${payload.assignments.length}`,
+        error: 'The same inventory unit is assigned more than once in this shipment payload.',
       };
     }
 
-    // 0. Release any previously linked units for this order that were NOT selected in this shipment assignment
+    // 3. Release any previously linked units for this order that were NOT selected in this shipment assignment
     const selectedUnitIds = new Set(payload.assignments.map((a) => a.unitId).filter(Boolean));
     try {
-      const filterStr = order.orderId ? `orderId = "${order.id}" || orderId = "${order.orderId}"` : `orderId = "${order.id}"`;
       const previouslyLinked = await adminPb.collection('stock_management').getFullList({
-        filter: filterStr,
+        filter: adminPb.filter('orderId = {:recId} || orderId = {:orderNo}', {
+          recId: order.id,
+          orderNo: order.orderId || order.id,
+        }),
       });
 
       for (const prevUnit of previouslyLinked) {
@@ -193,7 +227,8 @@ export async function shipOrderWithSerialsAction(payload: SerialAssignmentPayloa
       console.warn('[shipOrderWithSerialsAction] Warning releasing unselected units:', releaseErr);
     }
 
-    // 1. Update each assigned stock_management unit to 'sold' (or create if custom entry)
+    // 4. Update each assigned stock_management unit to 'sold' (or create if custom entry)
+    const updateErrors: string[] = [];
     for (const assign of payload.assignments) {
       if (assign.unitId && !assign.unitId.startsWith('custom_')) {
         try {
@@ -202,11 +237,11 @@ export async function shipOrderWithSerialsAction(payload: SerialAssignmentPayloa
             orderId: order.id,
             notes: `Shipped for Order ${order.orderId || order.id} on ${new Date().toLocaleString()}`,
           });
-        } catch (unitErr) {
-          console.warn(`[shipOrderWithSerialsAction] Failed to update unit ${assign.unitId}:`, unitErr);
+        } catch (unitErr: any) {
+          console.error(`[shipOrderWithSerialsAction] Failed to update unit ${assign.unitId}:`, unitErr);
+          updateErrors.push(`Unit ${assign.barcode || assign.unitId}: ${unitErr?.message || 'Update failed'}`);
         }
       } else {
-        // Create unit on the fly if custom scanned/entered
         try {
           await adminPb.collection('stock_management').create({
             product: assign.productId,
@@ -216,16 +251,32 @@ export async function shipOrderWithSerialsAction(payload: SerialAssignmentPayloa
             orderId: order.id,
             notes: `Auto-created and shipped for Order ${order.orderId || order.id} on ${new Date().toLocaleString()}`,
           });
-        } catch (createErr) {
-          console.warn('[shipOrderWithSerialsAction] Failed to auto-create unit:', createErr);
+        } catch (createErr: any) {
+          console.error('[shipOrderWithSerialsAction] Failed to auto-create unit:', createErr);
+          updateErrors.push(`Auto-unit ${assign.barcode}: ${createErr?.message || 'Create failed'}`);
         }
       }
     }
 
-    // 2. Attach serial assignments to items in order record
+    if (updateErrors.length > 0) {
+      return {
+        success: false,
+        error: `Failed updating stock inventory units: ${updateErrors.join('; ')}`,
+      };
+    }
+
+    // 5. Attach serial assignments to items in order record (consuming assignments per line item)
+    const remainingAssignments = [...payload.assignments];
     const updatedItems = itemsRaw.map((item: any) => {
       const pId = item.productId || item.product || '';
-      const matched = payload.assignments.filter((a) => a.productId === pId);
+      const qty = item.quantity || item.qty || 1;
+      const matched: typeof payload.assignments = [];
+
+      for (let idx = remainingAssignments.length - 1; idx >= 0 && matched.length < qty; idx--) {
+        if (remainingAssignments[idx].productId === pId) {
+          matched.unshift(remainingAssignments.splice(idx, 1)[0]);
+        }
+      }
 
       return {
         ...item,
@@ -247,7 +298,7 @@ export async function shipOrderWithSerialsAction(payload: SerialAssignmentPayloa
 
     const updatedOrder = await pbOrders.update(order.id, updateData);
 
-    // 3. Write Audit Log
+    // 6. Write Audit Log
     await writeAuditLog(
       check.actorEmail!,
       'update',
@@ -258,7 +309,7 @@ export async function shipOrderWithSerialsAction(payload: SerialAssignmentPayloa
       { ip: check.ip, userAgent: check.userAgent }
     );
 
-    // 4. Send Shipping Email to Customer with itemized Serial Numbers
+    // 7. Send Shipping Email to Customer with itemized Serial Numbers
     try {
       const customerEmail = order.customer?.email || order.customerEmail || order.email;
       if (customerEmail) {

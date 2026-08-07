@@ -53,6 +53,7 @@ export default function ShipFulfillmentModal({
     let isMounted = true;
     setLoading(true);
     setError(null);
+    setDetails(null); // Clear previous order details when opening for a new order
     setAssignments({});
     setScanInputs({});
     setTrackingNumber('');
@@ -91,14 +92,14 @@ export default function ShipFulfillmentModal({
 
   if (!isOpen) return null;
 
-  // Calculate overall completion stats
+  // Calculate overall completion stats cleanly filtering assigned units
   let totalRequiredUnits = 0;
   let totalAssignedUnits = 0;
 
   if (details) {
     details.items.forEach((item, idx) => {
       totalRequiredUnits += item.quantity;
-      totalAssignedUnits += (assignments[idx] || []).length;
+      totalAssignedUnits += (assignments[idx] || []).filter((a) => a?.unitId).length;
     });
   }
 
@@ -114,7 +115,7 @@ export default function ShipFulfillmentModal({
       if (unit) {
         currentList[slotIdx] = { unitId: unit.id, barcode: unit.barcode, serialNumber: unit.serialNumber };
       } else {
-        currentList.splice(slotIdx, 1);
+        delete currentList[slotIdx];
       }
       return { ...prev, [itemIdx]: currentList };
     });
@@ -132,7 +133,7 @@ export default function ShipFulfillmentModal({
     );
 
     if (!matchedUnit) {
-      // Create new unit candidate dynamically on the fly
+      // Create new unit candidate dynamically on the fly without mutating details directly
       const newUnit = {
         id: `custom_${item.productId}_${Date.now()}`,
         productId: item.productId,
@@ -140,7 +141,16 @@ export default function ShipFulfillmentModal({
         serialNumber: scanValue.trim(),
         batchNumber: 'SCANNED',
       };
-      item.availableUnits.unshift(newUnit);
+      setDetails((prev) =>
+        prev
+          ? {
+              ...prev,
+              items: prev.items.map((it, i) =>
+                i === itemIdx ? { ...it, availableUnits: [newUnit, ...it.availableUnits] } : it
+              ),
+            }
+          : prev
+      );
       matchedUnit = newUnit;
     }
 
@@ -148,7 +158,7 @@ export default function ShipFulfillmentModal({
     const currentList = [...(assignments[itemIdx] || [])];
     let assignedIndex = -1;
     for (let i = 0; i < item.quantity; i++) {
-      if (!currentList[i]) {
+      if (!currentList[i]?.unitId) {
         assignedIndex = i;
         break;
       }

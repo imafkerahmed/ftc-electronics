@@ -35,6 +35,25 @@ const escapeHtml = (s: string): string =>
  */
 const isDevFallbackEnabled = process.env.EMAIL_DEV_FALLBACK === 'true';
 
+let sharedTransporter: nodemailer.Transporter | null = null;
+
+function getSmtpTransporter(host: string, port: number, user: string, pass?: string) {
+  if (!sharedTransporter) {
+    sharedTransporter = nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      pool: true,
+      maxConnections: 3,
+      connectionTimeout: 5000,
+      greetingTimeout: 5000,
+      socketTimeout: 10000,
+      auth: { user, pass },
+    });
+  }
+  return sharedTransporter;
+}
+
 /**
  * Shared Nodemailer SMTP & Resend transport helper.
  * Handles Nodemailer SMTP, Resend, error logging, and development console fallbacks.
@@ -56,15 +75,7 @@ async function sendEmail({
   // 1. Primary: Use Nodemailer SMTP if SMTP_HOST and SMTP_USER are configured
   if (smtpHost && smtpUser) {
     try {
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpPort === 465,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
-      });
+      const transporter = getSmtpTransporter(smtpHost, smtpPort, smtpUser, smtpPass);
 
       await transporter.sendMail({
         from: smtpFrom,
@@ -76,7 +87,7 @@ async function sendEmail({
       return { success: true };
     } catch (smtpErr: any) {
       console.error('[NODEMAILER SMTP ERROR]', smtpErr);
-      if (!process.env.RESEND_API_KEY && !isDevFallbackEnabled) {
+      if (!process.env.RESEND_API_KEY && !process.env.BREVO_API_KEY && !isDevFallbackEnabled) {
         return { success: false, error: smtpErr?.message || prodErrorMessage };
       }
     }
@@ -91,6 +102,7 @@ async function sendEmail({
     try {
       const res = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
+        signal: AbortSignal.timeout(5000),
         headers: {
           'accept': 'application/json',
           'api-key': brevoApiKey,
@@ -658,6 +670,11 @@ export async function sendContactInquiryEmail({
   const safeMessage = escapeHtml(message).replace(/\n/g, '<br/>');
   const dateStr = new Date().toLocaleString('en-US', { timeZone: 'Asia/Colombo' });
 
+  const phoneHtml =
+    phone && phone !== 'N/A'
+      ? `<a href="tel:${safePhone}">${safePhone}</a>`
+      : safePhone;
+
   return sendEmail({
     to: recipientEmail,
     subject: `[New Website Inquiry] Message from ${name}`,
@@ -696,11 +713,11 @@ export async function sendContactInquiryEmail({
               </tr>
               <tr>
                 <td class="label">Phone Number</td>
-                <td><a href="tel:${safePhone}">${safePhone}</a></td>
+                <td>${phoneHtml}</td>
               </tr>
             </table>
 
-            <div style="margin-bottom: 8px; font-size: 12px; font-weight: 700; uppercase; color: #71717a; tracking-wider;">Message Content</div>
+            <div style="margin-bottom: 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #71717a;">Message Content</div>
             <div class="message-box">
               ${safeMessage}
             </div>
@@ -715,15 +732,17 @@ export async function sendContactInquiryEmail({
     devLog: () => {
       console.log('\n==================================================');
       console.log(`[DEV MAIL SENDER] Contact Form Inquiry received!`);
-      console.log(`[DEV MAIL SENDER] From: ${safeName} (${safeEmail}) | Phone: ${safePhone}`);
-      console.log(`[DEV MAIL SENDER] Message: ${safeMessage}`);
+      console.log(`[DEV MAIL SENDER] Message length: ${message.length} characters`);
       console.log(`[DEV MAIL SENDER] Target Recipient: ${recipientEmail}`);
       console.log('==================================================\n');
     },
-    devFallbackMessage: `Contact Form Inquiry from ${safeName} (${safeEmail}) to ${recipientEmail}`,
+    devFallbackMessage: `Contact Form Inquiry delivered to ${recipientEmail}`,
     prodErrorMessage: 'Failed to send contact inquiry email.',
   });
 }
+
+const escapeTelegramHtml = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 export async function sendTelegramInquiryAlert({
   name,
@@ -735,11 +754,17 @@ export async function sendTelegramInquiryAlert({
   const chatId = process.env.TELEGRAM_CHAT_ID;
   if (!token || !chatId) return false;
 
-  const text = `📬 <b>New Website Inquiry</b>\n\n<b>Name:</b> ${name}\n<b>Email:</b> ${email}\n<b>Phone:</b> ${phone}\n\n<b>Message:</b>\n${message}`;
+  const safeName = escapeTelegramHtml(name);
+  const safeEmail = escapeTelegramHtml(email);
+  const safePhone = escapeTelegramHtml(phone);
+  const safeMsg = escapeTelegramHtml(message);
+
+  const text = `📬 <b>New Website Inquiry</b>\n\n<b>Name:</b> ${safeName}\n<b>Email:</b> ${safeEmail}\n<b>Phone:</b> ${safePhone}\n\n<b>Message:</b>\n${safeMsg}`;
 
   try {
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
+      signal: AbortSignal.timeout(5000),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
     });

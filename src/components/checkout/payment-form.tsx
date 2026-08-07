@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Building2,
@@ -16,6 +16,7 @@ import {
 import { useCart } from '@/hooks/use-cart';
 import { Button } from '@/components/ui/button';
 import { processCheckoutOrderAction } from '@/app/actions/checkout';
+import { BANK_DETAILS } from '@/lib/bank-details';
 
 export type PaymentMethod = 'payhere' | 'bank_transfer' | 'cash_pickup' | 'cash_delivery';
 
@@ -70,7 +71,7 @@ const PAYHERE_CHECKOUT_URL =
 
 export default function PaymentForm() {
   const router = useRouter();
-  const { items, total, clearCart } = useCart();
+  const { items, total } = useCart();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('payhere');
@@ -78,6 +79,13 @@ export default function PaymentForm() {
   // Hidden PayHere form ref — submitted programmatically after hash is ready
   const payhereFormRef = useRef<HTMLFormElement>(null);
   const [payhereData, setPayhereData] = useState<Record<string, string> | null>(null);
+
+  // Submit hidden form once payhereData state updates
+  useEffect(() => {
+    if (payhereData) {
+      payhereFormRef.current?.submit();
+    }
+  }, [payhereData]);
 
   const getShippingData = () => {
     try {
@@ -89,22 +97,24 @@ export default function PaymentForm() {
   };
 
   // ─── PayHere Card Payment ───────────────────────────────────────────────────
-  const handlePayHere = async (orderId: string, orderNumber: string) => {
+  const handlePayHere = async (orderId: string, orderNumber: string, orderTotal: number) => {
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
     const shippingData = getShippingData();
 
-    // 1. Request hash from secure server-side endpoint
+    // 1. Request hash from secure server-side endpoint (reads verified order total from DB)
     const hashRes = await fetch('/api/payhere/hash', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_id: orderNumber, amount: total, currency: 'LKR' }),
+      body: JSON.stringify({ order_id: orderNumber, currency: 'LKR' }),
     });
 
     if (!hashRes.ok) {
-      throw new Error('Failed to generate payment hash. Please try again.');
+      const errJson = await hashRes.json().catch(() => ({}));
+      throw new Error(errJson.error || 'Failed to generate payment hash. Please try again.');
     }
 
-    const { hash, merchant_id } = await hashRes.json();
+    const { hash, merchant_id, amount: serverAmount } = await hashRes.json();
+    const finalAmount = serverAmount || orderTotal.toFixed(2);
 
     // 2. Build the PayHere form data
     const formFields: Record<string, string> = {
@@ -115,7 +125,7 @@ export default function PaymentForm() {
       order_id: orderNumber,
       items: items.map((i) => i.product.name).join(', ').substring(0, 255),
       currency: 'LKR',
-      amount: total.toFixed(2),
+      amount: finalAmount,
       first_name: shippingData.firstName || 'Customer',
       last_name: shippingData.lastName || '',
       email: shippingData.email || '',
@@ -127,11 +137,6 @@ export default function PaymentForm() {
     };
 
     setPayhereData(formFields);
-
-    // 3. Submit the hidden form on the next render tick
-    setTimeout(() => {
-      payhereFormRef.current?.submit();
-    }, 100);
   };
 
   // ─── Main Order Handler ─────────────────────────────────────────────────────
@@ -141,17 +146,19 @@ export default function PaymentForm() {
       return;
     }
 
+    // Guard: Validate stored shipping data before creating order
+    const shippingData = getShippingData();
+    if (!shippingData.email || !shippingData.firstName || !shippingData.addressLine1) {
+      setError('Shipping details are missing. Redirecting you to the shipping step.');
+      router.push('/checkout/shipping');
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
-    const shippingData = getShippingData();
-    const customerName = shippingData.firstName
-      ? `${shippingData.firstName} ${shippingData.lastName || ''}`.trim()
-      : 'Customer';
-    const customerEmail = shippingData.email || 'guest@ftc.lk';
-    const shippingAddress = [shippingData.addressLine1, shippingData.city, shippingData.country]
-      .filter(Boolean)
-      .join(', ') || 'Sri Lanka';
+    const customerName = `${shippingData.firstName} ${shippingData.lastName || ''}`.trim();
+    const customerEmail = shippingData.email;
 
     const cartInput = items.map((i) => ({
       productId: i.product.id,
@@ -164,10 +171,10 @@ export default function PaymentForm() {
     const result = await processCheckoutOrderAction({
       customerName,
       customerEmail,
-      shippingAddress,
+      shippingAddress: shippingData,
       phone: shippingData.phone || '',
       items: cartInput,
-      paymentMethod: selectedMethod === 'payhere' ? 'payhere' : selectedMethod,
+      paymentMethod: selectedMethod,
     });
 
     if (!result.success) {
@@ -185,18 +192,14 @@ export default function PaymentForm() {
           orderId: result.orderId,
           paymentMethod: selectedMethod,
           customerEmail,
-          total,
+          total: result.total || total,
         })
       );
-      sessionStorage.removeItem('ftc_checkout_shipping');
     } catch { /* ignore */ }
-
-    // Clear cart immediately upon successful order creation in database
-    clearCart();
 
     if (selectedMethod === 'payhere') {
       try {
-        await handlePayHere(result.orderId!, result.orderNumber!);
+        await handlePayHere(result.orderId!, result.orderNumber!, result.total || total);
       } catch (payhereErr: any) {
         setError(payhereErr.message || 'Failed to redirect to PayHere. Please try another method.');
         setLoading(false);
@@ -205,8 +208,6 @@ export default function PaymentForm() {
       router.push(`/checkout/confirmation?order=${result.orderNumber}&method=${selectedMethod}`);
     }
   };
-
-  const selectedDef = PAYMENT_METHODS.find((m) => m.id === selectedMethod)!;
 
   return (
     <>
@@ -241,7 +242,7 @@ export default function PaymentForm() {
           </div>
 
           {/* Method Cards */}
-          <div className="space-y-3">
+          <div className="space-y-3" role="radiogroup" aria-label="Payment Method">
             {PAYMENT_METHODS.map((method) => {
               const Icon = method.icon;
               const isActive = selectedMethod === method.id;
@@ -249,6 +250,8 @@ export default function PaymentForm() {
                 <button
                   key={method.id}
                   type="button"
+                  role="radio"
+                  aria-checked={isActive}
                   onClick={() => setSelectedMethod(method.id)}
                   className={`w-full flex items-center gap-4 p-4 rounded-xl border-2 transition-all duration-200 text-left cursor-pointer ${
                     isActive
@@ -318,13 +321,7 @@ export default function PaymentForm() {
             <div className="rounded-xl bg-blue-500/5 border border-blue-500/20 p-4 space-y-3">
               <p className="text-xs font-bold text-blue-400 uppercase tracking-widest">Bank Account Details</p>
               <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                {[
-                  ['Bank', 'Commercial Bank of Ceylon'],
-                  ['Account Name', 'FTC Electronics'],
-                  ['Account No.', '8001234567'],
-                  ['Branch', 'Colombo 03'],
-                  ['Branch Code', '003'],
-                ].map(([label, value]) => (
+                {BANK_DETAILS.map(([label, value]) => (
                   <div key={label}>
                     <span className="text-muted-foreground block">{label}</span>
                     <span className="font-bold text-foreground font-mono">{value}</span>

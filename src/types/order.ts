@@ -28,6 +28,8 @@ export interface OrderItem {
   image: string;
 }
 
+export type OrderStatus = 'pending_payment' | 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
+
 export interface Order {
   id: string;
   userId?: string;
@@ -38,7 +40,7 @@ export interface Order {
   shippingPrice: number;
   taxPrice: number;
   totalPrice: number;
-  status: 'pending_payment' | 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+  status: OrderStatus;
   isPaid: boolean;
   paidAt?: string;
   isDelivered: boolean;

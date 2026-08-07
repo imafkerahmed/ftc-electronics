@@ -1,10 +1,12 @@
 'use server';
 
+import crypto from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { getAdminPb } from '@/lib/pb-admin';
 import { pbProducts } from '@/lib/pb-collections';
 import { sendInvoiceEmailForOrder } from '@/lib/order-email';
 import { getCurrentUserSessionAction } from '@/app/actions/auth';
+import type { ShippingAddress } from '@/types/order';
 
 export interface CartItemInput {
   productId: string;
@@ -18,14 +20,15 @@ export type OnlinePaymentMethod = 'payhere' | 'bank_transfer' | 'cash_pickup' | 
 export async function processCheckoutOrderAction(data: {
   customerName: string;
   customerEmail: string;
-  shippingAddress: string;
+  shippingAddress: string | Partial<ShippingAddress>;
   phone?: string;
   items: CartItemInput[];
   paymentMethod?: OnlinePaymentMethod;
 }) {
   try {
     const adminPb = await getAdminPb();
-    const orderId = `ORD-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
+    const uniqueSuffix = crypto.randomUUID().slice(0, 4).toUpperCase();
+    const orderId = `ORD-${Date.now().toString().slice(-6)}-${uniqueSuffix}`;
     const paymentMethod = data.paymentMethod || 'bank_transfer';
 
     let totalAmount = 0;
@@ -43,9 +46,9 @@ export async function processCheckoutOrderAction(data: {
     }
     const itemsToProcess = Array.from(consolidatedItemsMap.values());
 
-    // Fetch product details concurrently
+    // Fetch product details concurrently (safely handling missing/deleted products)
     const products = await Promise.all(
-      itemsToProcess.map((item) => pbProducts.getById(item.productId))
+      itemsToProcess.map((item) => pbProducts.getById(item.productId).catch(() => null))
     );
 
     // 1. Strict Stock Validation: Ensure no 0-stock or out-of-stock items can be ordered
@@ -69,36 +72,33 @@ export async function processCheckoutOrderAction(data: {
       }
     }
 
-    // Process each purchased item
+    // Process each purchased item using authoritative database prices
     for (let i = 0; i < itemsToProcess.length; i++) {
       const item = itemsToProcess[i];
-      const product = products[i];
-      totalAmount += item.price * item.quantity;
+      const product = products[i]!;
+      const unitPrice =
+        typeof product.discountPrice === 'number' && product.discountPrice > 0
+          ? product.discountPrice
+          : product.price;
 
-      const slug = product?.slug || '';
-      const image = product?.images && product.images.length > 0 ? product.images[0] : '';
+      totalAmount += unitPrice * item.quantity;
+
+      const slug = product.slug || '';
+      const image = product.images && product.images.length > 0 ? product.images[0] : '';
 
       orderItems.push({
         productId: item.productId,
-        name: item.name,
+        name: product.name || item.name,
         slug,
-        price: item.price,
+        price: unitPrice,
         quantity: item.quantity,
         image,
       });
     }
 
-    // Note: Stock deduction is deferred until payment confirmation (deductStockForConfirmedOrderAction)
-    // to prevent abandoned/failed checkout attempts from leaking inventory stock.
-
     // Determine payment status based on method
-    // payhere/bank_transfer → 'pending' until webhook/admin confirms
-    // cash methods → 'processing' immediately (payment on delivery/pickup)
     const isCash = paymentMethod === 'cash_pickup' || paymentMethod === 'cash_delivery';
-
-    // Use only valid PocketBase OrderStatus values: pending | processing | shipped | delivered | cancelled | refunded
     const orderStatus = isCash ? 'processing' : 'pending';
-    const isPaid = false; // Nothing is paid until webhook/admin confirms
 
     const paymentMethodLabel = {
       payhere: 'PayHere (Card/Wallet)',
@@ -107,11 +107,20 @@ export async function processCheckoutOrderAction(data: {
       cash_delivery: 'Cash on Delivery',
     }[paymentMethod] || paymentMethod;
 
-    // Parse shipping address from string back to structured object for PocketBase schema
-    // data.shippingAddress is a comma-joined string like "123 Main St, Colombo, Sri Lanka"
-    const addressParts = data.shippingAddress.split(',').map((s) => s.trim());
+    // Parse shipping address
+    let shippingObj: Partial<ShippingAddress> = {};
+    if (typeof data.shippingAddress === 'object' && data.shippingAddress !== null) {
+      shippingObj = data.shippingAddress;
+    } else if (typeof data.shippingAddress === 'string') {
+      const addressParts = data.shippingAddress.split(',').map((s) => s.trim());
+      shippingObj = {
+        addressLine1: addressParts[0] || data.shippingAddress,
+        city: addressParts[1] || 'Colombo',
+        country: addressParts[2] || 'Sri Lanka',
+      };
+    }
 
-    // Check if customer is logged in to associate order with user account
+    // Check if customer is logged in
     let userId: string | undefined = undefined;
     try {
       const sessionRes = await getCurrentUserSessionAction();
@@ -122,7 +131,7 @@ export async function processCheckoutOrderAction(data: {
       // guest checkout
     }
 
-    // Create Order Record — must match PBOrder / PBShippingAddress schema exactly
+    // Create Order Record — matching PBOrder / PBShippingAddress schema exactly
     const orderRecord = await adminPb.collection('orders').create({
       orderId,
       user: userId,
@@ -130,19 +139,20 @@ export async function processCheckoutOrderAction(data: {
         userId,
         name: data.customerName,
         email: data.customerEmail,
-        phone: data.phone || '',
+        phone: data.phone || shippingObj.phone || '',
       },
       items: orderItems,
       shippingAddress: {
-        firstName: data.customerName.split(' ')[0] || data.customerName,
-        lastName: data.customerName.split(' ').slice(1).join(' ') || '',
-        email: data.customerEmail,
-        addressLine1: addressParts[0] || data.shippingAddress,
-        city: addressParts[1] || 'Colombo',
-        state: '',
-        postalCode: '',
-        country: addressParts[2] || 'Sri Lanka',
-        phone: data.phone || '',
+        firstName: shippingObj.firstName || data.customerName.split(' ')[0] || data.customerName,
+        lastName: shippingObj.lastName || data.customerName.split(' ').slice(1).join(' ') || '',
+        email: shippingObj.email || data.customerEmail,
+        addressLine1: shippingObj.addressLine1 || '',
+        addressLine2: shippingObj.addressLine2 || '',
+        city: shippingObj.city || 'Colombo',
+        state: shippingObj.state || '',
+        postalCode: shippingObj.postalCode || '',
+        country: shippingObj.country || 'Sri Lanka',
+        phone: shippingObj.phone || data.phone || '',
       },
       paymentDetails: {
         method: paymentMethod,
@@ -158,8 +168,6 @@ export async function processCheckoutOrderAction(data: {
       notes: `Payment method: ${paymentMethodLabel}`,
     });
 
-    // Send confirmation email ONLY for Cash orders (COD/Pickup) since they are confirmed orders.
-    // Online (PayHere) and Bank Transfer orders will get their confirmation email when payment is confirmed.
     if (isCash) {
       try {
         await sendInvoiceEmailForOrder(orderRecord.id);
@@ -175,7 +183,7 @@ export async function processCheckoutOrderAction(data: {
     revalidatePath('/admin/products');
     revalidatePath('/products');
 
-    return { success: true, orderId: orderRecord.id, orderNumber: orderId };
+    return { success: true, orderId: orderRecord.id, orderNumber: orderId, total: totalAmount };
   } catch (err: any) {
     console.error('Failed to process checkout order:', err);
     return { success: false, error: err.message || 'Failed to process order.' };
@@ -183,7 +191,50 @@ export async function processCheckoutOrderAction(data: {
 }
 
 /**
- * Upload a payment slip for a bank transfer order.
+ * Server action to verify order existence and user authorization for payment slip upload.
+ */
+export async function verifyOrderForSlipUploadAction(orderNumber: string) {
+  try {
+    const adminPb = await getAdminPb();
+    let orderRecord: any;
+    try {
+      orderRecord = await adminPb.collection('orders').getFirstListItem(
+        adminPb.filter('orderId = {:orderNumber}', { orderNumber })
+      );
+    } catch {
+      return { success: false, isAuthorized: false, error: 'Order not found.' };
+    }
+
+    const sessionRes = await getCurrentUserSessionAction().catch(() => null);
+    const currentUser = sessionRes?.success ? sessionRes.user : null;
+
+    let isAuthorized = false;
+    if (currentUser) {
+      const isOwnerUser = orderRecord.user === currentUser.id || orderRecord.customer?.userId === currentUser.id;
+      const orderEmail = (orderRecord.customer?.email || orderRecord.shippingAddress?.email || '').toLowerCase();
+      const isOwnerEmail = orderEmail && orderEmail === (currentUser.email || '').toLowerCase();
+      isAuthorized = Boolean(isOwnerUser || isOwnerEmail);
+    }
+
+    return {
+      success: true,
+      isAuthorized,
+      order: {
+        orderNumber: orderRecord.orderId,
+        orderId: orderRecord.id,
+        paymentMethod: orderRecord.paymentDetails?.method || 'bank_transfer',
+        customerEmail: orderRecord.customer?.email || orderRecord.shippingAddress?.email || '',
+        total: Number(orderRecord.total || 0),
+      },
+    };
+  } catch {
+    return { success: false, isAuthorized: false, error: 'Failed to verify order.' };
+  }
+}
+
+/**
+ * Uploads a bank transfer payment slip for an existing order.
+ * Verifies caller authorization (logged in user ownership or matching checkout session customer email).
  * The order record is updated with the slip file reference and status changes to 'pending'.
  */
 export async function uploadPaymentSlipAction(formData: FormData) {
@@ -192,50 +243,69 @@ export async function uploadPaymentSlipAction(formData: FormData) {
     const slip = formData.get('slip') as File | null;
     const orderNumber = formData.get('orderNumber') as string;
     const orderId = formData.get('orderId') as string;
+    const customerEmail = ((formData.get('customerEmail') as string) || '').trim().toLowerCase();
 
     if (!slip || !orderNumber) {
       return { success: false, error: 'Missing slip file or order number.' };
     }
 
-    // Validate file
     if (slip.size > 10 * 1024 * 1024) {
       return { success: false, error: 'File too large. Maximum size is 10MB.' };
     }
 
-    // Find order by orderId or by searching orderId field
-    let targetId = orderId;
-    if (!targetId) {
-      try {
-        const found = await adminPb.collection('orders').getFirstListItem(
-          `orderId = "${orderNumber}"`
+    let found: any;
+    try {
+      if (orderId) {
+        found = await adminPb.collection('orders').getOne(orderId);
+      } else {
+        found = await adminPb.collection('orders').getFirstListItem(
+          adminPb.filter('orderId = {:orderNumber}', { orderNumber })
         );
-        targetId = found.id;
-      } catch {
-        return { success: false, error: `Order ${orderNumber} not found in system.` };
       }
+    } catch {
+      return { success: false, error: `Order ${orderNumber} not found in system.` };
     }
 
-    // Upload slip file to the order record
+    const sessionRes = await getCurrentUserSessionAction().catch(() => null);
+    const currentUser = sessionRes?.success ? sessionRes.user : null;
+
+    const orderOwnerEmail = (found.customer?.email || found.shippingAddress?.email || '').toLowerCase();
+    const isOwnerUser = currentUser && (found.user === currentUser.id || found.customer?.userId === currentUser.id);
+    const isOwnerEmail = currentUser && orderOwnerEmail && orderOwnerEmail === (currentUser.email || '').toLowerCase();
+    const isMatchingProvidedEmail = customerEmail && orderOwnerEmail && customerEmail === orderOwnerEmail;
+
+    if (!isOwnerUser && !isOwnerEmail && !isMatchingProvidedEmail) {
+      return { success: false, error: 'Unauthorized to upload payment slip for this order. Please log in to your account.' };
+    }
+
+    const targetId = found.id;
+    const existingNotes = found.notes || '';
+
     const slipFormData = new FormData();
     slipFormData.append('paymentSlip', slip, slip.name);
     slipFormData.append('paymentDetails.paymentSlipUploadedAt', new Date().toISOString());
 
-    // PocketBase file upload via multipart
     const updated = await adminPb.collection('orders').update(targetId, slipFormData);
 
-    // Also mark as pending (awaiting admin verification) if still pending_payment
-    if (updated.status === 'pending_payment') {
+    const slipNote = `Payment slip uploaded by customer on ${new Date().toLocaleString()}`;
+    const newNotes = existingNotes
+      ? `${existingNotes} | ${slipNote}`
+      : updated.notes
+      ? `${updated.notes} | ${slipNote}`
+      : slipNote;
+
+    if (updated.status === 'pending' || updated.status === 'pending_payment') {
       await adminPb.collection('orders').update(targetId, {
         status: 'pending',
-        notes: `Payment slip uploaded by customer on ${new Date().toLocaleString()}`,
+        notes: newNotes,
       });
     }
 
     revalidatePath('/admin/orders');
     return { success: true };
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Failed to upload payment slip:', err);
-    return { success: false, error: err.message || 'Upload failed. Please try again.' };
+    return { success: false, error: err instanceof Error ? err.message : 'Upload failed. Please try again.' };
   }
 }
 
@@ -249,17 +319,25 @@ export async function confirmPayHereReturnAction(orderNumber: string) {
     let orderRecord: any = null;
 
     try {
-      orderRecord = await adminPb.collection('orders').getFirstListItem(`orderId = "${orderNumber}"`);
+      orderRecord = await adminPb.collection('orders').getFirstListItem(
+        adminPb.filter('orderId = {:orderNumber}', { orderNumber })
+      );
     } catch {
       return { success: false, error: 'Order not found' };
     }
 
-    // If order is already paid, just return success
     if (orderRecord.isPaid) {
       return { success: true, alreadyPaid: true };
     }
 
-    // Update order status to paid / processing
+    // Security guard: in production, require PayHere webhook notification for payment confirmation
+    if (process.env.NODE_ENV === 'production') {
+      return {
+        success: false,
+        error: 'Payment confirmation is processing via secure PayHere notification.',
+      };
+    }
+
     await adminPb.collection('orders').update(orderRecord.id, {
       isPaid: true,
       paidAt: new Date().toISOString(),
@@ -270,14 +348,12 @@ export async function confirmPayHereReturnAction(orderNumber: string) {
       },
     });
 
-    // Deduct inventory stock upon confirmed payment
     try {
       await deductStockForConfirmedOrderAction(orderRecord.id);
     } catch (stockErr) {
       console.error('[confirmPayHereReturnAction] Stock deduction error:', stockErr);
     }
 
-    // Send confirmation email to customer
     try {
       await sendInvoiceEmailForOrder(orderRecord.id);
     } catch (emailErr) {
@@ -302,10 +378,18 @@ export async function deductStockForConfirmedOrderAction(orderIdRecord: string) 
     const order = await adminPb.collection('orders').getOne(orderIdRecord);
     if (!order) return { success: false, error: 'Order not found.' };
 
+    // Security check: only paid or processing (COD/pickup) orders can consume stock
+    if (!order.isPaid && order.status !== 'processing') {
+      return { success: false, error: 'Order payment is not confirmed.' };
+    }
+
     // Idempotency check: don't deduct stock twice
     if (order.stockDeducted) {
       return { success: true, alreadyDeducted: true };
     }
+
+    // Mark stockDeducted = true IMMEDIATELY to prevent concurrent double-deduction race conditions
+    await adminPb.collection('orders').update(order.id, { stockDeducted: true });
 
     const items = Array.isArray(order.items) ? order.items : [];
     const customerEmail = order.customer?.email || order.customerEmail || order.email || 'Customer';
@@ -346,7 +430,7 @@ export async function deductStockForConfirmedOrderAction(orderIdRecord: string) 
         // 3. Update status of available unit barcodes in stock_management collection to 'sold'
         try {
           const availableUnits = await adminPb.collection('stock_management').getList(1, qty, {
-            filter: `product = "${productId}" && status = "available"`,
+            filter: adminPb.filter('product = {:productId} && status = "available"', { productId }),
           });
 
           await Promise.all(
@@ -364,9 +448,6 @@ export async function deductStockForConfirmedOrderAction(orderIdRecord: string) 
       }
     }
 
-    // Mark stockDeducted = true on order record
-    await adminPb.collection('orders').update(order.id, { stockDeducted: true });
-
     revalidatePath('/admin/orders');
     revalidatePath('/admin/inventory');
     revalidatePath('/products');
@@ -377,4 +458,3 @@ export async function deductStockForConfirmedOrderAction(orderIdRecord: string) 
     return { success: false, error: err.message };
   }
 }
-
