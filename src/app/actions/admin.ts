@@ -796,6 +796,18 @@ function generatePbId(): string {
   return crypto.randomUUID().replace(/-/g, '').slice(0, 15);
 }
 
+export async function getAnnouncementsAction() {
+  const check = await checkPermission('settings', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.', items: [] };
+
+  try {
+    const res = await pbAnnouncements.getAll({ page: 1, perPage: 100 });
+    return { success: true, items: res.items || [] };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to fetch announcements.', items: [] };
+  }
+}
+
 export async function createAnnouncementAction(formData: FormData) {
   const check = await checkPermission('settings', 'write');
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useTransition, useRef } from 'react';
 import { Megaphone, Plus, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { pbAnnouncements } from '@/lib/pb-collections';
-import { createAnnouncementAction, deleteAnnouncementAction, updateAnnouncementAction, toggleAnnouncementActiveAction } from '@/app/actions/admin';
+import { createAnnouncementAction, deleteAnnouncementAction, updateAnnouncementAction, toggleAnnouncementActiveAction, getAnnouncementsAction } from '@/app/actions/admin';
 import type { PBAnnouncement } from '@/types/admin';
 import { Announcement } from './types';
 import { AnnouncementCard } from './announcement-card';
@@ -37,7 +37,10 @@ export default function AdminAnnouncementsPage() {
     try {
       setLoading(true);
       setError(null);
-      const res = await pbAnnouncements.getAll();
+      const res = await getAnnouncementsAction();
+      if (!res.success && res.error) {
+        setError(res.error);
+      }
       setAnnouncements((res?.items || []).map((ann: PBAnnouncement) => ({
         id: ann.id,
         title: ann.title || 'Untitled Ad',

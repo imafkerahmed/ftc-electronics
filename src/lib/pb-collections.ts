@@ -31,7 +31,7 @@ import type {
   PBQuotation,
   PBContactInquiry,
 } from "@/types/admin";
-import { pbProductToProduct, pbCategoryToCategory } from "@/types/admin";
+import { pbProductToProduct, pbCategoryToCategory, getPbFileUrl } from "@/types/admin";
 import type { Product, Category } from "@/types/product";
 import type { PBEmployee, PBSale, PBSaleItem, SalePayload } from "@/types/pos";
 
@@ -901,17 +901,27 @@ export const pbAnnouncements = {
           sort: "-created",
         });
       } catch {
-        const allActive = await pbClient.collection("announcements").getFullList<PBAnnouncement>({
-          filter: `isActive = true`,
-          sort: "-created",
-        });
+        try {
+          return await pbClient.collection("announcement").getFullList<PBAnnouncement>({
+            filter: pbClient.filter('isActive = true && (endsAt = "" || endsAt = null || endsAt >= {:now})', { now }),
+            sort: "-created",
+          });
+        } catch {
+          const allActive = await pbClient.collection("announcements").getFullList<PBAnnouncement>({
+            filter: `isActive = true`,
+            sort: "-created",
+          }).catch(() => pbClient.collection("announcement").getFullList<PBAnnouncement>({
+            filter: `isActive = true`,
+            sort: "-created",
+          })).catch(() => []);
 
-        const nowMs = Date.now();
-        return allActive.filter((item) => {
-          if (!item.endsAt) return true;
-          const endMs = new Date(item.endsAt).getTime();
-          return isNaN(endMs) || endMs >= nowMs;
-        });
+          const nowMs = Date.now();
+          return allActive.filter((item) => {
+            if (!item.endsAt) return true;
+            const endMs = new Date(item.endsAt).getTime();
+            return isNaN(endMs) || endMs >= nowMs;
+          });
+        }
       }
     } catch (err) {
       console.warn("[pbAnnouncements.getActive] Failed to load active announcements:", err);
@@ -924,23 +934,46 @@ export const pbAnnouncements = {
     perPage?: number;
   }): Promise<{ items: PBAnnouncement[]; totalItems: number }> {
     try {
-      const isClient = typeof window !== 'undefined';
-      const pbClient = isClient ? getPublicPb() : await getAdminPb();
-      const result = await pbClient
-        .collection("announcements")
-        .getList<PBAnnouncement>(options?.page || 1, options?.perPage || 25, {
-          sort: "-created",
-        });
-      return { items: result.items, totalItems: result.totalItems };
+      let pbClient: PocketBase;
+      try {
+        pbClient = await getAdminPb();
+      } catch {
+        pbClient = getPublicPb();
+      }
+
+      try {
+        const result = await pbClient
+          .collection("announcements")
+          .getList<PBAnnouncement>(options?.page || 1, options?.perPage || 50, {
+            sort: "-created",
+          });
+        return { items: result.items, totalItems: result.totalItems };
+      } catch {
+        try {
+          const result = await pbClient
+            .collection("announcement")
+            .getList<PBAnnouncement>(options?.page || 1, options?.perPage || 50, {
+              sort: "-created",
+            });
+          return { items: result.items, totalItems: result.totalItems };
+        } catch {
+          return { items: [], totalItems: 0 };
+        }
+      }
     } catch (err) {
-      handleError(err, "pbAnnouncements.getAll");
+      console.warn("[pbAnnouncements.getAll] Warning: Failed to fetch announcements:", err);
+      return { items: [], totalItems: 0 };
     }
   },
 
   async create(data: FormData | Record<string, unknown>): Promise<PBAnnouncement> {
     try {
       const adminPb = await getAdminPb();
-      return await adminPb.collection("announcements").create<PBAnnouncement>(data);
+      try {
+        return await adminPb.collection("announcements").create<PBAnnouncement>(data);
+      } catch {
+        return await adminPb.collection("announcement").create<PBAnnouncement>(data);
+      }
     } catch (err) {
       handleError(err, "pbAnnouncements.create");
     }
@@ -952,9 +985,11 @@ export const pbAnnouncements = {
   ): Promise<PBAnnouncement> {
     try {
       const adminPb = await getAdminPb();
-      return await adminPb
-        .collection("announcements")
-        .update<PBAnnouncement>(id, data);
+      try {
+        return await adminPb.collection("announcements").update<PBAnnouncement>(id, data);
+      } catch {
+        return await adminPb.collection("announcement").update<PBAnnouncement>(id, data);
+      }
     } catch (err) {
       handleError(err, "pbAnnouncements.update");
     }
@@ -963,7 +998,11 @@ export const pbAnnouncements = {
   async delete(id: string): Promise<boolean> {
     try {
       const adminPb = await getAdminPb();
-      await adminPb.collection("announcements").delete(id);
+      try {
+        await adminPb.collection("announcements").delete(id);
+      } catch {
+        await adminPb.collection("announcement").delete(id);
+      }
       return true;
     } catch (err) {
       handleError(err, "pbAnnouncements.delete");
@@ -971,9 +1010,8 @@ export const pbAnnouncements = {
   },
 
   getFileUrl(record: PBAnnouncement): string {
-    const pbUrl = getPbUrl();
     if (!record.image) return "";
-    return `${pbUrl}/api/files/${record.collectionId || record.collectionName || "announcements"}/${record.id}/${record.image}`;
+    return getPbFileUrl(record, record.image);
   },
 };
 
