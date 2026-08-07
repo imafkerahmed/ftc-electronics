@@ -890,42 +890,70 @@ export const pbPromotions = {
 
 let announcementsReady = false;
 
+function normalizeAnnouncementRecord(rec: any): PBAnnouncement {
+  return {
+    id: rec.id,
+    collectionId: rec.collectionId || rec.collectionName || "announcements",
+    collectionName: rec.collectionName || rec.collectionId || "announcements",
+    created: rec.created || "",
+    updated: rec.updated || "",
+    title: rec.title || rec.name || rec.headline || "Untitled Ad",
+    image: rec.image || rec.file || rec.graphic || rec.photo || "",
+    link: rec.link || rec.url || rec.targetUrl || "",
+    isActive:
+      rec.isActive !== undefined
+        ? Boolean(rec.isActive)
+        : rec.is_active !== undefined
+        ? Boolean(rec.is_active)
+        : rec.is_enabled !== undefined
+        ? Boolean(rec.is_enabled)
+        : true,
+    endsAt: rec.endsAt || rec.ends_at || rec.endDate || rec.end_date || "",
+  };
+}
+
 export const pbAnnouncements = {
   async ensureCollection(): Promise<boolean> {
     if (announcementsReady) return true;
     try {
       const adminPb = await getAdminPb();
-      try {
-        await adminPb.collections.getOne("announcements");
-        announcementsReady = true;
-        return true;
-      } catch {
+      const collectionsToTry = ["announcements", "announcement", "popup_announcements", "ads"];
+
+      for (const colName of collectionsToTry) {
         try {
-          await adminPb.collections.getOne("announcement");
+          await adminPb.collections.getOne(colName);
+          try {
+            await adminPb.collections.update(colName, { listRule: "", viewRule: "" });
+          } catch {
+            // ignore rule update error
+          }
           announcementsReady = true;
           return true;
         } catch {
-          await adminPb.collections.create({
-            id: "announcements",
-            name: "announcements",
-            type: "base",
-            schema: [
-              { name: "title", type: "text", required: true },
-              { name: "image", type: "file", required: false, options: { maxSelect: 1 } },
-              { name: "link", type: "text", required: false },
-              { name: "isActive", type: "bool", required: false },
-              { name: "endsAt", type: "date", required: false },
-            ],
-            listRule: "",
-            viewRule: "",
-            createRule: null,
-            updateRule: null,
-            deleteRule: null,
-          });
-          announcementsReady = true;
-          return true;
+          // try next
         }
       }
+
+      // Auto-create 'announcements' collection in PocketBase if missing
+      await adminPb.collections.create({
+        id: "announcements",
+        name: "announcements",
+        type: "base",
+        schema: [
+          { name: "title", type: "text", required: true },
+          { name: "image", type: "file", required: false, options: { maxSelect: 1 } },
+          { name: "link", type: "text", required: false },
+          { name: "isActive", type: "bool", required: false },
+          { name: "endsAt", type: "date", required: false },
+        ],
+        listRule: "",
+        viewRule: "",
+        createRule: null,
+        updateRule: null,
+        deleteRule: null,
+      });
+      announcementsReady = true;
+      return true;
     } catch (err) {
       console.warn("Failed to auto-create announcements collection:", err);
       return false;
@@ -937,36 +965,65 @@ export const pbAnnouncements = {
       await this.ensureCollection();
       const isClient = typeof window !== 'undefined';
       const pbClient = isClient ? getPublicPb() : await getAdminPb();
-      const now = new Date().toISOString();
 
-      try {
-        return await pbClient.collection("announcements").getFullList<PBAnnouncement>({
-          filter: pbClient.filter('isActive = true && (endsAt = "" || endsAt = null || endsAt >= {:now})', { now }),
-          sort: "-created",
-        });
-      } catch {
+      let rawItems: any[] = [];
+      const collectionsToTry = ["announcements", "announcement", "popup_announcements", "ads"];
+
+      for (const colName of collectionsToTry) {
         try {
-          return await pbClient.collection("announcement").getFullList<PBAnnouncement>({
-            filter: pbClient.filter('isActive = true && (endsAt = "" || endsAt = null || endsAt >= {:now})', { now }),
+          const res = await pbClient.collection(colName).getFullList({
             sort: "-created",
           });
+          if (res && res.length > 0) {
+            rawItems = res;
+            break;
+          }
         } catch {
-          const allActive = await pbClient.collection("announcements").getFullList<PBAnnouncement>({
-            filter: `isActive = true`,
-            sort: "-created",
-          }).catch(() => pbClient.collection("announcement").getFullList<PBAnnouncement>({
-            filter: `isActive = true`,
-            sort: "-created",
-          })).catch(() => []);
-
-          const nowMs = Date.now();
-          return allActive.filter((item) => {
-            if (!item.endsAt) return true;
-            const endMs = new Date(item.endsAt).getTime();
-            return isNaN(endMs) || endMs >= nowMs;
-          });
+          // try next
         }
       }
+
+      if (rawItems.length === 0) {
+        try {
+          const adminPb = await getAdminPb();
+          for (const colName of collectionsToTry) {
+            try {
+              const res = await adminPb.collection(colName).getFullList({
+                sort: "-created",
+              });
+              if (res && res.length > 0) {
+                rawItems = res;
+                break;
+              }
+            } catch {
+              // try next
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      const nowMs = Date.now();
+      const activeItems = rawItems.filter((item: any) => {
+        const active =
+          item.isActive !== undefined
+            ? Boolean(item.isActive)
+            : item.is_active !== undefined
+            ? Boolean(item.is_active)
+            : item.is_enabled !== undefined
+            ? Boolean(item.is_enabled)
+            : true;
+        if (!active) return false;
+
+        const endDateStr = item.endsAt || item.ends_at || item.endDate || item.end_date;
+        if (!endDateStr) return true;
+
+        const endMs = new Date(endDateStr).getTime();
+        return isNaN(endMs) || endMs >= nowMs;
+      });
+
+      return activeItems.map(normalizeAnnouncementRecord);
     } catch (err) {
       console.warn("[pbAnnouncements.getActive] Failed to load active announcements:", err);
       return [];
@@ -986,25 +1043,26 @@ export const pbAnnouncements = {
         pbClient = getPublicPb();
       }
 
-      try {
-        const result = await pbClient
-          .collection("announcements")
-          .getList<PBAnnouncement>(options?.page || 1, options?.perPage || 50, {
-            sort: "-created",
-          });
-        return { items: result.items, totalItems: result.totalItems };
-      } catch {
+      const collectionsToTry = ["announcements", "announcement", "popup_announcements", "ads"];
+      for (const colName of collectionsToTry) {
         try {
           const result = await pbClient
-            .collection("announcement")
-            .getList<PBAnnouncement>(options?.page || 1, options?.perPage || 50, {
+            .collection(colName)
+            .getList<any>(options?.page || 1, options?.perPage || 50, {
               sort: "-created",
             });
-          return { items: result.items, totalItems: result.totalItems };
+          if (result && result.items && result.items.length > 0) {
+            return {
+              items: result.items.map(normalizeAnnouncementRecord),
+              totalItems: result.totalItems,
+            };
+          }
         } catch {
-          return { items: [], totalItems: 0 };
+          // try next
         }
       }
+
+      return { items: [], totalItems: 0 };
     } catch (err) {
       console.warn("[pbAnnouncements.getAll] Warning: Failed to fetch announcements:", err);
       return { items: [], totalItems: 0 };
@@ -1015,11 +1073,20 @@ export const pbAnnouncements = {
     try {
       await this.ensureCollection();
       const adminPb = await getAdminPb();
-      try {
-        return await adminPb.collection("announcements").create<PBAnnouncement>(data);
-      } catch {
-        return await adminPb.collection("announcement").create<PBAnnouncement>(data);
+      const collectionsToTry = ["announcements", "announcement"];
+      let record: any = null;
+
+      for (const colName of collectionsToTry) {
+        try {
+          record = await adminPb.collection(colName).create(data);
+          if (record) break;
+        } catch {
+          // try next
+        }
       }
+
+      if (!record) throw new Error("Failed to create announcement record in PocketBase.");
+      return normalizeAnnouncementRecord(record);
     } catch (err) {
       handleError(err, "pbAnnouncements.create");
     }
@@ -1030,12 +1097,22 @@ export const pbAnnouncements = {
     data: FormData | Record<string, unknown>,
   ): Promise<PBAnnouncement> {
     try {
+      await this.ensureCollection();
       const adminPb = await getAdminPb();
-      try {
-        return await adminPb.collection("announcements").update<PBAnnouncement>(id, data);
-      } catch {
-        return await adminPb.collection("announcement").update<PBAnnouncement>(id, data);
+      const collectionsToTry = ["announcements", "announcement", "popup_announcements", "ads"];
+      let record: any = null;
+
+      for (const colName of collectionsToTry) {
+        try {
+          record = await adminPb.collection(colName).update(id, data);
+          if (record) break;
+        } catch {
+          // try next
+        }
       }
+
+      if (!record) throw new Error("Failed to update announcement record.");
+      return normalizeAnnouncementRecord(record);
     } catch (err) {
       handleError(err, "pbAnnouncements.update");
     }
@@ -1043,11 +1120,17 @@ export const pbAnnouncements = {
 
   async delete(id: string): Promise<boolean> {
     try {
+      await this.ensureCollection();
       const adminPb = await getAdminPb();
-      try {
-        await adminPb.collection("announcements").delete(id);
-      } catch {
-        await adminPb.collection("announcement").delete(id);
+      const collectionsToTry = ["announcements", "announcement", "popup_announcements", "ads"];
+
+      for (const colName of collectionsToTry) {
+        try {
+          await adminPb.collection(colName).delete(id);
+          return true;
+        } catch {
+          // try next
+        }
       }
       return true;
     } catch (err) {

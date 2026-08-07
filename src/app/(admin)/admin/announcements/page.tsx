@@ -41,13 +41,13 @@ export default function AdminAnnouncementsPage() {
       if (!res.success && res.error) {
         setError(res.error);
       }
-      setAnnouncements((res?.items || []).map((ann: PBAnnouncement) => ({
+      setAnnouncements((res?.items || []).map((ann: any) => ({
         id: ann.id,
-        title: ann.title || 'Untitled Ad',
-        image: ann.image || '',
-        link: ann.link || '',
-        isActive: ann.isActive || false,
-        endsAt: ann.endsAt ? ann.endsAt.split('T')[0] : '',
+        title: ann.title || ann.name || ann.headline || 'Untitled Ad',
+        image: ann.image || ann.file || '',
+        link: ann.link || ann.url || '',
+        isActive: ann.isActive !== undefined ? Boolean(ann.isActive) : (ann.is_active !== undefined ? Boolean(ann.is_active) : true),
+        endsAt: ann.endsAt ? ann.endsAt.split('T')[0] : (ann.ends_at ? ann.ends_at.split('T')[0] : ''),
         imageUrl: pbAnnouncements.getFileUrl(ann),
       })));
     } catch (err: any) {
