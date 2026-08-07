@@ -101,8 +101,8 @@ export default function ProfilePage() {
   return (
     <div className="space-y-6 text-foreground">
       <div>
-        <h2 className="text-xl font-bold tracking-wide">My Profile & Shipping Address</h2>
-        <p className="text-xs text-muted-foreground mt-1">
+        <h2 className="text-lg sm:text-xl font-bold tracking-wide">My Profile & Shipping Address</h2>
+        <p className="text-[11px] sm:text-xs text-muted-foreground mt-1">
           Save your personal details and default shipping address so your checkout is automatically pre-filled every time.
         </p>
       </div>
@@ -121,15 +121,15 @@ export default function ProfilePage() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl bg-card p-6 rounded-xl border border-border">
+      <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl bg-card p-4 sm:p-6 rounded-xl border border-border">
         {/* Account Header */}
-        <div className="flex items-center gap-4 bg-secondary/40 p-4 rounded-xl border border-border">
-          <div className="h-12 w-12 rounded-full bg-blue-600 text-white flex items-center justify-center text-lg font-bold shrink-0">
+        <div className="flex items-center gap-3 sm:gap-4 bg-secondary/40 p-3.5 sm:p-4 rounded-xl border border-border">
+          <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm sm:text-lg font-bold shrink-0">
             {initials}
           </div>
-          <div>
-            <h4 className="text-sm font-semibold">{profile.name}</h4>
-            <p className="text-xs text-muted-foreground">Customer since {memberSince}</p>
+          <div className="min-w-0 flex-1">
+            <h4 className="text-xs sm:text-sm font-semibold truncate">{profile.name}</h4>
+            <p className="text-[11px] sm:text-xs text-muted-foreground truncate">Customer since {memberSince}</p>
           </div>
         </div>
 
@@ -137,9 +137,9 @@ export default function ProfilePage() {
         <div className="space-y-4">
           <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Personal Information</h4>
           
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
-              <label htmlFor="firstName" className="block text-xs text-muted-foreground mb-2">First Name</label>
+              <label htmlFor="firstName" className="block text-xs text-muted-foreground mb-1.5">First Name</label>
               <Input
                 id="firstName"
                 value={profile.firstName || ''}
@@ -148,7 +148,7 @@ export default function ProfilePage() {
               />
             </div>
             <div>
-              <label htmlFor="lastName" className="block text-xs text-muted-foreground mb-2">Last Name</label>
+              <label htmlFor="lastName" className="block text-xs text-muted-foreground mb-1.5">Last Name</label>
               <Input
                 id="lastName"
                 value={profile.lastName || ''}
@@ -158,9 +158,9 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
-              <label htmlFor="profile-email" className="block text-xs text-muted-foreground mb-2">Email Address</label>
+              <label htmlFor="profile-email" className="block text-xs text-muted-foreground mb-1.5">Email Address</label>
               <Input
                 id="profile-email"
                 type="email"
@@ -170,7 +170,7 @@ export default function ProfilePage() {
               />
             </div>
             <div>
-              <label htmlFor="profile-phone" className="block text-xs text-muted-foreground mb-2">Phone Number</label>
+              <label htmlFor="profile-phone" className="block text-xs text-muted-foreground mb-1.5">Phone Number</label>
               <Input
                 id="profile-phone"
                 type="tel"
@@ -184,14 +184,14 @@ export default function ProfilePage() {
         </div>
 
         {/* Shipping Address Section */}
-        <div className="space-y-4 pt-2 border-t border-border">
+        <div className="space-y-4 pt-4 border-t border-border">
           <div className="flex items-center gap-2">
-            <MapPin className="h-4 w-4 text-blue-500" />
+            <MapPin className="h-4 w-4 text-blue-500 shrink-0" />
             <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Default Shipping Address</h4>
           </div>
 
           <div>
-            <label htmlFor="addressLine1" className="block text-xs text-muted-foreground mb-2">Address Line 1</label>
+            <label htmlFor="addressLine1" className="block text-xs text-muted-foreground mb-1.5">Address Line 1</label>
             <Input
               id="addressLine1"
               placeholder="No. 123 Main Street"
@@ -202,7 +202,7 @@ export default function ProfilePage() {
           </div>
 
           <div>
-            <label htmlFor="addressLine2" className="block text-xs text-muted-foreground mb-2">Address Line 2 (Optional)</label>
+            <label htmlFor="addressLine2" className="block text-xs text-muted-foreground mb-1.5">Address Line 2 (Optional)</label>
             <Input
               id="addressLine2"
               placeholder="Apartment, suite, unit, etc."
@@ -212,9 +212,9 @@ export default function ProfilePage() {
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
             <div>
-              <label htmlFor="city" className="block text-xs text-muted-foreground mb-2">City</label>
+              <label htmlFor="city" className="block text-xs text-muted-foreground mb-1.5">City</label>
               <Input
                 id="city"
                 placeholder="Colombo"
@@ -224,7 +224,7 @@ export default function ProfilePage() {
               />
             </div>
             <div>
-              <label htmlFor="state" className="block text-xs text-muted-foreground mb-2">State / Province</label>
+              <label htmlFor="state" className="block text-xs text-muted-foreground mb-1.5">State / Province</label>
               <Input
                 id="state"
                 placeholder="Western Province"
@@ -234,7 +234,7 @@ export default function ProfilePage() {
               />
             </div>
             <div>
-              <label htmlFor="postalCode" className="block text-xs text-muted-foreground mb-2">Postal Code</label>
+              <label htmlFor="postalCode" className="block text-xs text-muted-foreground mb-1.5">Postal Code</label>
               <Input
                 id="postalCode"
                 placeholder="00300"
@@ -246,7 +246,7 @@ export default function ProfilePage() {
           </div>
 
           <div>
-            <label htmlFor="country" className="block text-xs text-muted-foreground mb-2">Country</label>
+            <label htmlFor="country" className="block text-xs text-muted-foreground mb-1.5">Country</label>
             <Input
               id="country"
               value={profile.country || 'Sri Lanka'}
@@ -259,7 +259,7 @@ export default function ProfilePage() {
         <Button
           type="submit"
           disabled={saving}
-          className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-bold cursor-pointer transition-colors rounded-xl"
+          className="w-full h-11 sm:h-12 bg-blue-600 hover:bg-blue-700 text-white font-bold cursor-pointer transition-colors rounded-xl text-xs sm:text-sm shadow-md"
         >
           {saving ? 'Saving Profile Details...' : 'Save Profile & Default Shipping Address'}
         </Button>

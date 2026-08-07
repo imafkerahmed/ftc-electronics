@@ -58,11 +58,6 @@ export default function Navbar() {
   const setIntroPlayed = useUiStore((state) => state.setIntroPlayed);
   const router = useRouter();
 
-  const pathname = usePathname();
-  const shouldPlayIntro = pathname === "/" && !hasIntroPlayed && Boolean(logoUrl);
-
-  const [isIntroActive, setIsIntroActive] = useState(shouldPlayIntro);
-  const [showOverlay, setShowOverlay] = useState(shouldPlayIntro);
   const closeMobileNav = () => setMobileNavOpen(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
@@ -79,9 +74,11 @@ export default function Navbar() {
   // Reactively detect auth state via non-httpOnly cookie (pb_auth_indicator)
   useEffect(() => {
     const check = async () => {
-      const loggedIn = /(?:^|;\s*)pb_auth_indicator=1(?:;|$)/.test(document.cookie);
+      const loggedIn = /(?:^|;\s*)pb_auth_indicator=1(?:;|$)/.test(
+        document.cookie,
+      );
       setIsLoggedIn(loggedIn);
-      
+
       if (loggedIn) {
         // Read avatar
         const avatarMatch = document.cookie.match(/pb_auth_avatar=([^;]+)/);
@@ -126,7 +123,7 @@ export default function Navbar() {
   }, [isLoggedIn]);
 
   useEffect(() => {
-    const NAV_CACHE_KEY = 'ftc_nav_data';
+    const NAV_CACHE_KEY = "ftc_nav_data";
     const NAV_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
     async function fetchData() {
@@ -134,8 +131,17 @@ export default function Navbar() {
       try {
         const raw = sessionStorage.getItem(NAV_CACHE_KEY);
         if (raw) {
-          const { cats, brs, ts } = JSON.parse(raw) as { cats: any[]; brs: any[]; ts: number };
-          if (Array.isArray(cats) && Array.isArray(brs) && Number.isFinite(ts) && Date.now() - ts < NAV_CACHE_TTL_MS) {
+          const { cats, brs, ts } = JSON.parse(raw) as {
+            cats: any[];
+            brs: any[];
+            ts: number;
+          };
+          if (
+            Array.isArray(cats) &&
+            Array.isArray(brs) &&
+            Number.isFinite(ts) &&
+            Date.now() - ts < NAV_CACHE_TTL_MS
+          ) {
             setCategories(cats.filter((c: any) => c.isActive !== false));
             setBrands(brs);
             setDataLoaded(true);
@@ -154,8 +160,9 @@ export default function Navbar() {
         pbBrands.getAll(),
       ]);
 
-      const cats = catsResult.status === "fulfilled" ? (catsResult.value || []) : [];
-      const brs = brsResult.status === "fulfilled" ? (brsResult.value || []) : [];
+      const cats =
+        catsResult.status === "fulfilled" ? catsResult.value || [] : [];
+      const brs = brsResult.status === "fulfilled" ? brsResult.value || [] : [];
 
       if (catsResult.status === "fulfilled") {
         setCategories(cats.filter((c: any) => c.isActive !== false));
@@ -170,9 +177,15 @@ export default function Navbar() {
       }
 
       // Write to cache only when both fetches succeeded
-      if (catsResult.status === "fulfilled" && brsResult.status === "fulfilled") {
+      if (
+        catsResult.status === "fulfilled" &&
+        brsResult.status === "fulfilled"
+      ) {
         try {
-          sessionStorage.setItem(NAV_CACHE_KEY, JSON.stringify({ cats, brs, ts: Date.now() }));
+          sessionStorage.setItem(
+            NAV_CACHE_KEY,
+            JSON.stringify({ cats, brs, ts: Date.now() }),
+          );
         } catch {
           // quota exceeded or unavailable — skip
         }
@@ -186,38 +199,6 @@ export default function Navbar() {
   const activeAnnouncements = announcement?.text
     ? [announcement.text, ...defaultAnnouncements]
     : defaultAnnouncements;
-
-  useEffect(() => {
-    if (!shouldPlayIntro) {
-      setIsIntroActive(false);
-      setShowOverlay(false);
-      return;
-    }
-
-    document.body.style.overflow = "hidden";
-
-    const frame = requestAnimationFrame(() => {
-      setIsIntroActive(true);
-      setShowOverlay(true);
-    });
-
-    const timer1 = setTimeout(() => {
-      setIsIntroActive(false);
-      document.body.style.overflow = "";
-    }, 1500);
-
-    const timer2 = setTimeout(() => {
-      setShowOverlay(false);
-      setIntroPlayed(true);
-    }, 2000);
-
-    return () => {
-      cancelAnimationFrame(frame);
-      clearTimeout(timer1);
-      clearTimeout(timer2);
-      document.body.style.overflow = "";
-    };
-  }, [shouldPlayIntro, setIntroPlayed]);
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 10);
@@ -274,6 +255,10 @@ export default function Navbar() {
       link: "/products",
     },
     {
+      label: "On Sale",
+      link: "/products?onSale=true",
+    },
+    {
       label: "Categories",
       link: "/categories",
       subItems: categorySubItems,
@@ -283,6 +268,7 @@ export default function Navbar() {
       link: "/brands",
       subItems: brandSubItems,
     },
+    { label: "About Us", link: "/about" },
     { label: "Contact Us", link: "/contact" },
   ];
 
@@ -323,10 +309,10 @@ export default function Navbar() {
           "sticky top-0 z-40 w-full transition-all duration-300 border-b border-border/40",
           isScrolled
             ? "bg-background/80 backdrop-blur-xl shadow-lg border-border/80"
-            : "bg-background/95 backdrop-blur-md"
+            : "bg-background/95 backdrop-blur-md",
         )}
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between gap-2 sm:gap-4">
+        <div className="w-full px-4 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between gap-2 sm:gap-4">
           {/* Left: Menu & Search */}
           <div className="flex items-center space-x-1 sm:space-x-3">
             {/* React Bits StaggeredMenu Overlay Trigger */}
@@ -335,13 +321,11 @@ export default function Navbar() {
                 position="left"
                 items={navItems}
                 displaySocials={true}
-                displayItemNumbering={true}
+                displayItemNumbering={false}
                 closeOnClickAway={true}
                 menuButtonColor="#3b82f6"
                 openMenuButtonColor="#ef4444"
                 accentColor="#3b82f6"
-                onMenuOpen={() => setMobileNavOpen(true)}
-                onMenuClose={closeMobileNav}
               />
             </div>
 
@@ -362,34 +346,17 @@ export default function Navbar() {
             <Link
               href="/"
               onClick={closeMobileNav}
-              className="flex items-center gap-1.5 sm:gap-2 text-xl font-bold tracking-wider text-foreground group select-none"
+              className="flex items-center gap-2 text-xl font-bold tracking-wider text-foreground select-none"
             >
-              {!isIntroActive && (
-                <>
-                  {logoUrl ? (
-                    <Image
-                      src={logoUrl}
-                      alt={siteName || "FTC Electronics"}
-                      width={160}
-                      height={40}
-                      unoptimized={logoUrl.startsWith("http")}
-                      className="h-7 sm:h-9 w-auto max-w-[140px] sm:max-w-[180px] object-contain drop-shadow-sm transition-transform duration-200 group-hover:scale-105"
-                    />
-                  ) : (
-                    <>
-                      <span className="relative text-blue-600 font-black text-xl sm:text-2xl">
-                        FTC
-                      </span>
-                      <span className="text-muted-foreground font-light hidden sm:inline-block">
-                        |
-                      </span>
-                      <span className="text-xs uppercase tracking-widest text-foreground/80 hidden sm:inline-block">
-                        Electronics
-                      </span>
-                    </>
-                  )}
-                </>
-              )}
+              <div className="flex items-center gap-2 sm:gap-2.5">
+                <span className="text-blue-500 font-black text-2xl sm:text-3xl tracking-tight leading-none">
+                  FTC
+                </span>
+                <span className="hidden sm:inline-block h-5 sm:h-6 w-[1.5px] bg-neutral-400/50 dark:bg-neutral-600 rounded-full" />
+                <span className="hidden sm:inline-block text-[11px] sm:text-sm font-bold tracking-[0.22em] sm:tracking-[0.28em] text-neutral-300 dark:text-neutral-300 uppercase leading-none">
+                  ELECTRONICS
+                </span>
+              </div>
             </Link>
           </div>
 
@@ -406,7 +373,11 @@ export default function Navbar() {
                 }
               }}
               className="transition-colors cursor-pointer p-1 rounded-full"
-              aria-label={isLoggedIn ? "Open your account" : "Sign in or create an account"}
+              aria-label={
+                isLoggedIn
+                  ? "Open your account"
+                  : "Sign in or create an account"
+              }
             >
               {isLoggedIn ? (
                 userAvatar ? (
@@ -415,7 +386,10 @@ export default function Navbar() {
                     alt="User Avatar"
                     width={32}
                     height={32}
-                    unoptimized={userAvatar.startsWith("http")}
+                    unoptimized={
+                      !userAvatar.startsWith("http") &&
+                      !userAvatar.startsWith("/")
+                    }
                     onError={() => setUserAvatar("")}
                     className="h-8 w-8 rounded-full object-cover shadow-md ring-2 ring-background hover:scale-105 transition-transform duration-200"
                   />
@@ -432,7 +406,10 @@ export default function Navbar() {
                   </div>
 
                   {/* Desktop / Tablet View (>= sm): Animated Sign-IN Pill */}
-                  <div aria-hidden="true" className="hidden sm:flex items-center text-xs font-extrabold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-full border border-border bg-secondary/20 gap-0.5 select-none h-8 min-w-[80px] justify-center relative overflow-hidden">
+                  <div
+                    aria-hidden="true"
+                    className="hidden sm:flex items-center text-xs font-extrabold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-full border border-border bg-secondary/20 gap-0.5 select-none h-8 min-w-[80px] justify-center relative overflow-hidden"
+                  >
                     <span>Sign-</span>
                     <div className="relative h-4 w-6 flex items-center justify-start overflow-hidden">
                       <AnimatePresence mode="wait">
@@ -482,34 +459,6 @@ export default function Navbar() {
           isOpen={isSearchOpen}
           onClose={() => setIsSearchOpen(false)}
         />
-
-        {/* Cinematic Intro Overlay — Only plays if custom logoUrl is configured */}
-        {showOverlay && logoUrl && (
-          <motion.div
-            initial={{ opacity: 1 }}
-            animate={{ opacity: isIntroActive ? 1 : 0 }}
-            transition={{ duration: 0.5, ease: "easeInOut" }}
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-background pointer-events-none"
-          >
-            {isIntroActive && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.85 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ type: "spring", stiffness: 80, damping: 20 }}
-                className="flex flex-col items-center justify-center p-4"
-              >
-                <Image
-                  src={logoUrl}
-                  alt={siteName || "FTC Electronics"}
-                  width={256}
-                  height={256}
-                  unoptimized={logoUrl.startsWith("http")}
-                  className="h-32 sm:h-44 lg:h-52 max-h-64 w-auto max-w-[85vw] object-contain drop-shadow-2xl"
-                />
-              </motion.div>
-            )}
-          </motion.div>
-        )}
       </header>
 
       <style>{`

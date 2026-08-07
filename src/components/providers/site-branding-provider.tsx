@@ -10,6 +10,18 @@ export interface SiteBrandingContextType {
   darkLogoUrl: string;
   faviconUrl: string;
   primaryColor: string;
+  storeHours: string;
+  storeHoursList: Array<{ days: string; time: string }>;
+  contactInfo: {
+    phone: string;
+    email: string;
+    whatsapp: string;
+  };
+  location: {
+    address: string;
+    city: string;
+    googleMapsUrl: string;
+  };
   announcement: {
     show: boolean;
     text: string;
@@ -26,6 +38,21 @@ const defaultBranding: SiteBrandingContextType = {
   darkLogoUrl: '',
   faviconUrl: '',
   primaryColor: '#2563eb',
+  storeHours: '9:00 AM - 7:00 PM Daily',
+  storeHoursList: [
+    { days: 'Monday – Saturday', time: '9:00 AM – 7:00 PM' },
+    { days: 'Sunday', time: '10:00 AM – 5:00 PM' },
+  ],
+  contactInfo: {
+    phone: '+94 76 666 4566',
+    email: 'info@ftc.lk',
+    whatsapp: '+94 76 666 4566',
+  },
+  location: {
+    address: 'No. 91/2/4, First Cross Street',
+    city: 'Colombo 11',
+    googleMapsUrl: '',
+  },
   announcement: {
     show: true,
     text: '🚀 Free islandwide delivery on orders over LKR 50,000 | Authorized Reseller',
@@ -85,6 +112,25 @@ export function SiteBrandingProvider({ children }: { children: React.ReactNode }
 
         const siteName = genSettings?.siteName || defaultBranding.siteName;
         const tagline = genSettings?.tagline || defaultBranding.tagline;
+        const storeHours = genSettings?.storeHoursCopy || defaultBranding.storeHours;
+        const rawStoreHoursList = genSettings?.storeHoursList || genSettings?.weeklyHours;
+        const storeHoursList: Array<{ days: string; time: string }> = Array.isArray(rawStoreHoursList) && rawStoreHoursList.length > 0
+          ? rawStoreHoursList.map((item: any) => ({
+              days: item.days || item.day || 'Days',
+              time: item.isOpen === false ? 'Closed' : item.time || 'Closed',
+            }))
+          : defaultBranding.storeHoursList;
+
+        const contactInfo = {
+          phone: genSettings?.contactInfo?.phone || defaultBranding.contactInfo.phone,
+          email: genSettings?.contactInfo?.email || defaultBranding.contactInfo.email,
+          whatsapp: genSettings?.contactInfo?.whatsapp || defaultBranding.contactInfo.whatsapp,
+        };
+        const location = {
+          address: genSettings?.location?.address || defaultBranding.location.address,
+          city: genSettings?.location?.city || defaultBranding.location.city,
+          googleMapsUrl: genSettings?.location?.googleMapsUrl || defaultBranding.location.googleMapsUrl,
+        };
         const logoUrl = persSettings?.logoUrl || '';
         const darkLogoUrl = persSettings?.darkLogoUrl || '';
         const faviconUrl = persSettings?.faviconUrl || '';
@@ -98,6 +144,10 @@ export function SiteBrandingProvider({ children }: { children: React.ReactNode }
           darkLogoUrl,
           faviconUrl,
           primaryColor,
+          storeHours,
+          storeHoursList,
+          contactInfo,
+          location,
           announcement,
           isLoading: false,
         };

@@ -29,6 +29,25 @@ interface SiteContactSettings {
   hours?: Array<{ days: string; time: string }> | string;
 }
 
+import { useSiteBranding } from "@/components/providers/site-branding-provider";
+
+interface SiteGeneralSettings {
+  storeHoursCopy?: string | Array<{ days: string; time: string }>;
+  storeHoursList?: Array<{ days: string; time: string }>;
+  contactInfo?: { phone?: string; email?: string; whatsapp?: string };
+  location?: { address?: string; city?: string; googleMapsUrl?: string };
+}
+
+interface SiteContactSettings {
+  address?: string;
+  city?: string;
+  phone?: string;
+  email?: string;
+  hours?: Array<{ days: string; time: string }> | string;
+  googleMapsLink?: string;
+  whatsappLink?: string;
+}
+
 interface DbSettings {
   gen?: SiteGeneralSettings | null;
   con?: SiteContactSettings | null;
@@ -47,6 +66,7 @@ interface LocationMapProps {
 }
 
 export default function LocationMap({ settings: propSettings }: LocationMapProps) {
+  const branding = useSiteBranding();
   const [dbSettings, setDbSettings] = useState<DbSettings | null>(null);
 
   useEffect(() => {
@@ -64,11 +84,13 @@ export default function LocationMap({ settings: propSettings }: LocationMapProps
 
   const rawAddress =
     propSettings?.address ||
+    branding?.location?.address ||
     dbSettings?.gen?.location?.address ||
     dbSettings?.con?.address ||
     "No. 91/2/4, First Cross Street";
   const city =
     propSettings?.city ||
+    branding?.location?.city ||
     dbSettings?.gen?.location?.city ||
     dbSettings?.con?.city ||
     "Colombo 11";
@@ -76,18 +98,21 @@ export default function LocationMap({ settings: propSettings }: LocationMapProps
 
   const phone =
     propSettings?.phone ||
+    branding?.contactInfo?.phone ||
     dbSettings?.gen?.contactInfo?.phone ||
     dbSettings?.con?.phone ||
     "+94 76 666 4566";
 
   const email =
     propSettings?.email ||
+    branding?.contactInfo?.email ||
     dbSettings?.gen?.contactInfo?.email ||
     dbSettings?.con?.email ||
     "info@ftc.lk";
 
   const rawMapsLink =
     propSettings?.googleMapsLink ||
+    branding?.location?.googleMapsUrl ||
     dbSettings?.gen?.location?.googleMapsUrl ||
     dbSettings?.con?.googleMapsLink ||
     "";
@@ -118,9 +143,10 @@ export default function LocationMap({ settings: propSettings }: LocationMapProps
 
   const rawWhatsapp =
     propSettings?.whatsappLink ||
+    branding?.contactInfo?.whatsapp ||
     dbSettings?.gen?.contactInfo?.whatsapp ||
     dbSettings?.con?.whatsappLink ||
-    "+94 77 123 4567";
+    "+94 76 666 4566";
 
   const whatsappValue = String(rawWhatsapp ?? "");
   const formattedWhatsapp = whatsappValue.startsWith("http")
@@ -129,17 +155,57 @@ export default function LocationMap({ settings: propSettings }: LocationMapProps
 
   const rawHours =
     propSettings?.hours ||
+    (Array.isArray(branding?.storeHoursList) && branding.storeHoursList.length > 0 ? branding.storeHoursList : undefined) ||
+    (Array.isArray(dbSettings?.gen?.storeHoursList) && dbSettings.gen.storeHoursList.length > 0 ? dbSettings.gen.storeHoursList : undefined) ||
+    branding?.storeHours ||
     dbSettings?.gen?.storeHoursCopy ||
     dbSettings?.con?.hours;
 
-  const formattedHours: Array<{ days: string; time: string }> = Array.isArray(rawHours)
-    ? rawHours
-    : typeof rawHours === "string" && rawHours.trim()
-    ? [{ days: "Daily Store Hours", time: rawHours }]
-    : [
-        { days: "Monday – Saturday", time: "9:00 AM – 7:00 PM" },
-        { days: "Sunday & Holidays", time: "10:00 AM – 6:00 PM" },
-      ];
+  const formattedHours: Array<{ days: string; time: string }> = (() => {
+    if (Array.isArray(rawHours) && rawHours.length > 0) {
+      // Group consecutive days with matching times
+      const groups: Array<{ days: string[]; time: string }> = [];
+      for (const item of rawHours) {
+        if (!item) continue;
+        const it = item as { days?: string; day?: string; time?: string; isOpen?: boolean };
+        const dayName = it.days || it.day || "";
+        const timeStr = it.isOpen === false || it.time === "Closed" ? "Closed" : it.time || "Closed";
+        if (!dayName) continue;
+
+        const lastGroup = groups[groups.length - 1];
+        if (lastGroup && lastGroup.time === timeStr) {
+          lastGroup.days.push(dayName);
+        } else {
+          groups.push({ days: [dayName], time: timeStr });
+        }
+      }
+
+      if (groups.length > 0) {
+        return groups.map((g) => {
+          let daysLabel = "";
+          if (g.days.length === 1) {
+            daysLabel = g.days[0].length > 4 ? g.days[0].slice(0, 3) : g.days[0];
+          } else if (g.days.length === 7) {
+            daysLabel = "Everyday";
+          } else {
+            const first = g.days[0].slice(0, 3);
+            const last = g.days[g.days.length - 1].slice(0, 3);
+            daysLabel = `${first} – ${last}`;
+          }
+          return { days: daysLabel, time: g.time };
+        });
+      }
+    }
+
+    if (typeof rawHours === "string" && rawHours.trim()) {
+      return [{ days: "Store Hours", time: rawHours }];
+    }
+
+    return [
+      { days: "Mon – Sat", time: "9:00 AM – 7:00 PM" },
+      { days: "Sun", time: "10:00 AM – 5:00 PM" },
+    ];
+  })();
 
   const storeInfo = {
     name: "FTC Flagship Store",
@@ -328,24 +394,24 @@ export default function LocationMap({ settings: propSettings }: LocationMapProps
               <div className="h-px bg-white/8" />
 
               {/* CTA Buttons */}
-              <div className="flex flex-col sm:flex-row gap-3 pt-2">
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 pt-3 w-full shrink-0">
                 <a
                   href={storeInfo.googleMapsLink}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex-1 inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs sm:text-sm px-4 h-11 transition-all hover:scale-[1.02] cursor-pointer gap-2 active:scale-[0.98] shadow-lg shadow-blue-500/25 whitespace-nowrap"
+                  className="flex-1 shrink-0 w-full inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs sm:text-sm px-4 h-12 min-h-[48px] py-3 transition-all hover:scale-[1.02] cursor-pointer gap-2 active:scale-[0.98] shadow-lg shadow-blue-500/25 whitespace-nowrap"
                 >
-                  Get Directions
-                  <ExternalLink className="h-4 w-4" />
+                  <span>Get Directions</span>
+                  <ExternalLink className="h-4 w-4 shrink-0" />
                 </a>
                 <a
                   href={storeInfo.whatsappLink}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex-1 inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-sm px-4 h-11 transition-all hover:scale-[1.02] cursor-pointer gap-2 active:scale-[0.98] shadow-lg shadow-emerald-600/25 whitespace-nowrap"
+                  className="flex-1 shrink-0 w-full inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-sm px-4 h-12 min-h-[48px] py-3 transition-all hover:scale-[1.02] cursor-pointer gap-2 active:scale-[0.98] shadow-lg shadow-emerald-600/25 whitespace-nowrap"
                 >
-                  <MessageCircle className="h-4 w-4 fill-white/20" />
-                  Chat on WhatsApp
+                  <MessageCircle className="h-4 w-4 fill-white/20 shrink-0" />
+                  <span>Chat on WhatsApp</span>
                 </a>
               </div>
             </div>

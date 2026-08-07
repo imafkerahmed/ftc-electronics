@@ -409,7 +409,7 @@ export default function ContactPage() {
             city,
             phone,
             email,
-            hours,
+            hours: settings?.storeHoursList || settings?.storeHoursCopy || hours,
             googleMapsLink: googleMapsUrl,
             whatsappLink: whatsapp ? (whatsapp.startsWith('http') ? whatsapp : `https://wa.me/${cleanWhatsapp.replace(/^\+/, '')}`) : undefined,
           }}

@@ -58,13 +58,13 @@ export default function Footer() {
           <div className="flex flex-col gap-2">
             <Link
               href="/"
-              className="text-3xl sm:text-4xl font-black tracking-widest text-white uppercase flex items-center gap-3"
+              className="flex items-center gap-3 py-1"
             >
-              <span className="text-blue-500">FTC</span>
-              <span className="text-white/20 font-light">|</span>
-              <span className="text-sm sm:text-base font-bold tracking-widest text-white/60 uppercase">
-                Electronics
-              </span>
+              <img
+                src={darkLogoUrl || logoUrl || '/loader-logo.webp'}
+                alt={siteName || "FTC Electronics"}
+                className="h-8 sm:h-10 w-auto max-w-[200px] sm:max-w-[260px] object-contain"
+              />
             </Link>
             <p className="text-xs text-neutral-500 max-w-xs leading-relaxed">
               {tagline || "Sri Lanka's premier destination for premium consumer electronics, mobile gear, and computer hardware."}

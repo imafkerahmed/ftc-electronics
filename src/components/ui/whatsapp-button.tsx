@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSiteBranding } from "@/components/providers/site-branding-provider";
 
 interface WhatsAppButtonProps {
   phoneNumber?: string;
@@ -8,14 +9,14 @@ interface WhatsAppButtonProps {
 }
 
 export default function WhatsAppButton({
-  phoneNumber = "1234567890",
+  phoneNumber,
   message = "Hi! I have a question about your products.",
 }: WhatsAppButtonProps) {
   const [mounted, setMounted] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
+  const branding = useSiteBranding();
 
   useEffect(() => {
-     
     setMounted(true);
     const timer = setTimeout(() => setShowTooltip(true), 3000);
     const hideTimer = setTimeout(() => setShowTooltip(false), 8000);
@@ -27,8 +28,15 @@ export default function WhatsAppButton({
 
   if (!mounted) return null;
 
+  const rawPhone =
+    phoneNumber ||
+    branding?.contactInfo?.whatsapp ||
+    branding?.contactInfo?.phone ||
+    "+94 77 123 4567";
+
+  const cleanPhone = rawPhone.replace(/[^0-9]/g, "");
   const encodedMessage = encodeURIComponent(message);
-  const whatsappUrl = `https://wa.me/${phoneNumber.replace(/[^0-9]/g, "")}?text=${encodedMessage}`;
+  const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodedMessage}`;
 
   return (
     <div

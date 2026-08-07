@@ -33,6 +33,15 @@ export default function GeneralSettingsPage() {
   const [email, setEmail] = useState('info@ftc.lk');
   const [whatsapp, setWhatsapp] = useState('+94 77 123 4567');
   const [hours, setHours] = useState('9:00 AM - 7:00 PM Daily');
+  const [weeklyHours, setWeeklyHours] = useState<Array<{ day: string; isOpen: boolean; time: string }>>([
+    { day: 'Monday', isOpen: true, time: '9:00 AM - 7:00 PM' },
+    { day: 'Tuesday', isOpen: true, time: '9:00 AM - 7:00 PM' },
+    { day: 'Wednesday', isOpen: true, time: '9:00 AM - 7:00 PM' },
+    { day: 'Thursday', isOpen: true, time: '9:00 AM - 7:00 PM' },
+    { day: 'Friday', isOpen: true, time: '9:00 AM - 7:00 PM' },
+    { day: 'Saturday', isOpen: true, time: '9:00 AM - 7:00 PM' },
+    { day: 'Sunday', isOpen: true, time: '10:00 AM - 5:00 PM' },
+  ]);
   const [currency, setCurrency] = useState('LKR');
   const [taxRate, setTaxRate] = useState('15');
   const [address, setAddress] = useState('');
@@ -84,6 +93,24 @@ export default function GeneralSettingsPage() {
           setEmail(settings.contactInfo?.email || '');
           setWhatsapp(settings.contactInfo?.whatsapp || '');
           setHours(settings.storeHoursCopy || '');
+
+          const rawList = settings.storeHoursList || settings.weeklyHours;
+          if (Array.isArray(rawList) && rawList.length > 0) {
+            const daysOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+            const mapped = daysOrder.map((dayName) => {
+              const found = rawList.find((item: any) => (item.days || item.day || '').toLowerCase() === dayName.toLowerCase());
+              if (found) {
+                return {
+                  day: dayName,
+                  isOpen: found.isOpen !== false && found.time !== 'Closed',
+                  time: found.time && found.time !== 'Closed' ? found.time : '9:00 AM - 7:00 PM',
+                };
+              }
+              return { day: dayName, isOpen: true, time: '9:00 AM - 7:00 PM' };
+            });
+            setWeeklyHours(mapped);
+          }
+
           setCurrency(settings.currency || 'LKR');
           setTaxRate(settings.taxRate?.toString() || '15');
           setAddress(settings.location?.address || '');
@@ -127,6 +154,7 @@ export default function GeneralSettingsPage() {
             parsed.hostname === 'google.com' ||
             parsed.hostname.endsWith('.google.lk') ||
             parsed.hostname === 'google.lk' ||
+            parsed.hostname.endsWith('.googlemaps.com') ||
             parsed.hostname === 'maps.google.com'
           );
           if (!isGoogleMaps) {
@@ -138,12 +166,21 @@ export default function GeneralSettingsPage() {
         }
       }
 
+      // Convert individual weekday hours array into compact storeHoursList array & summary string
+      const storeHoursList = weeklyHours.map((w) => ({
+        days: w.day,
+        time: w.isOpen ? w.time : 'Closed',
+        isOpen: w.isOpen,
+      }));
+
       const payload = {
         siteName,
         tagline,
         currency,
         taxRate: parseFloat(taxRate) || 0,
-        storeHoursCopy: hours,
+        storeHoursCopy: hours || '9:00 AM - 7:00 PM Daily',
+        storeHoursList,
+        weeklyHours: storeHoursList,
         contactInfo: { phone, email, whatsapp },
         location: { address, city, googleMapsUrl: cleanGoogleMapsUrl },
         socialLinks: {
@@ -304,11 +341,81 @@ export default function GeneralSettingsPage() {
                   <Input value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} className="h-8.5 text-xs" />
                 </div>
               </div>
-              <div className="space-y-1.5 pt-1">
-                <label className="text-xs font-semibold text-foreground/80 flex items-center gap-1">
-                  <Clock className="h-3.5 w-3.5 text-muted-foreground" /> Store Operating Hours
-                </label>
-                <Input value={hours} onChange={(e) => setHours(e.target.value)} className="h-8.5 text-xs" />
+              {/* Individual Weekday Store Operating Hours */}
+              <div className="space-y-3 pt-3 border-t border-border">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Clock className="h-3.5 w-3.5 text-blue-500" /> Weekday Store Operating Hours
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWeeklyHours((prev) =>
+                        prev.map((w) => ({
+                          ...w,
+                          isOpen: w.day !== 'Sunday',
+                          time: w.day === 'Sunday' ? '10:00 AM - 5:00 PM' : '9:00 AM - 7:00 PM',
+                        }))
+                      );
+                    }}
+                    className="text-[11px] text-blue-500 hover:text-blue-600 font-semibold underline cursor-pointer"
+                  >
+                    Reset: 9:00 AM - 7:00 PM (Sun 10-5)
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-2.5">
+                  {weeklyHours.map((item, idx) => (
+                    <div
+                      key={item.day}
+                      className={`p-2.5 rounded-xl border transition-colors flex flex-col justify-between gap-2 ${
+                        item.isOpen
+                          ? 'bg-background border-border/80'
+                          : 'bg-muted/40 border-border/40 opacity-75'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-xs font-bold text-foreground">{item.day}</span>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={item.isOpen}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setWeeklyHours((prev) =>
+                                prev.map((w, i) => (i === idx ? { ...w, isOpen: checked } : w))
+                              );
+                            }}
+                            className="sr-only peer"
+                          />
+                          <div className="w-7 h-4 bg-muted peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-600" />
+                        </label>
+                      </div>
+
+                      {item.isOpen ? (
+                        <Input
+                          value={item.time}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setWeeklyHours((prev) =>
+                              prev.map((w, i) => (i === idx ? { ...w, time: val } : w))
+                            );
+                          }}
+                          placeholder="e.g. 9:00 AM - 7:00 PM"
+                          className="h-7 text-[11px] px-2 bg-background border-border"
+                        />
+                      ) : (
+                        <span className="text-[11px] font-semibold text-red-500 py-1 block">Closed</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="space-y-1 pt-2">
+                  <label className="text-[11px] font-medium text-muted-foreground">General Summary Note (Optional)</label>
+                  <Input value={hours} onChange={(e) => setHours(e.target.value)} placeholder="e.g. 9:00 AM - 7:00 PM Daily" className="h-8 text-xs" />
+                </div>
               </div>
             </div>
 

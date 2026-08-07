@@ -806,15 +806,31 @@ export const pbSiteSettings = {
 export const pbPromotions = {
   async getActive(): Promise<PBPromotion[]> {
     try {
-      const pbClient = getPublicPb();
+      const isClient = typeof window !== 'undefined';
+      const pbClient = isClient ? getPublicPb() : await getAdminPb();
       const now = new Date().toISOString();
 
-      return await pbClient.collection("promotions").getFullList<PBPromotion>({
-        filter: `isActive = true && startDate <= "${now}" && endDate >= "${now}"`,
-        sort: "-created",
-      });
+      try {
+        return await pbClient.collection("promotions").getFullList<PBPromotion>({
+          filter: pbClient.filter('isActive = true && startDate <= {:now} && endDate >= {:now}', { now }),
+          sort: "-created",
+        });
+      } catch {
+        const allActive = await pbClient.collection("promotions").getFullList<PBPromotion>({
+          filter: `isActive = true`,
+          sort: "-created",
+        });
+
+        const nowMs = Date.now();
+        return allActive.filter((item) => {
+          const startMs = item.startDate ? new Date(item.startDate).getTime() : 0;
+          const endMs = item.endDate ? new Date(item.endDate).getTime() : Infinity;
+          return (isNaN(startMs) || startMs <= nowMs) && (isNaN(endMs) || endMs >= nowMs);
+        });
+      }
     } catch (err) {
-      handleError(err, "pbPromotions.getActive");
+      console.warn("[pbPromotions.getActive] Failed to load active promotions:", err);
+      return [];
     }
   },
 
@@ -875,15 +891,31 @@ export const pbPromotions = {
 export const pbAnnouncements = {
   async getActive(): Promise<PBAnnouncement[]> {
     try {
-      const pbClient = getPublicPb();
+      const isClient = typeof window !== 'undefined';
+      const pbClient = isClient ? getPublicPb() : await getAdminPb();
       const now = new Date().toISOString();
 
-      return await pbClient.collection("announcements").getFullList<PBAnnouncement>({
-        filter: `isActive = true && (endsAt = "" || endsAt >= "${now}")`,
-        sort: "-created",
-      });
+      try {
+        return await pbClient.collection("announcements").getFullList<PBAnnouncement>({
+          filter: pbClient.filter('isActive = true && (endsAt = "" || endsAt = null || endsAt >= {:now})', { now }),
+          sort: "-created",
+        });
+      } catch {
+        const allActive = await pbClient.collection("announcements").getFullList<PBAnnouncement>({
+          filter: `isActive = true`,
+          sort: "-created",
+        });
+
+        const nowMs = Date.now();
+        return allActive.filter((item) => {
+          if (!item.endsAt) return true;
+          const endMs = new Date(item.endsAt).getTime();
+          return isNaN(endMs) || endMs >= nowMs;
+        });
+      }
     } catch (err) {
-      handleError(err, "pbAnnouncements.getActive");
+      console.warn("[pbAnnouncements.getActive] Failed to load active announcements:", err);
+      return [];
     }
   },
 

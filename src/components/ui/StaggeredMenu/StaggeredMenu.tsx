@@ -1,9 +1,10 @@
-'use client';
+"use client";
 
 import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { gsap } from "gsap";
-import { ArrowLeft, ChevronRight } from "lucide-react";
+import { ArrowLeft, ChevronRight, X } from "lucide-react";
+import { useSiteBranding } from "@/components/providers/site-branding-provider";
 import "./StaggeredMenu.css";
 
 export interface MenuItem {
@@ -20,7 +21,7 @@ export interface SocialItem {
 }
 
 export interface StaggeredMenuProps {
-  position?: 'left' | 'right';
+  position?: "left" | "right";
   colors?: string[];
   items?: MenuItem[];
   socialItems?: SocialItem[];
@@ -54,6 +55,7 @@ export const StaggeredMenu: React.FC<StaggeredMenuProps> = ({
   onMenuOpen = () => {},
   onMenuClose = () => {},
 }) => {
+  const branding = useSiteBranding();
   const [open, setOpen] = useState(false);
   const openRef = useRef(false);
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
@@ -308,50 +310,53 @@ export const StaggeredMenu: React.FC<StaggeredMenuProps> = ({
     }
   }, [changeMenuColorOnOpen, menuButtonColor, openMenuButtonColor]);
 
-  const transitionToView = useCallback((targetView: { type: "main" | "submenu"; activeItem: MenuItem | null }) => {
-    if (transitionBusyRef.current) return;
-    transitionBusyRef.current = true;
+  const transitionToView = useCallback(
+    (targetView: { type: "main" | "submenu"; activeItem: MenuItem | null }) => {
+      if (transitionBusyRef.current) return;
+      transitionBusyRef.current = true;
 
-    const panel = panelRef.current;
-    if (!panel) {
-      transitionBusyRef.current = false;
-      return;
-    }
+      const panel = panelRef.current;
+      if (!panel) {
+        transitionBusyRef.current = false;
+        return;
+      }
 
-    const labels = Array.from(panel.querySelectorAll(".sm-panel-itemLabel"));
+      const labels = Array.from(panel.querySelectorAll(".sm-panel-itemLabel"));
 
-    gsap.to(labels, {
-      yPercent: -140,
-      rotate: -5,
-      opacity: 0,
-      duration: 0.3,
-      ease: "power3.in",
-      stagger: { each: 0.03, from: "start" },
-      onComplete: () => {
-        setCurrentView(targetView);
+      gsap.to(labels, {
+        yPercent: -140,
+        rotate: -5,
+        opacity: 0,
+        duration: 0.3,
+        ease: "power3.in",
+        stagger: { each: 0.03, from: "start" },
+        onComplete: () => {
+          setCurrentView(targetView);
 
-        setTimeout(() => {
-          const newLabels = Array.from(
-            panel.querySelectorAll(".sm-panel-itemLabel"),
-          );
+          setTimeout(() => {
+            const newLabels = Array.from(
+              panel.querySelectorAll(".sm-panel-itemLabel"),
+            );
 
-          gsap.set(newLabels, { yPercent: 140, rotate: 5, opacity: 0 });
+            gsap.set(newLabels, { yPercent: 140, rotate: 5, opacity: 0 });
 
-          gsap.to(newLabels, {
-            yPercent: 0,
-            rotate: 0,
-            opacity: 1,
-            duration: 0.5,
-            ease: "power4.out",
-            stagger: { each: 0.04, from: "start" },
-            onComplete: () => {
-              transitionBusyRef.current = false;
-            },
-          });
-        }, 30);
-      },
-    });
-  }, []);
+            gsap.to(newLabels, {
+              yPercent: 0,
+              rotate: 0,
+              opacity: 1,
+              duration: 0.5,
+              ease: "power4.out",
+              stagger: { each: 0.04, from: "start" },
+              onComplete: () => {
+                transitionBusyRef.current = false;
+              },
+            });
+          }, 30);
+        },
+      });
+    },
+    [],
+  );
 
   const toggleMenu = useCallback(() => {
     const target = !openRef.current;
@@ -442,7 +447,11 @@ export const StaggeredMenu: React.FC<StaggeredMenuProps> = ({
         "staggered-menu-wrapper" +
         (isFixed ? " fixed-wrapper" : "")
       }
-      style={accentColor ? ({ "--sm-accent": accentColor } as React.CSSProperties) : undefined}
+      style={
+        accentColor
+          ? ({ "--sm-accent": accentColor } as React.CSSProperties)
+          : undefined
+      }
       data-position={position}
       data-open={open || undefined}
     >
@@ -479,7 +488,8 @@ export const StaggeredMenu: React.FC<StaggeredMenuProps> = ({
           <span className="hamburger-line line-mid" />
           <span className="hamburger-line line-bot" />
         </button>
-      </header>      <aside
+      </header>{" "}
+      <aside
         id="staggered-menu-panel"
         ref={panelRef}
         className="staggered-menu-panel"
@@ -487,7 +497,17 @@ export const StaggeredMenu: React.FC<StaggeredMenuProps> = ({
         inert={!open || undefined}
         data-lenis-prevent
       >
-        <div className="sm-panel-inner text-foreground dark:text-white relative flex flex-col h-full z-10">
+        {/* Explicit Panel Close Button anchored to top right corner */}
+        <button
+          type="button"
+          onClick={closeMenu}
+          className="absolute top-4 right-4 z-50 p-2.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-neutral-200/60 dark:hover:bg-neutral-800/80 transition-colors focus:outline-hidden cursor-pointer"
+          aria-label="Close menu"
+        >
+          <X className="h-6 w-6" />
+        </button>
+
+        <div className="sm-panel-inner text-foreground dark:text-white relative flex flex-col h-full z-10 pb-16 sm:pb-20">
           {/* Ambient background glassmorphic radial mesh */}
           <div className="sm-mesh-container">
             <div className="sm-glow-orb orb-1" />
@@ -503,7 +523,10 @@ export const StaggeredMenu: React.FC<StaggeredMenuProps> = ({
               renderList.map((it, idx) => {
                 if (it.isBack) {
                   return (
-                    <li className="mb-4 sm-panel-itemWrap border-none!" key="back-button">
+                    <li
+                      className="mb-4 sm-panel-itemWrap border-none!"
+                      key="back-button"
+                    >
                       <Link
                         className="group inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-neutral-200/50 dark:hover:bg-neutral-800/80 transition-all duration-300 shadow-xs cursor-pointer"
                         href={it.link}
@@ -518,10 +541,7 @@ export const StaggeredMenu: React.FC<StaggeredMenuProps> = ({
                   );
                 }
                 return (
-                  <li
-                    className="sm-panel-itemWrap"
-                    key={it.label + idx}
-                  >
+                  <li className="sm-panel-itemWrap" key={it.label + idx}>
                     <Link
                       className="sm-panel-item"
                       href={it.link}
@@ -529,16 +549,22 @@ export const StaggeredMenu: React.FC<StaggeredMenuProps> = ({
                       aria-label={it.ariaLabel}
                       data-index={idx + 1}
                     >
-                      <span className="sm-panel-itemLabel" style={{ flex: 1 }}>{it.label}</span>
+                      <span className="sm-panel-itemLabel" style={{ flex: 1 }}>
+                        {it.label}
+                      </span>
                       {it.subItems && it.subItems.length > 0 && (
                         <ChevronRight
                           className="sm-chevron"
                           style={{
-                            width: '1rem',
-                            height: '1rem',
+                            width: "1rem",
+                            height: "1rem",
                             flexShrink: 0,
-                            transition: 'transform 0.3s cubic-bezier(0.16,1,0.3,1)',
-                            transform: expandedItem === it.label ? 'rotate(90deg)' : 'rotate(0deg)',
+                            transition:
+                              "transform 0.3s cubic-bezier(0.16,1,0.3,1)",
+                            transform:
+                              expandedItem === it.label
+                                ? "rotate(90deg)"
+                                : "rotate(0deg)",
                             opacity: 0.5,
                           }}
                         />
@@ -548,15 +574,22 @@ export const StaggeredMenu: React.FC<StaggeredMenuProps> = ({
                       <div
                         className="sm-inline-subitems-wrap"
                         style={{
-                          maxHeight: expandedItem === it.label ? `${Math.min(it.subItems.length * 2.6, 14)}rem` : '0px',
-                          overflow: 'hidden',
-                          transition: 'max-height 0.38s cubic-bezier(0.16,1,0.3,1)',
+                          maxHeight:
+                            expandedItem === it.label
+                              ? `${Math.min(it.subItems.length * 2.6, 14)}rem`
+                              : "0px",
+                          overflow: "hidden",
+                          transition:
+                            "max-height 0.38s cubic-bezier(0.16,1,0.3,1)",
                         }}
                       >
                         <div className="sm-inline-subitems-scroll">
                           <ul className="sm-inline-subitems">
                             {it.subItems.map((sub, subIdx) => (
-                              <li key={sub.label + subIdx} className="sm-inline-subitem">
+                              <li
+                                key={sub.label + subIdx}
+                                className="sm-inline-subitem"
+                              >
                                 <Link
                                   href={sub.link}
                                   onClick={closeMenu}
@@ -588,7 +621,8 @@ export const StaggeredMenu: React.FC<StaggeredMenuProps> = ({
               Join the Club
             </h4>
             <p className="text-[11px] text-muted-foreground mb-3 leading-relaxed max-w-[280px]">
-              Subscribe to get special offers, early access to new releases, and authorized discount alerts.
+              Subscribe to get special offers, early access to new releases, and
+              authorized discount alerts.
             </p>
             <div className="flex gap-2 w-full max-w-[280px]">
               <input
@@ -602,31 +636,11 @@ export const StaggeredMenu: React.FC<StaggeredMenuProps> = ({
             </div>
           </div>
 
-          {/* Flagship Store Location & Hours panel */}
-          <div className="grid grid-cols-2 gap-4 mt-4 mb-6 pt-6 border-t border-neutral-200/50 dark:border-neutral-800/40 relative z-10">
-            <div>
-              <h5 className="text-[9px] uppercase tracking-widest font-black text-neutral-400 dark:text-neutral-500 mb-1.5">
-                Flagship Store
-              </h5>
-              <p className="text-[10px] text-muted-foreground leading-normal font-medium">
-                120 Galle Road<br />
-                Colombo 03,<br />
-                Sri Lanka
-              </p>
-            </div>
-            <div>
-              <h5 className="text-[9px] uppercase tracking-widest font-black text-neutral-400 dark:text-neutral-500 mb-1.5">
-                Store Hours
-              </h5>
-              <p className="text-[10px] text-muted-foreground leading-normal font-medium">
-                Mon - Sat: 9am - 8pm<br />
-                Sun: 10am - 5pm
-              </p>
-            </div>
-          </div>
-          
           {displaySocials && socialItems && socialItems.length > 0 && (
-            <div className="sm-socials relative z-10 mb-4" aria-label="Social links">
+            <div
+              className="sm-socials relative z-10 mb-4"
+              aria-label="Social links"
+            >
               <h3 className="sm-socials-title">Socials</h3>
               <ul className="sm-socials-list" role="list">
                 {socialItems.map((s, i) => (

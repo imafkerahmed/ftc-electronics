@@ -26,6 +26,10 @@ interface ShipFulfillmentModalProps {
   onSuccess: (message: string) => void;
 }
 
+export function generateCustomUnitId(productId: string): string {
+  return `custom_${productId}_${Date.now()}`;
+}
+
 export default function ShipFulfillmentModal({
   isOpen,
   onClose,
@@ -135,7 +139,7 @@ export default function ShipFulfillmentModal({
     if (!matchedUnit) {
       // Create new unit candidate dynamically on the fly without mutating details directly
       const newUnit = {
-        id: `custom_${item.productId}_${Date.now()}`,
+        id: generateCustomUnitId(item.productId),
         productId: item.productId,
         barcode: scanValue.trim(),
         serialNumber: scanValue.trim(),

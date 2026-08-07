@@ -126,7 +126,7 @@ export const useCartStore = create<CartStoreState>()(
             return state;
           }
 
-          let newItems = state.items
+          const newItems = state.items
             .map((item) => {
               if (item.id === productId || item.product?.id === productId) {
                 const finalQty = Math.min(quantity, item.product.countInStock);
