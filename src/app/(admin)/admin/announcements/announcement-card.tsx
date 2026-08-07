@@ -48,9 +48,12 @@ export function AnnouncementCard({
       {/* Details */}
       <div className="p-4 flex-grow flex flex-col justify-between gap-3">
         <div>
-          <h3 className="font-bold text-sm text-foreground truncate">{announcement.title}</h3>
+          <h3 className="font-bold text-sm text-foreground truncate">{announcement.title || 'Announcement'}</h3>
+          {announcement.description && (
+            <p className="text-xs text-muted-foreground line-clamp-2 mt-1 font-normal">{announcement.description}</p>
+          )}
           {announcement.link && (
-            <div className="flex items-center gap-1 text-[10px] text-muted-foreground mt-1 truncate">
+            <div className="flex items-center gap-1 text-[10px] text-muted-foreground mt-1.5 truncate">
               <LinkIcon className="h-3 w-3 shrink-0" />
               <span>{announcement.link}</span>
             </div>

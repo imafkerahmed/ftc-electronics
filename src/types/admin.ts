@@ -379,8 +379,9 @@ export interface PBPromotion extends PBRecord {
 
 // ─── Announcements Collection ──────────────────────────────────────────────────
 export interface PBAnnouncement extends PBRecord {
-  title: string;
-  image: string;
+  title?: string;
+  description?: string;
+  image?: string;
   link?: string;
   isActive: boolean;
   endsAt?: string;

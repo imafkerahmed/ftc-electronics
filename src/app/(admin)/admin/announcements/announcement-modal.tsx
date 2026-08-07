@@ -11,6 +11,8 @@ interface AnnouncementModalProps {
   editingAnnouncement: Announcement | null;
   title: string;
   setTitle: (val: string) => void;
+  description?: string;
+  setDescription?: (val: string) => void;
   link: string;
   setLink: (val: string) => void;
   linkType: string;
@@ -34,6 +36,8 @@ export function AnnouncementModal({
   editingAnnouncement,
   title,
   setTitle,
+  description = '',
+  setDescription,
   link,
   setLink,
   linkType,
@@ -126,10 +130,10 @@ export function AnnouncementModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="announcement-modal-title"
-        className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full overflow-hidden animate-scale-in"
+        className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full overflow-hidden animate-scale-in max-h-[90vh] flex flex-col"
       >
         {/* Header */}
-        <div className="p-5 border-b border-border flex items-center justify-between">
+        <div className="p-5 border-b border-border flex items-center justify-between shrink-0">
           <h3 id="announcement-modal-title" className="text-base font-bold text-foreground">
             {editingAnnouncement ? 'Edit Announcement' : 'Add Popup Announcement'}
           </h3>
@@ -144,21 +148,32 @@ export function AnnouncementModal({
         </div>
 
         {/* Form */}
-        <form onSubmit={onSubmit} className="p-5 space-y-4">
+        <form onSubmit={onSubmit} className="p-5 space-y-4 overflow-y-auto">
           <div className="space-y-1.5">
-            <label htmlFor="announcement-title-input" className="text-xs font-semibold text-foreground/80 block">Ad/Promo Title *</label>
+            <label htmlFor="announcement-title-input" className="text-xs font-semibold text-foreground/80 block">Ad/Promo Title (Optional)</label>
             <Input
               id="announcement-title-input"
               ref={titleInputRef}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              required
-              placeholder="e.g. Clearance Sale Poster"
+              placeholder="e.g. Clearance Sale Poster or⚡ Flash Sale"
             />
           </div>
 
           <div className="space-y-1.5">
-            <label htmlFor="announcement-file-input" className="text-xs font-semibold text-foreground/80 block">Ad Graphic Image *</label>
+            <label htmlFor="announcement-desc-input" className="text-xs font-semibold text-foreground/80 block">Description / Promotional Details (Optional)</label>
+            <textarea
+              id="announcement-desc-input"
+              value={description}
+              onChange={(e) => setDescription && setDescription(e.target.value)}
+              rows={3}
+              placeholder="e.g. Enjoy up to 40% OFF on all wireless headphones. Limited stock available!"
+              className="w-full px-3 py-2 text-sm rounded-lg border border-input bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 resize-none"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label htmlFor="announcement-file-input" className="text-xs font-semibold text-foreground/80 block">Ad Graphic Image (Optional if text is provided)</label>
             <div className="border border-dashed border-border rounded-lg p-4 flex flex-col items-center justify-center gap-2 bg-muted/10 relative">
               {imagePreview ? (
                 <div className="relative w-full h-36 rounded-md overflow-hidden bg-black/10">
@@ -176,7 +191,7 @@ export function AnnouncementModal({
                 <>
                   <ImageIcon className="h-8 w-8 text-muted-foreground" />
                   <p className="text-[10px] text-muted-foreground text-center">
-                    Upload banner graphic (Suggested size: 500x600px, aspect 5:6)
+                    Upload banner graphic (Suggested size: 600x600px or banner aspect)
                   </p>
                 </>
               )}
@@ -187,7 +202,6 @@ export function AnnouncementModal({
                 accept="image/*"
                 onChange={handleFileChange}
                 className="absolute inset-0 opacity-0 cursor-pointer"
-                required={!editingAnnouncement && !imagePreview}
               />
             </div>
           </div>

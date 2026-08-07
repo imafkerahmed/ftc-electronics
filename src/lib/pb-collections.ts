@@ -897,7 +897,8 @@ function normalizeAnnouncementRecord(rec: any): PBAnnouncement {
     collectionName: rec.collectionName || rec.collectionId || "announcements",
     created: rec.created || "",
     updated: rec.updated || "",
-    title: rec.title || rec.name || rec.headline || "Untitled Ad",
+    title: rec.title || rec.name || rec.headline || "",
+    description: rec.description || rec.body || rec.details || rec.text || "",
     image: rec.image || rec.file || rec.graphic || rec.photo || "",
     link: rec.link || rec.url || rec.targetUrl || "",
     isActive:
@@ -914,6 +915,7 @@ function normalizeAnnouncementRecord(rec: any): PBAnnouncement {
 
 export const pbAnnouncements = {
   async ensureCollection(): Promise<boolean> {
+    if (typeof window !== 'undefined') return true;
     if (announcementsReady) return true;
     try {
       const adminPb = await getAdminPb();
@@ -921,11 +923,37 @@ export const pbAnnouncements = {
 
       for (const colName of collectionsToTry) {
         try {
-          await adminPb.collections.getOne(colName);
-          try {
-            await adminPb.collections.update(colName, { listRule: "", viewRule: "" });
-          } catch {
-            // ignore rule update error
+          const col = await adminPb.collections.getOne(colName);
+          let needsUpdate = false;
+          const fields = col.fields || (col as any).schema || [];
+          const hasDesc = fields.some((f: any) => f.name === "description");
+          const updatedFields = fields.map((f: any) => {
+            if (f.name === "image" && f.required) {
+              needsUpdate = true;
+              return { ...f, required: false };
+            }
+            if (f.name === "title" && f.required) {
+              needsUpdate = true;
+              return { ...f, required: false };
+            }
+            return f;
+          });
+
+          if (!hasDesc) {
+            needsUpdate = true;
+            updatedFields.push({ name: "description", type: "text", required: false });
+          }
+
+          if (needsUpdate || col.listRule !== "" || col.viewRule !== "") {
+            try {
+              await adminPb.collections.update(col.name || colName, {
+                listRule: "",
+                viewRule: "",
+                fields: updatedFields,
+              });
+            } catch {
+              // ignore
+            }
           }
           announcementsReady = true;
           return true;
@@ -940,7 +968,8 @@ export const pbAnnouncements = {
         name: "announcements",
         type: "base",
         schema: [
-          { name: "title", type: "text", required: true },
+          { name: "title", type: "text", required: false },
+          { name: "description", type: "text", required: false },
           { name: "image", type: "file", required: false, options: { maxSelect: 1 } },
           { name: "link", type: "text", required: false },
           { name: "isActive", type: "bool", required: false },
@@ -971,9 +1000,13 @@ export const pbAnnouncements = {
 
       for (const colName of collectionsToTry) {
         try {
-          const res = await pbClient.collection(colName).getFullList({
-            sort: "-created",
-          });
+          let res: any[] = [];
+          try {
+            res = await pbClient.collection(colName).getFullList({ sort: "-created" });
+          } catch {
+            res = await pbClient.collection(colName).getFullList();
+          }
+
           if (res && res.length > 0) {
             rawItems = res;
             break;
@@ -983,14 +1016,18 @@ export const pbAnnouncements = {
         }
       }
 
-      if (rawItems.length === 0) {
+      if (rawItems.length === 0 && !isClient) {
         try {
           const adminPb = await getAdminPb();
           for (const colName of collectionsToTry) {
             try {
-              const res = await adminPb.collection(colName).getFullList({
-                sort: "-created",
-              });
+              let res: any[] = [];
+              try {
+                res = await adminPb.collection(colName).getFullList({ sort: "-created" });
+              } catch {
+                res = await adminPb.collection(colName).getFullList();
+              }
+
               if (res && res.length > 0) {
                 rawItems = res;
                 break;
@@ -1046,11 +1083,19 @@ export const pbAnnouncements = {
       const collectionsToTry = ["announcements", "announcement", "popup_announcements", "ads"];
       for (const colName of collectionsToTry) {
         try {
-          const result = await pbClient
-            .collection(colName)
-            .getList<any>(options?.page || 1, options?.perPage || 50, {
-              sort: "-created",
-            });
+          let result: any = null;
+          try {
+            result = await pbClient
+              .collection(colName)
+              .getList<any>(options?.page || 1, options?.perPage || 50, {
+                sort: "-created",
+              });
+          } catch {
+            result = await pbClient
+              .collection(colName)
+              .getList<any>(options?.page || 1, options?.perPage || 50);
+          }
+
           if (result && result.items && result.items.length > 0) {
             return {
               items: result.items.map(normalizeAnnouncementRecord),
@@ -1782,6 +1827,7 @@ export const pbContactInquiries = {
    * Ensures that the 'contact_inquiries' collection exists in PocketBase.
    */
   async ensureCollection(): Promise<boolean> {
+    if (typeof window !== 'undefined') return true;
     if (contactInquiriesReady) return true;
     try {
       const adminPb = await getAdminPb();

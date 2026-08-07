@@ -20,6 +20,7 @@ export default function AdminAnnouncementsPage() {
 
   // Form states
   const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [link, setLink] = useState('');
   const [linkType, setLinkType] = useState('none');
   const [endsAt, setEndsAt] = useState('');
@@ -43,7 +44,8 @@ export default function AdminAnnouncementsPage() {
       }
       setAnnouncements((res?.items || []).map((ann: any) => ({
         id: ann.id,
-        title: ann.title || ann.name || ann.headline || 'Untitled Ad',
+        title: ann.title || ann.name || ann.headline || '',
+        description: ann.description || ann.body || ann.details || '',
         image: ann.image || ann.file || '',
         link: ann.link || ann.url || '',
         isActive: ann.isActive !== undefined ? Boolean(ann.isActive) : (ann.is_active !== undefined ? Boolean(ann.is_active) : true),
@@ -65,6 +67,7 @@ export default function AdminAnnouncementsPage() {
   const handleOpenCreate = () => {
     setEditingAnnouncement(null);
     setTitle('');
+    setDescription('');
     setLink('');
     setLinkType('none');
     setEndsAt('');
@@ -78,16 +81,17 @@ export default function AdminAnnouncementsPage() {
 
   const handleOpenEdit = (ann: Announcement) => {
     setEditingAnnouncement(ann);
-    setTitle(ann.title);
-    setLink(ann.link);
-    if (ann.link === '') {
+    setTitle(ann.title || '');
+    setDescription(ann.description || '');
+    setLink(ann.link || '');
+    if (!ann.link) {
       setLinkType('none');
     } else if (['/deals', '/new-arrivals', '/products', '/contact'].includes(ann.link)) {
       setLinkType(ann.link);
     } else {
       setLinkType('custom');
     }
-    setEndsAt(ann.endsAt);
+    setEndsAt(ann.endsAt || '');
     setSelectedFile(null);
     setImagePreview(ann.imageUrl || null);
     setRemoveImage(false);
@@ -135,18 +139,14 @@ export default function AdminAnnouncementsPage() {
     setError(null);
     setSuccess(null);
 
-    if (!title) {
-      setError('Title is required.');
-      return;
-    }
-
-    if (!editingAnnouncement && !selectedFile) {
-      setError('Please select an announcement image to upload.');
+    if (!title && !description && !selectedFile && (!editingAnnouncement || !editingAnnouncement.image)) {
+      setError('Please provide at least a Title, Description, or Graphic Image for the announcement.');
       return;
     }
 
     const formData = new FormData();
     formData.append('title', title);
+    formData.append('description', description);
     formData.append('link', link);
     formData.append('isActive', editingAnnouncement ? String(editingAnnouncement.isActive) : 'true');
     formData.append('removeImage', String(removeImage));
@@ -263,6 +263,8 @@ export default function AdminAnnouncementsPage() {
         editingAnnouncement={editingAnnouncement}
         title={title}
         setTitle={setTitle}
+        description={description}
+        setDescription={setDescription}
         link={link}
         setLink={setLink}
         linkType={linkType}

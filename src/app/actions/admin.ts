@@ -793,7 +793,12 @@ export async function deletePromotionAction(id: string) {
 }
 
 function generatePbId(): string {
-  return crypto.randomUUID().replace(/-/g, '').slice(0, 15);
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let result = '';
+  for (let i = 0; i < 15; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
 }
 
 export async function getAnnouncementsAction() {
@@ -815,15 +820,17 @@ export async function createAnnouncementAction(formData: FormData) {
   try {
     formData.delete('removeImage');
 
+    if (!formData.has('id') || !formData.get('id')) {
+      formData.set('id', generatePbId());
+    }
+
     const imageFile = formData.get('image');
     if (!imageFile || (imageFile instanceof File && imageFile.size === 0)) {
       formData.delete('image');
     }
 
     const titleVal = formData.get('title')?.toString() || '';
-    if (!titleVal) {
-      return { success: false, error: 'Title is required.' };
-    }
+    formData.set('title', titleVal);
 
     // Normalize endsAt to end of specified day (23:59:59.999)
     const endsAtVal = formData.get('endsAt')?.toString();
@@ -856,6 +863,7 @@ export async function createAnnouncementAction(formData: FormData) {
     revalidatePath('/', 'layout');
     return { success: true, data: record };
   } catch (err: any) {
+    console.error('[createAnnouncementAction] Error:', err);
     return { success: false, error: err?.message || 'Failed to create announcement.' };
   }
 }
