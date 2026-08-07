@@ -43,8 +43,8 @@ next-env.d.ts
 # agent customizations and logs
 .agent/
 
-# local setup scripts
-/scripts/local/
+# local setup scripts & database tools
+/scripts/
 *.local.mjs
 *.local.js
 
