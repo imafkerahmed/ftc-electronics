@@ -1075,17 +1075,42 @@ export const pbAnnouncements = {
       const adminPb = await getAdminPb();
       const collectionsToTry = ["announcements", "announcement"];
       let record: any = null;
+      let lastErr: any = null;
 
       for (const colName of collectionsToTry) {
         try {
           record = await adminPb.collection(colName).create(data);
           if (record) break;
-        } catch {
-          // try next
+        } catch (err: any) {
+          lastErr = err;
+          console.error(`[pbAnnouncements.create] Error creating on collection '${colName}':`, err?.response?.data || err?.message || err);
         }
       }
 
-      if (!record) throw new Error("Failed to create announcement record in PocketBase.");
+      if (!record && data instanceof FormData) {
+        const fallbackData = new FormData();
+        const allowedKeys = ["title", "name", "image", "file", "link", "url", "isActive", "is_active", "endsAt", "ends_at"];
+        for (const key of allowedKeys) {
+          const val = data.get(key);
+          if (val !== null && val !== undefined && val !== "") {
+            fallbackData.append(key, val);
+          }
+        }
+        for (const colName of collectionsToTry) {
+          try {
+            record = await adminPb.collection(colName).create(fallbackData);
+            if (record) break;
+          } catch (err: any) {
+            lastErr = err;
+          }
+        }
+      }
+
+      if (!record) {
+        const detail = lastErr?.response?.data ? JSON.stringify(lastErr.response.data) : (lastErr?.message || "Failed to create announcement record.");
+        throw new Error(detail);
+      }
+
       return normalizeAnnouncementRecord(record);
     } catch (err) {
       handleError(err, "pbAnnouncements.create");
@@ -1101,17 +1126,41 @@ export const pbAnnouncements = {
       const adminPb = await getAdminPb();
       const collectionsToTry = ["announcements", "announcement", "popup_announcements", "ads"];
       let record: any = null;
+      let lastErr: any = null;
 
       for (const colName of collectionsToTry) {
         try {
           record = await adminPb.collection(colName).update(id, data);
           if (record) break;
-        } catch {
-          // try next
+        } catch (err: any) {
+          lastErr = err;
         }
       }
 
-      if (!record) throw new Error("Failed to update announcement record.");
+      if (!record && data instanceof FormData) {
+        const fallbackData = new FormData();
+        const allowedKeys = ["title", "name", "image", "file", "link", "url", "isActive", "is_active", "endsAt", "ends_at"];
+        for (const key of allowedKeys) {
+          const val = data.get(key);
+          if (val !== null && val !== undefined) {
+            fallbackData.append(key, val);
+          }
+        }
+        for (const colName of collectionsToTry) {
+          try {
+            record = await adminPb.collection(colName).update(id, fallbackData);
+            if (record) break;
+          } catch (err: any) {
+            lastErr = err;
+          }
+        }
+      }
+
+      if (!record) {
+        const detail = lastErr?.response?.data ? JSON.stringify(lastErr.response.data) : (lastErr?.message || "Failed to update announcement record.");
+        throw new Error(detail);
+      }
+
       return normalizeAnnouncementRecord(record);
     } catch (err) {
       handleError(err, "pbAnnouncements.update");

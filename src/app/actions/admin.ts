@@ -820,6 +820,11 @@ export async function createAnnouncementAction(formData: FormData) {
       formData.delete('image');
     }
 
+    const titleVal = formData.get('title')?.toString() || '';
+    if (!titleVal) {
+      return { success: false, error: 'Title is required.' };
+    }
+
     // Normalize endsAt to end of specified day (23:59:59.999)
     const endsAtVal = formData.get('endsAt')?.toString();
     if (endsAtVal) {
@@ -851,7 +856,7 @@ export async function createAnnouncementAction(formData: FormData) {
     revalidatePath('/', 'layout');
     return { success: true, data: record };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to create announcement.' };
+    return { success: false, error: err?.message || 'Failed to create announcement.' };
   }
 }
 
