@@ -813,8 +813,11 @@ export async function createAnnouncementAction(formData: FormData) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    if (!formData.has('id')) {
-      formData.append('id', generatePbId());
+    formData.delete('removeImage');
+
+    const imageFile = formData.get('image');
+    if (!imageFile || (imageFile instanceof File && imageFile.size === 0)) {
+      formData.delete('image');
     }
 
     // Normalize endsAt to end of specified day (23:59:59.999)
@@ -824,10 +827,15 @@ export async function createAnnouncementAction(formData: FormData) {
       if (!isNaN(endOfDay.getTime())) {
         endOfDay.setHours(23, 59, 59, 999);
         formData.set('endsAt', endOfDay.toISOString());
+      } else {
+        formData.delete('endsAt');
       }
+    } else {
+      formData.delete('endsAt');
     }
 
     const record = await pbAnnouncements.create(formData);
+    if (!record) throw new Error('Failed to create announcement record.');
 
     await writeAuditLog(
       check.actorEmail!,
@@ -852,22 +860,34 @@ export async function updateAnnouncementAction(id: string, formData: FormData) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    // Normalize endsAt to end of specified day (23:59:59.999)
+    const isRemoveImage = formData.get('removeImage') === 'true';
+    formData.delete('removeImage');
+
+    if (isRemoveImage) {
+      formData.set('image', '');
+    } else {
+      const imageFile = formData.get('image');
+      if (!imageFile || (imageFile instanceof File && imageFile.size === 0)) {
+        formData.delete('image');
+      }
+    }
+
+    // Normalize endsAt
     const endsAtVal = formData.get('endsAt')?.toString();
     if (endsAtVal) {
       const endOfDay = new Date(endsAtVal);
       if (!isNaN(endOfDay.getTime())) {
         endOfDay.setHours(23, 59, 59, 999);
         formData.set('endsAt', endOfDay.toISOString());
+      } else {
+        formData.delete('endsAt');
       }
-    }
-
-    // Explicitly delete image file in PocketBase when client requests image removal
-    if (formData.get('removeImage') === 'true') {
-      formData.set('image', '');
+    } else {
+      formData.delete('endsAt');
     }
 
     const record = await pbAnnouncements.update(id, formData);
+    if (!record) throw new Error('Failed to update announcement record.');
 
     await writeAuditLog(
       check.actorEmail!,

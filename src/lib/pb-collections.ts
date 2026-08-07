@@ -888,9 +888,53 @@ export const pbPromotions = {
 
 // ─── Announcements ────────────────────────────────────────────────────────────
 
+let announcementsReady = false;
+
 export const pbAnnouncements = {
+  async ensureCollection(): Promise<boolean> {
+    if (announcementsReady) return true;
+    try {
+      const adminPb = await getAdminPb();
+      try {
+        await adminPb.collections.getOne("announcements");
+        announcementsReady = true;
+        return true;
+      } catch {
+        try {
+          await adminPb.collections.getOne("announcement");
+          announcementsReady = true;
+          return true;
+        } catch {
+          await adminPb.collections.create({
+            id: "announcements",
+            name: "announcements",
+            type: "base",
+            schema: [
+              { name: "title", type: "text", required: true },
+              { name: "image", type: "file", required: false, options: { maxSelect: 1 } },
+              { name: "link", type: "text", required: false },
+              { name: "isActive", type: "bool", required: false },
+              { name: "endsAt", type: "date", required: false },
+            ],
+            listRule: "",
+            viewRule: "",
+            createRule: null,
+            updateRule: null,
+            deleteRule: null,
+          });
+          announcementsReady = true;
+          return true;
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to auto-create announcements collection:", err);
+      return false;
+    }
+  },
+
   async getActive(): Promise<PBAnnouncement[]> {
     try {
+      await this.ensureCollection();
       const isClient = typeof window !== 'undefined';
       const pbClient = isClient ? getPublicPb() : await getAdminPb();
       const now = new Date().toISOString();
@@ -934,6 +978,7 @@ export const pbAnnouncements = {
     perPage?: number;
   }): Promise<{ items: PBAnnouncement[]; totalItems: number }> {
     try {
+      await this.ensureCollection();
       let pbClient: PocketBase;
       try {
         pbClient = await getAdminPb();
@@ -968,6 +1013,7 @@ export const pbAnnouncements = {
 
   async create(data: FormData | Record<string, unknown>): Promise<PBAnnouncement> {
     try {
+      await this.ensureCollection();
       const adminPb = await getAdminPb();
       try {
         return await adminPb.collection("announcements").create<PBAnnouncement>(data);
