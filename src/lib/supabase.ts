@@ -24,6 +24,10 @@ export function getSupabaseFileUrl(bucket: string, path?: string | null): string
   return data?.publicUrl || `${supabaseUrl}/storage/v1/object/public/${bucket}/${path}`;
 }
 
+export function getSupabaseUrl(): string {
+  return process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+}
+
 export function isUserAuthenticated(): boolean {
   if (typeof window === 'undefined') return false;
   return false;

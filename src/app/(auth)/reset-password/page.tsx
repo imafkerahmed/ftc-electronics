@@ -1,17 +1,15 @@
 'use client';
 
-import { useState, useEffect, useRef, Suspense } from 'react';
+import { useState, useRef, Suspense } from 'react';
 import Link from 'next/link';
-import { useSearchParams, useRouter } from 'next/navigation';
-import { ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ArrowRight, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { resetPasswordAction } from '@/app/actions/auth';
 
 function ResetPasswordForm() {
-  const searchParams = useSearchParams();
   const router = useRouter();
-  const [token, setToken] = useState<string>(() => searchParams.get('token') || '');
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const [password, setPassword] = useState('');
@@ -19,27 +17,6 @@ function ResetPasswordForm() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  // Strip token query parameter from browser address bar / history on mount to prevent leakage
-  useEffect(() => {
-    const urlToken = searchParams.get('token');
-    if (urlToken) {
-      setToken(urlToken);
-      if (typeof window !== 'undefined') {
-        const cleanUrl = window.location.pathname;
-        window.history.replaceState(null, '', cleanUrl);
-      }
-    }
-  }, [searchParams]);
-
-  // Clean up redirect timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
-    };
-  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,7 +36,6 @@ function ResetPasswordForm() {
     setError(null);
 
     const fd = new FormData();
-    fd.append('token', token);
     fd.append('password', password);
     fd.append('confirmPassword', confirmPassword);
 
@@ -67,13 +43,13 @@ function ResetPasswordForm() {
       const res = await resetPasswordAction(fd);
 
       if (res.success) {
-        setMessage(res.message || 'Your password has been successfully reset. Redirecting to login...');
+        setMessage(res.message || 'Your password has been successfully updated. Redirecting to home...');
         router.refresh();
         timerRef.current = setTimeout(() => {
           router.push('/');
         }, 2000);
       } else {
-        setError(res.error || 'Invalid or expired password reset token.');
+        setError(res.error || 'Failed to update password. Your reset session may have expired.');
       }
     } catch {
       setError('An unexpected error occurred. Please try again.');
@@ -109,50 +85,53 @@ function ResetPasswordForm() {
         </div>
       )}
 
-      {!token ? (
-        <div className="p-4 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 rounded-lg text-xs">
-          Missing or invalid reset token in URL parameters. Please check your reset link or request a new reset email.
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label htmlFor="new-password" className="block text-xs text-muted-foreground mb-2">New Password</label>
+          <Input
+            id="new-password"
+            type="password"
+            required
+            minLength={8}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
+          />
         </div>
-      ) : (
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="new-password" className="block text-xs text-muted-foreground mb-2">New Password</label>
-            <Input
-              id="new-password"
-              type="password"
-              required
-              minLength={8}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
-            />
-          </div>
 
-          <div>
-            <label htmlFor="confirm-password" className="block text-xs text-muted-foreground mb-2">Confirm New Password</label>
-            <Input
-              id="confirm-password"
-              type="password"
-              required
-              minLength={8}
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="••••••••"
-              className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
-            />
-          </div>
+        <div>
+          <label htmlFor="confirm-password" className="block text-xs text-muted-foreground mb-2">Confirm New Password</label>
+          <Input
+            id="confirm-password"
+            type="password"
+            required
+            minLength={8}
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            placeholder="••••••••"
+            className="h-10 bg-background border-border text-foreground text-sm focus-visible:ring-blue-500"
+          />
+        </div>
 
-          <Button
-            type="submit"
-            disabled={loading}
-            className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-semibold cursor-pointer rounded-lg flex items-center justify-center gap-2 transition-colors mt-2"
-          >
-            {loading ? 'Updating password...' : 'Update Password'}
-            <ArrowRight className="h-4 w-4" />
-          </Button>
-        </form>
-      )}
+        <Button
+          type="submit"
+          disabled={loading}
+          className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-semibold cursor-pointer rounded-lg flex items-center justify-center gap-2 transition-colors mt-2"
+        >
+          {loading ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Updating password...</span>
+            </>
+          ) : (
+            <>
+              <span>Update Password</span>
+              <ArrowRight className="h-4 w-4" />
+            </>
+          )}
+        </Button>
+      </form>
 
       {/* Link back to sign in */}
       <div className="text-center text-xs text-muted-foreground border-t border-border pt-5">

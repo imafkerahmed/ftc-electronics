@@ -22,6 +22,7 @@ import type {
   PBSiteSetting,
   PBContactInquiry,
 } from "@/types/admin";
+import type { PBEmployee, EmployeeRole } from "@/types/pos";
 import { pbProductToProduct, pbCategoryToCategory } from "@/types/admin";
 import type { Product, Category } from "@/types/product";
 
@@ -37,10 +38,12 @@ function logError(context: string, err: any) {
       msg = `${title.trim()} (HTML response body truncated)`;
     }
 
-    console.error(`${context} failed: ${msg}`);
-    if (err.details) console.error(`  Details: ${err.details}`);
-    if (err.hint) console.error(`  Hint: ${err.hint}`);
-    if (err.code) console.error(`  Code: ${err.code}`);
+    console.error(`${context} failed:`, {
+      message: msg,
+      details: err.details || null,
+      hint: err.hint || null,
+      code: err.code || null,
+    });
     if (err.stack) console.error(`  Stack: ${err.stack}`);
   } else {
     console.error(`${context} failed:`, err);
@@ -302,6 +305,11 @@ export const sbProducts = {
 
       const { data, count, error } = await query.range(from, to);
 
+      if (error) {
+        logError("[sbProducts.getAll] Supabase query failed", error);
+        throw error;
+      }
+
       const items: Product[] = (data || []).map((row) =>
         pbProductToProduct(mapProductRow(row as unknown as ProductDbRow), ""),
       );
@@ -335,7 +343,11 @@ export const sbProducts = {
 
       const { data, error } = await query.maybeSingle();
 
-      if (error || !data) return null;
+      if (error) {
+        logError(`[sbProducts.getBySlug] for ${slug} failed`, error);
+        throw error;
+      }
+      if (!data) return null;
       return pbProductToProduct(
         mapProductRow(data as unknown as ProductDbRow),
         "",
@@ -347,17 +359,26 @@ export const sbProducts = {
   },
 
   async getById(id: string): Promise<Product | null> {
-    const client = getClient(false);
-    const { data } = await client
-      .from("products")
-      .select("*, category_obj:categories(*), brand_obj:brands(*)")
-      .eq("id", id)
-      .maybeSingle();
-    if (!data) return null;
-    return pbProductToProduct(
-      mapProductRow(data as unknown as ProductDbRow),
-      "",
-    );
+    try {
+      const client = getClient(false);
+      const { data, error } = await client
+        .from("products")
+        .select("*, category_obj:categories(*), brand_obj:brands(*)")
+        .eq("id", id)
+        .maybeSingle();
+      if (error) {
+        logError(`[sbProducts.getById] for ${id} failed`, error);
+        return null;
+      }
+      if (!data) return null;
+      return pbProductToProduct(
+        mapProductRow(data as unknown as ProductDbRow),
+        "",
+      );
+    } catch (err) {
+      logError(`[sbProducts.getById] for ${id}`, err);
+      return null;
+    }
   },
 
   async getFeatured(limit = 6): Promise<Product[]> {
@@ -411,7 +432,10 @@ export const sbProducts = {
       .eq("status", "published")
       .limit(100);
 
-    if (error) throw error;
+    if (error) {
+      logError("[sbProducts.getByIds] Supabase query failed", error);
+      throw error;
+    }
     if (!data || !data.length) return [];
 
     return data.map((item) =>
@@ -1470,13 +1494,28 @@ export const pbContactInquiries = {
 };
 
 export const pbEmployees = {
-  async getAll() {
+  async getAll(): Promise<PBEmployee[]> {
+    const client = getClient(true);
+    // Never expose PINs to public POS cashier selection dropdowns
+    const { data } = await client
+      .from("employees")
+      .select("id, name, role, is_active, isActive, avatar, email, phone, created_at, updated_at");
+    return (data || []).map((e: any) => ({
+      id: e.id,
+      name: e.name || '',
+      pin: '', // Omitted for client security
+      role: (e.role === 'manager' ? 'manager' : 'cashier') as EmployeeRole,
+      isActive: Boolean(e.isActive ?? e.is_active ?? true),
+      created: e.created_at || new Date().toISOString(),
+      updated: e.updated_at || new Date().toISOString(),
+      collectionId: 'employees',
+      collectionName: 'employees',
+    }));
+  },
+  async getAllAdmin() {
     const client = getClient(true);
     const { data } = await client.from("employees").select("*");
     return data || [];
-  },
-  async getAllAdmin() {
-    return this.getAll();
   },
   async create(data: any) {
     const client = getClient(true);

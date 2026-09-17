@@ -4,9 +4,8 @@ import React, { useState, useEffect, useTransition } from 'react';
 import { Image as ImageIcon, Upload, Search, Trash2, Eye, FolderPlus, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { getSupabaseUrl } from '@/lib/supabase-admin';
+import { getSupabaseUrl, supabase } from '@/lib/supabase';
 import { uploadMediaAction, deleteMediaAction } from '@/app/actions/admin';
-import { supabase } from '@/lib/supabase';
 
 interface MediaItem {
   id: string;

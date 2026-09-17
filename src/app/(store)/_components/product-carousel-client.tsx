@@ -24,19 +24,22 @@ export default function ProductCarouselClient({
   // Extract IDs to batch fetch
   const ids = initialProducts.map(p => p.id).join(',');
 
-  const { data: products = initialProducts } = useQuery({
+  const { data: products = initialProducts } = useQuery<any[]>({
     queryKey: [...productKeys.lists(), 'batch', ids],
     queryFn: async () => {
-      if (!ids) return initialProducts;
-      const res = await fetch(`/api/products/batch?ids=${ids}`);
-      if (!res.ok) return initialProducts;
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        return data;
+      if (!ids) return [];
+      const res = await fetch(`/api/products/batch?ids=${encodeURIComponent(ids)}`);
+      if (!res.ok) {
+        throw new Error(`Failed to fetch batch products (HTTP ${res.status})`);
       }
-      return initialProducts;
+      const data = await res.json();
+      if (!Array.isArray(data)) {
+        throw new Error('Malformed batch response: expected an array');
+      }
+      return data;
     },
     initialData: initialProducts,
+    placeholderData: (prev) => prev ?? initialProducts,
     refetchOnWindowFocus: true,
     refetchInterval: 8000,
     // Only run the query if we have IDs

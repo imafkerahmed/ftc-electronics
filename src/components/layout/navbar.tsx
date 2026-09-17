@@ -16,6 +16,7 @@ import { useSiteBranding } from "@/components/providers/site-branding-provider";
 import { getCategories, getBrands } from "@/lib/db";
 import { AuthModal } from "@/components/auth/auth-modal";
 import { getCurrentUserSessionAction } from "@/app/actions/auth";
+import { supabase } from "@/lib/supabase/client";
 
 interface StaggeredMenuProps {
   position?: "left" | "right";
@@ -66,39 +67,41 @@ export default function Navbar() {
   const [userAvatar, setUserAvatar] = useState("");
   const [authSuffix, setAuthSuffix] = useState("in");
 
-  // Reactively detect auth state via non-httpOnly cookie (pb_auth_indicator)
+  // Reactively detect auth state via Supabase SSR session
   useEffect(() => {
+    let isMounted = true;
+
     const check = async () => {
-      const loggedIn = /(?:^|;\s*)pb_auth_indicator=1(?:;|$)/.test(
-        document.cookie,
-      );
-      setIsLoggedIn(loggedIn);
-
-      if (loggedIn) {
-        // Read avatar
-        const avatarMatch = document.cookie.match(/pb_auth_avatar=([^;]+)/);
-        setUserAvatar(avatarMatch ? decodeURIComponent(avatarMatch[1]) : "");
-
-        // If avatar isn't cached but indicator is active, perform a quick fallback check for avatar url
-        if (!avatarMatch) {
-          try {
-            const res = await getCurrentUserSessionAction();
-            if (res.success && res.user && res.user.avatar) {
-              setUserAvatar(res.user.avatar);
-            }
-          } catch {
-            // Ignore
-          }
+      try {
+        const res = await getCurrentUserSessionAction();
+        if (!isMounted) return;
+        if (res.success && res.user) {
+          setIsLoggedIn(true);
+          setUserAvatar(res.user.avatar || "");
+        } else {
+          setIsLoggedIn(false);
+          setUserAvatar("");
         }
-      } else {
-        setUserAvatar("");
+      } catch {
+        if (isMounted) {
+          setIsLoggedIn(false);
+          setUserAvatar("");
+        }
       }
     };
+
     void check();
-    // Re-check on focus (tab switch) AND on custom auth-change (login/logout)
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      void check();
+    });
+
     window.addEventListener("focus", check);
     window.addEventListener("auth-change", check);
+
     return () => {
+      isMounted = false;
+      subscription.unsubscribe();
       window.removeEventListener("focus", check);
       window.removeEventListener("auth-change", check);
     };

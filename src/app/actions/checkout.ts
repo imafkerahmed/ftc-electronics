@@ -238,6 +238,7 @@ export async function processCheckoutOrderAction(data: {
       .insert({
         id: uuid,
         order_id: orderId,
+        user_id: userId || null,
         customer: {
           userId,
           name: data.customerName,

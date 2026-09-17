@@ -40,9 +40,7 @@ export default function RootLayout({
       className={cn("h-full", "antialiased", geistSans.variable, geistMono.variable, "font-sans", inter.variable)}
     >
       <head>
-        {/* Preconnect to PocketBase for faster API and image fetches */}
-        <link rel="preconnect" href="https://ftc-db.codix.site" />
-        <link rel="dns-prefetch" href="https://ftc-db.codix.site" />
+
       </head>
       <body className="min-h-full flex flex-col">
         <QueryProvider>

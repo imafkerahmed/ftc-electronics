@@ -16,7 +16,17 @@ export function formatPrice(amount: number, currency: 'USD' | 'LKR' = 'LKR') {
 export function isValidSafeRedirect(target: unknown): target is string {
   if (typeof target !== 'string' || !target.trim()) return false;
   const clean = target.trim();
-  return clean.startsWith('/') && !clean.startsWith('//') && !clean.startsWith('/\\') && !clean.includes('\\');
+  if (!clean.startsWith('/') || clean.startsWith('//') || clean.startsWith('/\\') || clean.includes('\\')) {
+    return false;
+  }
+  // Disallow control characters and javascript/data pseudo-protocols
+  if (/[\x00-\x1F\x7F\r\n\t]/.test(clean)) return false;
+  try {
+    const parsed = new URL(clean, 'http://localhost');
+    return parsed.origin === 'http://localhost' && parsed.pathname.startsWith('/') && !parsed.pathname.startsWith('//');
+  } catch {
+    return false;
+  }
 }
 
 export function getSafeRedirectUrl(target: unknown, fallback: string = '/'): string {

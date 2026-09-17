@@ -1,7 +1,8 @@
 'use server';
 
-import { cookies, headers } from 'next/headers';
+import { headers } from 'next/headers';
 import { revalidatePath } from 'next/cache';
+import { createClient as createServerSupabase } from '@/lib/supabase/server';
 import { getAdminSupabase, writeAuditLog } from '@/lib/supabase-admin';
 import { getTrustedClientIp } from '@/lib/get-client-ip';
 import { ROLE_PERMISSIONS, ADMIN_ROLES } from '@/types/admin';
@@ -52,72 +53,35 @@ export async function checkPermission(
   module: keyof typeof ROLE_PERMISSIONS[AdminRole],
   action: 'read' | 'write' | 'delete'
 ): Promise<{ allowed: boolean; role?: AdminRole; actorEmail?: string; actorId?: string; ip?: string; userAgent?: string }> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('pb_auth_token')?.value;
-  const refreshToken = cookieStore.get('pb_auth_refresh_token')?.value;
-
   const headersList = await headers();
   const ip = getTrustedClientIp(headersList);
   const userAgent = headersList.get('user-agent') || 'unknown';
 
-  if (!token && !refreshToken) {
-    return { allowed: false, ip, userAgent };
-  }
-
   try {
-    const supabase = getAdminSupabase();
-    let user = null;
-    if (token) {
-      const { data: userData, error: authErr } = await supabase.auth.getUser(token);
-      if (!authErr && userData?.user) {
-        user = userData.user;
-      }
-    }
+    const supabase = await createServerSupabase();
+    const { data: { user }, error: authErr } = await supabase.auth.getUser();
 
-    if (!user && refreshToken) {
-      try {
-        const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
-        if (!refreshErr && refreshData?.session && refreshData?.user) {
-          user = refreshData.user;
-          const secure = process.env.NODE_ENV === 'production';
-          const base = {
-            secure,
-            sameSite: 'strict' as const,
-            path: '/',
-            maxAge: 60 * 60 * 24 * 7,
-          };
-          cookieStore.set('pb_auth_token', refreshData.session.access_token, { ...base, httpOnly: true });
-          if (refreshData.session.refresh_token) {
-            cookieStore.set('pb_auth_refresh_token', refreshData.session.refresh_token, { ...base, httpOnly: true });
-          }
-        }
-      } catch {
-        // Refresh failed
-      }
-    }
-
-    if (!user) {
+    if (authErr || !user) {
       return { allowed: false, ip, userAgent };
     }
 
-    const { data: publicUser } = await supabase
-      .from('users')
-      .select('id, role, is_admin, email')
+    const adminSb = getAdminSupabase();
+    const { data: profile } = await adminSb
+      .from('profiles')
+      .select('id, role, name')
       .eq('id', user.id)
       .maybeSingle();
 
     let role: AdminRole | undefined = undefined;
-    const roleStr = publicUser?.role || user.user_metadata?.role;
+    const roleStr = profile?.role;
     if (roleStr && (ADMIN_ROLES as readonly string[]).includes(roleStr)) {
       role = roleStr as AdminRole;
-    } else if (publicUser?.is_admin === true) {
-      role = 'super_admin';
     }
 
     if (!role) {
       return {
         allowed: false,
-        actorEmail: user.email || publicUser?.email || '',
+        actorEmail: user.email || '',
         actorId: user.id,
         ip,
         userAgent,
@@ -130,7 +94,7 @@ export async function checkPermission(
     return {
       allowed: isAllowed,
       role,
-      actorEmail: user.email || publicUser?.email || '',
+      actorEmail: user.email || '',
       actorId: user.id,
       ip,
       userAgent,
@@ -3166,22 +3130,21 @@ export async function verifyManagerPinAction(pin: string): Promise<{
 
     const supabase = getAdminSupabase();
 
-    // 1. Query users table for privileged user matching PIN
-    const { data: users, error: userErr } = await supabase
-      .from('users')
-      .select('id, name, email, role, is_admin, pin')
+    // 1. Query profiles table for privileged manager/admin matching PIN
+    const { data: profiles, error: profileErr } = await supabase
+      .from('profiles')
+      .select('id, name, role, pin')
       .eq('pin', cleanPin)
       .limit(10);
 
-    if (userErr) {
-      console.error('[verifyManagerPinAction] Database error querying users:', userErr);
+    if (profileErr) {
+      console.error('[verifyManagerPinAction] Database error querying profiles:', profileErr);
       return { success: false, error: 'Authentication verification failed.' };
     }
 
-    const privilegedUser = (users || []).find((u) => {
-      const role = typeof u.role === 'string' ? u.role.toLowerCase() : '';
+    const privilegedUser = (profiles || []).find((p) => {
+      const role = typeof p.role === 'string' ? p.role.toLowerCase() : '';
       return (
-        u.is_admin === true ||
         role === 'manager' ||
         role === 'admin' ||
         role === 'super_admin' ||
@@ -3194,7 +3157,7 @@ export async function verifyManagerPinAction(pin: string): Promise<{
     if (privilegedUser) {
       return {
         success: true,
-        managerName: privilegedUser.name || privilegedUser.email || 'Manager',
+        managerName: privilegedUser.name || 'Manager',
       };
     }
 
@@ -3342,6 +3305,10 @@ export async function validatePosCouponAction(code: string, cartTotal: number) {
 }
 
 export async function getUnifiedSalesTrackerAction() {
+  const perm = await checkPermission('orders', 'read');
+  if (!perm.allowed) {
+    return { success: false, error: 'Unauthorized: Read orders permission required.' };
+  }
   try {
     const [sales, ordersRes] = await Promise.all([
       pbSales.getAll(),
@@ -4291,6 +4258,10 @@ export async function getAdminNotificationsAction(): Promise<{
   unreadCount?: number;
   error?: string;
 }> {
+  const perm = await checkPermission('inquiries', 'read');
+  if (!perm.allowed) {
+    return { success: false, notifications: [], unreadCount: 0, error: 'Unauthorized.' };
+  }
   try {
     const notifications: AdminNotification[] = [];
 
