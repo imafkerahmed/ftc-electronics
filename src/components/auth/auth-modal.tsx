@@ -6,8 +6,7 @@ import { X, ArrowRight, AlertCircle, CheckCircle2, Eye, EyeOff, KeyRound, Loader
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { loginAction, signUpAction, setOAuthSessionAction, verifyOtpAction } from '@/app/actions/auth';
-import { pb } from '@/lib/pocketbase';
-import { ClientResponseError } from 'pocketbase';
+import { supabase } from '@/lib/supabase';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 
 interface AuthModalProps {
@@ -171,38 +170,19 @@ export function AuthModal({
     setError(null);
     setMessage(null);
     try {
-      const authData = await pb.collection('users').authWithOAuth2({ provider: 'google' });
-      if (authData?.token) {
-        const res = await setOAuthSessionAction(authData.token);
-        if (!isMountedRef.current) return;
-        if (res.success) {
-          window.dispatchEvent(new Event('auth-change'));
-          onClose();
-          startTransition(() => {
-            router.refresh();
-            if (onSuccessRedirect) {
-              router.push(onSuccessRedirect);
-            }
-          });
-          return;
-        } else {
-          setError(res.error || 'Failed to authorize Google session.');
-        }
-      } else {
-        setError('Google authentication did not complete.');
-      }
-    } catch (err) {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}`,
+        },
+      });
+      if (error) throw error;
+    } catch (err: any) {
       if (!isMountedRef.current) return;
-      const isCancelled = err instanceof ClientResponseError && (err.isAbort || err.status === 0);
-      if (!isCancelled) {
-        setError(
-          err instanceof Error ? err.message : 'Google authentication failed. Please try again.'
-        );
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setGoogleLoading(false);
-      }
+      setError(
+        err?.message || 'Google authentication failed. Please try again.'
+      );
+      setGoogleLoading(false);
     }
   };
 

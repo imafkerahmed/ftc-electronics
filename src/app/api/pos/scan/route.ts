@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAdminPb, getPbUrl } from '@/lib/pb-admin';
+import { getAdminSupabase } from '@/lib/supabase-admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,79 +12,74 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: 'Query parameter "q" is required.' }, { status: 400 });
     }
 
-    const adminPb = await getAdminPb();
-    const pbUrl = getPbUrl();
-
-    // 1. Check stock_management collection for barcode, serialNumber, or id
-    let unit: any = null;
-    try {
-      unit = await adminPb.collection('stock_management').getFirstListItem(
-        `barcode = "${q}" || serialNumber = "${q}" || id = "${q}"`
-      );
-    } catch {
-      // Unit not found by exact barcode/serial/id
+    const supabase = getAdminSupabase();
+    const cleanQ = q.replace(/[,()"]/g, '').trim();
+    if (!cleanQ) {
+      return NextResponse.json({ success: false, error: 'Valid query parameter "q" is required.' }, { status: 400 });
     }
+
+    const { data: unit } = await supabase
+      .from('stock_management')
+      .select('*')
+      .or(`barcode.eq.${cleanQ},serial_number.eq.${cleanQ},id.eq.${cleanQ}`)
+      .maybeSingle();
 
     if (unit) {
       if (unit.status !== 'available') {
         return NextResponse.json(
           {
             success: false,
-            error: `Unit ${unit.barcode || unit.serialNumber || unit.id} is ${unit.status.toUpperCase()}.`,
+            error: `Unit ${unit.barcode || unit.serial_number || unit.id} is ${String(unit.status ?? 'UNKNOWN').toUpperCase()}.`,
           },
           { status: 400 }
         );
       }
 
-      // Fetch product details
-      const p: any = await adminPb.collection('products').getOne(unit.product, { expand: 'category' });
-      return NextResponse.json({
-        success: true,
-        type: 'unit',
-        data: {
-          productId: p.id,
-          productName: p.name,
-          sku: p.slug || p.id,
-          unitPrice: p.discountPrice || p.price,
-          imageUrl: p.images?.[0]
-            ? `${pbUrl}/api/files/${p.collectionId}/${p.id}/${p.images[0]}?thumb=200x200`
-            : null,
-          countInStock: p.countInStock ?? 0,
-          unitId: unit.id,
-          unitBarcode: unit.barcode,
-          unitSerial: unit.serialNumber,
-        },
-      });
+      const { data: p } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', unit.product_id)
+        .maybeSingle();
+
+      if (p) {
+        return NextResponse.json({
+          success: true,
+          type: 'unit',
+          data: {
+            productId: p.id,
+            productName: p.name,
+            sku: p.slug || p.id,
+            unitPrice: p.discount_price || p.price,
+            imageUrl: p.images?.[0] || null,
+            countInStock: p.count_in_stock ?? 0,
+            unitId: unit.id,
+            unitBarcode: unit.barcode,
+            unitSerial: unit.serial_number,
+          },
+        });
+      }
     }
 
-    // 2. Check products collection for id, slug, or name
-    let productRecord: any = null;
-    try {
-      productRecord = await adminPb.collection('products').getFirstListItem(
-        `id = "${q}" || slug = "${q}" || name ~ "${q}"`,
-        { expand: 'category' }
-      );
-    } catch {
-      // Product not found
-    }
+    const { data: productRecord } = await supabase
+      .from('products')
+      .select('*')
+      .or(`id.eq.${cleanQ},slug.eq.${cleanQ},name.ilike.%${cleanQ}%`)
+      .maybeSingle();
 
     if (productRecord) {
-      if ((productRecord.countInStock ?? 0) <= 0) {
+      if ((productRecord.count_in_stock ?? 0) <= 0) {
         return NextResponse.json(
           { success: false, error: `Product "${productRecord.name}" is OUT OF STOCK.` },
           { status: 400 }
         );
       }
 
-      // Fetch an available unit if present
-      let availUnit: any = null;
-      try {
-        availUnit = await adminPb.collection('stock_management').getFirstListItem(
-          `product = "${productRecord.id}" && status = "available"`
-        );
-      } catch {
-        // No stock_management unit found
-      }
+      const { data: availUnit } = await supabase
+        .from('stock_management')
+        .select('*')
+        .eq('product_id', productRecord.id)
+        .eq('status', 'available')
+        .maybeSingle();
 
       return NextResponse.json({
         success: true,
@@ -93,14 +88,12 @@ export async function GET(request: Request) {
           productId: productRecord.id,
           productName: productRecord.name,
           sku: productRecord.slug || productRecord.id,
-          unitPrice: productRecord.discountPrice || productRecord.price,
-          imageUrl: productRecord.images?.[0]
-            ? `${pbUrl}/api/files/${productRecord.collectionId}/${productRecord.id}/${productRecord.images[0]}?thumb=200x200`
-            : null,
-          countInStock: productRecord.countInStock ?? 0,
+          unitPrice: productRecord.discount_price || productRecord.price,
+          imageUrl: productRecord.images?.[0] || null,
+          countInStock: productRecord.count_in_stock ?? 0,
           unitId: availUnit?.id,
           unitBarcode: availUnit?.barcode,
-          unitSerial: availUnit?.serialNumber,
+          unitSerial: availUnit?.serial_number,
         },
       });
     }

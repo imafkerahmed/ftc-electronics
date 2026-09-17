@@ -5,7 +5,8 @@ import Link from "next/link";
 import Image from "next/image";
 import { Star, CheckCircle2, X } from "lucide-react";
 import { motion, useInView, AnimatePresence } from "motion/react";
-import { pbReviews } from "@/lib/pb-collections";
+import { sanitizeImageUrl } from "@/lib/supabase-collections";
+import { getReviews } from "@/lib/db";
 
 interface MockReview {
   id: string;
@@ -91,15 +92,13 @@ export default function ReviewCarousel() {
   const [selectedReview, setSelectedReview] = useState<MockReview | null>(null);
 
   useEffect(() => {
-    const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'https://ftc-db.codix.site';
-    pbReviews
-      .getApproved({ limit: 10 })
-      .then((rawReviews) => {
+    getReviews("")
+      .then((rawReviews: any[]) => {
         if (!rawReviews || rawReviews.length === 0) {
           setReviews(DEFAULT_FALLBACK_REVIEWS);
           return;
         }
-        const formatted = rawReviews.map((rev) => {
+        const formatted = rawReviews.map((rev: any) => {
           const prodExpand = rev.expand?.product;
           let imageUrl = "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?q=80&w=150";
 
@@ -121,10 +120,9 @@ export default function ReviewCarousel() {
               imgPath = rawImages;
             }
 
-            if (imgPath && imgPath.startsWith("http")) {
-              imageUrl = imgPath;
-            } else if (imgPath && !imgPath.startsWith("[")) {
-              imageUrl = `${pbUrl}/api/files/${prodExpand.collectionId}/${prodExpand.id}/${imgPath}`;
+            const sanitized = sanitizeImageUrl(imgPath);
+            if (sanitized) {
+              imageUrl = sanitized;
             } else if (prodExpand.slug) {
               const slugMapping: Record<string, string> = {
                 'apexbook-pro-16': 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?q=80&w=150',

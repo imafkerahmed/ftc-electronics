@@ -14,9 +14,14 @@ import {
   Send,
   Loader2,
   CheckCircle2,
+  QrCode,
+  Download,
+  Copy,
+  ExternalLink,
 } from 'lucide-react';
 import LocationMap from '@/components/layout/location-map';
-import { pbSiteSettings } from '@/lib/pb-collections';
+import { pbSiteSettings } from '@/lib/supabase-collections';
+import { QRCodeSVG } from 'qrcode.react';
 import { submitContactFormAction } from '@/app/actions/contact';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -127,6 +132,8 @@ export default function ContactPage() {
   const [formSent, setFormSent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [digitalCardEnabled, setDigitalCardEnabled] = useState(true);
+  const [originUrl, setOriginUrl] = useState('https://ftc.lk');
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -135,10 +142,16 @@ export default function ContactPage() {
   });
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setOriginUrl(window.location.origin);
+    }
     async function loadData() {
       try {
         const settingsRes = await pbSiteSettings.get<any>('general').catch(() => null);
-        if (settingsRes) setSettings(settingsRes);
+        if (settingsRes) {
+          setSettings(settingsRes);
+          setDigitalCardEnabled(settingsRes.digitalCardEnabled !== false);
+        }
       } catch {
         // fallback
       } finally {
@@ -149,14 +162,14 @@ export default function ContactPage() {
   }, []);
 
   const siteName = settings?.siteName || 'FTC Electronics';
-  const phone = settings?.contactInfo?.phone || '+94 77 123 4567';
-  const email = settings?.contactInfo?.email || 'info@ftc.lk';
-  const whatsapp = settings?.contactInfo?.whatsapp || '+94 77 123 4567';
-  const cleanWhatsapp = whatsapp.replace(/[^0-9+]/g, '');
-  const hours = settings?.storeHoursCopy || '9:30 AM - 7:00 PM Daily';
-  const address = settings?.location?.address || '123 Tech Avenue, Colombo 03, Sri Lanka';
-  const city = settings?.location?.city || 'Colombo';
-  const googleMapsUrl = settings?.location?.googleMapsUrl || 'https://maps.google.com';
+  const phone = settings?.contactInfo?.phone;
+  const email = settings?.contactInfo?.email;
+  const whatsapp = settings?.contactInfo?.whatsapp;
+  const cleanWhatsapp = whatsapp ? whatsapp.replace(/[^0-9+]/g, '') : undefined;
+  const hours = settings?.storeHoursCopy;
+  const address = settings?.location?.address;
+  const city = settings?.location?.city;
+  const googleMapsUrl = settings?.location?.googleMapsUrl;
 
   const socialLinks = settings?.socialLinks;
 
@@ -215,6 +228,46 @@ export default function ContactPage() {
     }
   };
 
+  const connectPageUrl = `${originUrl}/contact`;
+
+  const downloadQRCode = () => {
+    const svgEl = document.getElementById('visiting-card-qr-contact');
+    if (!svgEl) return;
+    const svgData = new XMLSerializer().serializeToString(svgEl);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+
+    img.onload = () => {
+      canvas.width = 1000;
+      canvas.height = 1000;
+      if (ctx) {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, 1000, 1000);
+        const pngFile = canvas.toDataURL('image/png');
+        const downloadLink = document.createElement('a');
+        downloadLink.download = 'ftc-electronics-visiting-card-qr.png';
+        downloadLink.href = pngFile;
+        downloadLink.click();
+      }
+      URL.revokeObjectURL(objectUrl);
+    };
+
+    const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const objectUrl = URL.createObjectURL(blob);
+    img.src = objectUrl;
+  };
+
+  const copyConnectUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(connectPageUrl);
+      alert('Copied URL to clipboard!');
+    } catch {
+      // ignore
+    }
+  };
+
   return (
     <div className="text-foreground py-8 space-y-12">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-10">
@@ -231,7 +284,7 @@ export default function ContactPage() {
         </div>
 
         {/* ── Socials Section ── */}
-        {(loadingSettings || allSocials.length > 0) && (
+        {(loadingSettings || (digitalCardEnabled && allSocials.length > 0)) && (
           <div className="rounded-3xl border border-border bg-card p-6 sm:p-8 shadow-sm space-y-6">
             {/* Centered Header */}
             <div className="text-center space-y-1.5 max-w-xl mx-auto">

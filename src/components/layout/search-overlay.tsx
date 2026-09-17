@@ -7,8 +7,10 @@ import Image from "next/image";
 import { Search, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useLenis } from "lenis/react";
+import { useQuery } from "@tanstack/react-query";
 import { formatPrice } from "@/lib/utils";
 import { getProducts } from "@/lib/db";
+import { productKeys } from "@/lib/query-keys";
 import type { Product } from "@/types/product";
 
 interface SearchOverlayProps {
@@ -21,13 +23,12 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
   const lenis = useLenis();
   const [searchQuery, setSearchQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
-  const [products, setProducts] = useState<Product[]>([]);
 
-  useEffect(() => {
-    if (isOpen && products.length === 0) {
-      getProducts().then(setProducts);
-    }
-  }, [isOpen, products.length]);
+  const { data: products = [] } = useQuery({
+    queryKey: productKeys.lists(),
+    queryFn: () => getProducts(),
+    enabled: isOpen,
+  });
 
   const categories = [
     { label: "Laptops", link: "/products/laptops" },

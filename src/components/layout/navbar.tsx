@@ -13,7 +13,7 @@ import StaggeredMenuComponent from "@/components/ui/StaggeredMenu/StaggeredMenu"
 import SearchOverlay from "@/components/layout/search-overlay";
 import { cn } from "@/lib/utils";
 import { useSiteBranding } from "@/components/providers/site-branding-provider";
-import { pbCategories, pbBrands } from "@/lib/pb-collections";
+import { getCategories, getBrands } from "@/lib/db";
 import { AuthModal } from "@/components/auth/auth-modal";
 import { getCurrentUserSessionAction } from "@/app/actions/auth";
 
@@ -42,12 +42,7 @@ interface StaggeredMenuProps {
 
 const StaggeredMenu = StaggeredMenuComponent as React.FC<StaggeredMenuProps>;
 
-const defaultAnnouncements = [
-  "🚀 Free Delivery on Orders Over LKR 10,000",
-  "✨ 0% Interest Installments via Koko Pay — Shop Now",
-  "🛡️ Official Manufacturer Warranty on All Products",
-  "⚡ New Arrivals Weekly — Explore the Latest Drops",
-];
+
 
 export default function Navbar() {
   const { logoUrl, siteName, announcement, isLoading } = useSiteBranding();
@@ -154,10 +149,10 @@ export default function Navbar() {
         // ignore cache read error, fall through to fetch
       }
 
-      // Cache miss — fetch from PocketBase
+      // Cache miss — fetch from server
       const [catsResult, brsResult] = await Promise.allSettled([
-        pbCategories.getAll(),
-        pbBrands.getAll(),
+        getCategories(),
+        getBrands(),
       ]);
 
       const cats =
@@ -196,9 +191,9 @@ export default function Navbar() {
     void fetchData();
   }, []);
 
-  const activeAnnouncements = announcement?.text
-    ? [announcement.text, ...defaultAnnouncements]
-    : defaultAnnouncements;
+  const activeAnnouncements = (announcement?.texts || [])
+    .filter((t: any) => t.enabled)
+    .map((t: any) => t);
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 10);
@@ -206,8 +201,13 @@ export default function Navbar() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // Cycle announcements
+  // Cycle announcements safely
   useEffect(() => {
+    if (activeAnnouncements.length <= 1) {
+      setAnnouncementIdx(0);
+      return;
+    }
+    setAnnouncementIdx((prev) => (prev >= activeAnnouncements.length ? 0 : prev));
     const interval = setInterval(() => {
       setAnnouncementIdx((prev) => (prev + 1) % activeAnnouncements.length);
     }, 4000);
@@ -275,7 +275,7 @@ export default function Navbar() {
   return (
     <>
       {/* Dynamic Announcement Bar */}
-      {showBanner && announcement?.show !== false && (
+      {showBanner && announcement?.show !== false && activeAnnouncements.length > 0 && (
         <div
           style={announcement?.bgColor ? { backgroundColor: announcement.bgColor } : undefined}
           className="bg-gradient-to-r from-blue-700 via-indigo-600 to-blue-700 text-white text-xs font-semibold py-2 px-4 transition-all duration-300 relative z-50 shadow-sm border-b border-white/10"
@@ -291,7 +291,12 @@ export default function Navbar() {
                   transition={{ duration: 0.3 }}
                   className="inline-block tracking-wide font-medium"
                 >
-                  {activeAnnouncements[announcementIdx]}
+                  {activeAnnouncements[announcementIdx]?.text}
+                  {activeAnnouncements[announcementIdx]?.link && (
+                    <Link href={activeAnnouncements[announcementIdx].link} className="ml-2 underline opacity-90 hover:opacity-100 transition-opacity">
+                      Learn More &rarr;
+                    </Link>
+                  )}
                 </motion.span>
               </AnimatePresence>
             </div>

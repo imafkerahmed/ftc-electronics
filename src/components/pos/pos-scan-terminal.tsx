@@ -1,6 +1,9 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { productKeys } from "@/lib/query-keys";
+
 import {
   ScanLine,
   Barcode,
@@ -44,7 +47,6 @@ interface PosScanTerminalProps {
     item: Omit<PosCartItem, "quantity" | "itemDiscount" | "lineTotal">,
   ) => void;
   cartItems: PosCartItem[];
-  refreshTrigger?: number;
   currency: string;
 }
 
@@ -59,7 +61,6 @@ function fmt(amount: number, currency = "LKR") {
 export default function PosScanTerminal({
   onAddToCart,
   cartItems,
-  refreshTrigger,
   currency,
 }: PosScanTerminalProps) {
   const [scanInput, setScanInput] = useState("");
@@ -68,12 +69,8 @@ export default function PosScanTerminal({
   const [scanLog, setScanLog] = useState<ScanEvent[]>([]);
   const [showCatalog, setShowCatalog] = useState(false);
 
-  // All products loaded on mount for live search
-  const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<string[]>([]);
   const [activeCategory, setActiveCategory] = useState("All");
   const [catalogSearch, setCatalogSearch] = useState("");
-  const [productsLoaded, setProductsLoaded] = useState(false);
 
   // Live search dropdown
   const [searchSuggestions, setSearchSuggestions] = useState<Product[]>([]);
@@ -96,32 +93,49 @@ export default function PosScanTerminal({
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // ── Load all products upfront for instant local search ─────────────
-  const loadProducts = useCallback(async () => {
-    try {
+  // ── Load all products via TanStack Query ──────────────────────────
+  // productKeys.lists() is the same key the admin panel invalidates on
+  // create/update/delete — so POS prices stay in sync automatically.
+  const {
+    data: posData,
+    isLoading: productsLoading,
+    isError: productsError,
+    isSuccess: productsSuccess,
+    error: loadError,
+    refetch: refetchProducts,
+  } = useQuery({
+    queryKey: [...productKeys.lists(), "pos"],
+    queryFn: async () => {
       const res = await fetch("/api/pos/products");
-      if (res.ok) {
-        const data = await res.json();
-        setProducts(data.products || []);
-        const cats = [
-          "All",
-          ...new Set<string>(
-            (data.products as Product[])
-              .map((p: Product) => p.category)
-              .filter(Boolean),
-          ),
-        ];
-        setCategories(cats);
-        setProductsLoaded(true);
+      if (!res.ok) {
+        let errMsg = `Failed to load products (${res.status})`;
+        try {
+          const errBody = await res.json();
+          if (errBody?.error) errMsg = errBody.error;
+        } catch {
+          // ignore non-json
+        }
+        throw new Error(errMsg);
       }
-    } catch {
-      /* silent */
-    }
-  }, []);
+      const data = await res.json();
+      if (!data || !Array.isArray(data.products)) {
+        throw new Error("Invalid response structure from server.");
+      }
+      return data as { products: Product[] };
+    },
+    refetchOnWindowFocus: true,
+    refetchInterval: 8000,
+  });
 
-  useEffect(() => {
-    void loadProducts();
-  }, [loadProducts, refreshTrigger]);
+  const products = posData?.products ?? [];
+  const productsLoaded = productsSuccess || (!productsLoading && !productsError && !!posData);
+
+  // Derive categories from the product list
+  const categories = [
+    "All",
+    ...new Set<string>(products.map((p: Product) => p.category).filter(Boolean)),
+  ];
+
 
   // ── Live search as user types ─────────────────────────────────────
   useEffect(() => {
@@ -618,7 +632,7 @@ export default function PosScanTerminal({
 
           {/* Grid */}
           <div className="flex-1 overflow-y-auto min-h-0">
-            {!productsLoaded ? (
+            {productsLoading ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {Array.from({ length: 6 }).map((_, i) => (
                   <div
@@ -626,6 +640,16 @@ export default function PosScanTerminal({
                     className="h-28 rounded-xl bg-muted/40 animate-pulse"
                   />
                 ))}
+              </div>
+            ) : productsError ? (
+              <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-3 py-10 px-4 text-center">
+                <AlertCircle className="h-7 w-7 text-red-500 opacity-80" />
+                <p className="text-xs font-semibold text-foreground">
+                  {loadError instanceof Error ? loadError.message : "Unable to load products. Please check connection."}
+                </p>
+                <Button size="sm" variant="outline" onClick={() => void refetchProducts()} className="h-7 text-xs">
+                  Retry
+                </Button>
               </div>
             ) : filteredCatalog.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-2 py-10">

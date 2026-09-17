@@ -5,17 +5,29 @@ import Image from 'next/image';
 import { 
   Package, Plus, Search, Filter, ArrowUpDown, Edit, Trash2, Eye, 
   X, CheckCircle, AlertCircle, Save, Loader2, DollarSign, Image as ImageIcon, FileText, Sparkles,
-  ChevronUp, ChevronDown
+  ChevronUp, ChevronDown, Star, ArrowLeft, ArrowRight
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { 
   createProductAction, 
   updateProductAction, 
-  deleteProductAction 
+  deleteProductAction,
+  getAdminProductsAction,
+  getAdminCategoriesAction,
+  getAdminBrandsAction,
 } from '@/app/actions/admin';
-import { pbCategories, pbBrands, pbProducts } from '@/lib/pb-collections';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { adminKeys, productKeys } from '@/lib/query-keys';
+import { sanitizeImageUrl } from '@/lib/supabase-collections';
 import { Product } from '@/types/product';
+
+interface ManagedImage {
+  id: string;
+  type: 'url' | 'file';
+  url: string;
+  file?: File;
+}
 
 interface DescriptionBlock {
   id: string;
@@ -109,13 +121,38 @@ function convertDescBlocksToText(blocks: DescriptionBlock[]): string {
 }
 
 export default function AdminProductsPage() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loadingProducts, setLoadingProducts] = useState(true);
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   
-  // Relations state
-  const [allCategories, setAllCategories] = useState<{ id: string; name: string }[]>([]);
-  const [allBrands, setAllBrands] = useState<{ id: string; name: string }[]>([]);
+  const { data: productsData, isLoading: loadingProducts } = useQuery({
+    queryKey: adminKeys.products(),
+    queryFn: async () => {
+      const res = await getAdminProductsAction();
+      if (!res.success) throw new Error(res.error || "Failed to load products");
+      return res.data || [];
+    }
+  });
+  const products = productsData || [];
+
+  const { data: categoriesData } = useQuery({
+    queryKey: adminKeys.categories(),
+    queryFn: async () => {
+      const res = await getAdminCategoriesAction();
+      if (!res.success) throw new Error(res.error || "Failed to load categories");
+      return res.data?.map((c: any) => ({ id: c.id, name: c.name })) || [];
+    }
+  });
+  const allCategories = categoriesData || [];
+
+  const { data: brandsData } = useQuery({
+    queryKey: adminKeys.brands(),
+    queryFn: async () => {
+      const res = await getAdminBrandsAction();
+      if (!res.success) throw new Error(res.error || "Failed to load brands");
+      return res.data?.map((b: any) => ({ id: b.id, name: b.name })) || [];
+    }
+  });
+  const allBrands = brandsData || [];
   
   // Drawer/Modal states
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -134,7 +171,8 @@ export default function AdminProductsPage() {
   const [description, setDescription] = useState('');
   const [descBlocks, setDescBlocks] = useState<DescriptionBlock[]>([]);
   const [descMode, setDescMode] = useState<'visual' | 'plain'>('visual');
-  const [imageFiles, setImageFiles] = useState<FileList | null>(null);
+  const [managedImages, setManagedImages] = useState<ManagedImage[]>([]);
+  const [imageUrlInput, setImageUrlInput] = useState('');
   const [badgesText, setBadgesText] = useState('');
   const [specsText, setSpecsText] = useState('{}');
   const [specsList, setSpecsList] = useState<{ id: string; key: string; value: string }[]>([]);
@@ -146,6 +184,54 @@ export default function AdminProductsPage() {
   const [isPreOrder, setIsPreOrder] = useState(false);
   const [currency, setCurrency] = useState<'USD' | 'LKR'>('USD');
   
+  // Image management helpers
+  const handleAddImageFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const newItems: ManagedImage[] = Array.from(files).map((f) => ({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      type: 'file',
+      url: URL.createObjectURL(f),
+      file: f,
+    }));
+    setManagedImages((prev) => [...prev, ...newItems]);
+  };
+
+  const handleAddImageUrl = () => {
+    const trimmed = imageUrlInput.trim();
+    if (!trimmed) return;
+    setManagedImages((prev) => [
+      ...prev,
+      { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, type: 'url', url: trimmed },
+    ]);
+    setImageUrlInput('');
+  };
+
+  const handleMakeCover = (index: number) => {
+    if (index <= 0 || index >= managedImages.length) return;
+    setManagedImages((prev) => {
+      const next = [...prev];
+      const [chosen] = next.splice(index, 1);
+      next.unshift(chosen);
+      return next;
+    });
+  };
+
+  const handleMoveImage = (index: number, direction: 'left' | 'right') => {
+    const targetIndex = direction === 'left' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= managedImages.length) return;
+    setManagedImages((prev) => {
+      const next = [...prev];
+      const temp = next[index];
+      next[index] = next[targetIndex];
+      next[targetIndex] = temp;
+      return next;
+    });
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setManagedImages((prev) => prev.filter((_, i) => i !== index));
+  };
+  
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   
@@ -154,36 +240,61 @@ export default function AdminProductsPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  // Load products initially
-  const loadData = async () => {
-    try {
-      setLoadingProducts(true);
-      const res = await pbProducts.getAll({ perPage: 100 });
-      setProducts(res.items || []);
-    } catch (err: any) {
-      console.error('Failed to load products:', err);
-    } finally {
-      setLoadingProducts(false);
+  const updateProductMutation = useMutation({
+    mutationFn: async ({ id, formData }: { id: string, formData: FormData }) => {
+      const res = await updateProductAction(id, formData);
+      if (!res.success) throw new Error(res.error || "Failed to update product");
+      return res;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: adminKeys.products() });
+      queryClient.invalidateQueries({ queryKey: productKeys.lists() });
+      // Invalidate ALL product detail queries so the storefront page refetches the new price
+      queryClient.invalidateQueries({ queryKey: productKeys.details() });
+      setSuccess('Product updated successfully.');
+      setIsDrawerOpen(false);
+    },
+    onError: (err: Error) => {
+      setError(err.message);
     }
-  };
+  });
 
-  const loadRelations = async () => {
-    try {
-      const [cats, brs] = await Promise.all([
-        pbCategories.getAll(),
-        pbBrands.getAll(),
-      ]);
-      setAllCategories(cats.map(c => ({ id: c.id, name: c.name })));
-      setAllBrands(brs.map(b => ({ id: b.id, name: b.name })));
-    } catch (err) {
-      console.error('Failed to load category/brand relations:', err);
+  const createProductMutation = useMutation({
+    mutationFn: async (formData: FormData) => {
+      const res = await createProductAction(formData);
+      if (!res.success) throw new Error(res.error || "Failed to create product");
+      return res;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: adminKeys.products() });
+      queryClient.invalidateQueries({ queryKey: productKeys.lists() });
+      setSuccess('Product created successfully.');
+      setIsDrawerOpen(false);
+    },
+    onError: (err: Error) => {
+      setError(err.message);
     }
-  };
+  });
 
-  useEffect(() => {
-    loadData();
-    loadRelations();
-  }, []);
+  const deleteProductMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await deleteProductAction(id);
+      if (!res.success) throw new Error(res.error || "Failed to delete product");
+      return res;
+    },
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: adminKeys.products() });
+      queryClient.invalidateQueries({ queryKey: productKeys.lists() });
+      // Invalidate ALL product detail queries so the storefront page refetches the new price
+      queryClient.invalidateQueries({ queryKey: productKeys.details() });
+      setSuccess('Product deleted successfully.');
+    },
+    onError: (err: Error) => {
+      setError(err.message);
+    }
+  });
+
+  const isSubmitting = isPending || createProductMutation.isPending || updateProductMutation.isPending;
 
   // Lock the admin main scroll container when modal is open
   useEffect(() => {
@@ -203,12 +314,12 @@ export default function AdminProductsPage() {
 
   // Filtered list
   const filteredProducts = products.filter((p) => {
-    const term = search.toLowerCase();
-    return (
-      p.name.toLowerCase().includes(term) ||
-      p.category.toLowerCase().includes(term) ||
-      p.brand.toLowerCase().includes(term)
-    );
+    const term = search.toLowerCase().trim();
+    if (!term) return true;
+    const pName = (p.name || '').toLowerCase();
+    const pCat = (p.category || '').toLowerCase();
+    const pBrand = (p.brand || '').toLowerCase();
+    return pName.includes(term) || pCat.includes(term) || pBrand.includes(term);
   });
 
   const handleOpenCreate = () => {
@@ -218,8 +329,8 @@ export default function AdminProductsPage() {
     setPrice('');
     setDiscountPrice('');
     setWholesalePrice('');
-    setCategory(allCategories[0]?.id || '');
-    setBrand(allBrands[0]?.id || '');
+    setCategory('');
+    setBrand('');
     setCountInStock('10');
     setDescription('');
     setDescBlocks([
@@ -227,7 +338,8 @@ export default function AdminProductsPage() {
       { id: '2', type: 'paragraph', content: 'Enter product description here...' },
     ]);
     setDescMode('visual');
-    setImageFiles(null);
+    setManagedImages([]);
+    setImageUrlInput('');
     setBadgesText('');
     setSpecsText('{}');
     setSpecsList([
@@ -256,11 +368,11 @@ export default function AdminProductsPage() {
     setDiscountPrice(product.discountPrice?.toString() || '');
     setWholesalePrice(product.wholesalePrice?.toString() || '');
     
-    // Resolve relation IDs from names
-    const catRecord = allCategories.find(c => c.name === product.category);
-    const brandRecord = allBrands.find(b => b.name === product.brand);
-    setCategory(catRecord ? catRecord.id : '');
-    setBrand(brandRecord ? brandRecord.id : '');
+    // Resolve relation IDs from names or IDs safely
+    const catRecord = allCategories.find(c => c.id === product.category || c.name.toLowerCase().trim() === String(product.category || '').toLowerCase().trim());
+    const brandRecord = allBrands.find(b => b.id === product.brand || b.name.toLowerCase().trim() === String(product.brand || '').toLowerCase().trim());
+    setCategory(catRecord ? catRecord.id : (product.category || ''));
+    setBrand(brandRecord ? brandRecord.id : (product.brand || ''));
     
     setCountInStock(product.countInStock.toString());
     setDescription(product.description || '');
@@ -270,7 +382,14 @@ export default function AdminProductsPage() {
     setDescBlocks(parsedBlocks);
     setDescMode('visual');
 
-    setImageFiles(null);
+    setManagedImages(
+      (product.images || []).map((img, i) => ({
+        id: `${i}-${Date.now()}`,
+        type: 'url',
+        url: img,
+      }))
+    );
+    setImageUrlInput('');
     setBadgesText(product.badges?.join(', ') || '');
     setSpecsText(JSON.stringify(product.specs || {}, null, 2));
     
@@ -296,11 +415,16 @@ export default function AdminProductsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     setError(null);
     setSuccess(null);
 
-    if (!name || !slug || !price || !category || !brand) {
-      setError('Please fill in all required fields.');
+    const targetCategory = category || '';
+    const targetBrand = brand || '';
+
+    if (!name || !slug || !price) {
+      setError('Please fill in required fields: Product Name, Slug, and Retail Price.');
       return;
     }
 
@@ -334,8 +458,8 @@ export default function AdminProductsPage() {
         formData.append('wholesalePrice', wholesalePrice);
         formData.append('wholesale_price', wholesalePrice); // redundancy
       }
-      formData.append('category', category); // category ID
-      formData.append('brand', brand);       // brand ID
+      formData.append('category', targetCategory); // category ID
+      formData.append('brand', targetBrand);       // brand ID
       formData.append('countInStock', countInStock || '0');
       formData.append('description', finalDescription);
       formData.append('status', status);
@@ -365,63 +489,84 @@ export default function AdminProductsPage() {
       }
       if (bannerText) formData.append('bannerText', bannerText);
       
-      // Append files
-      if (imageFiles && imageFiles.length > 0) {
-        for (let i = 0; i < imageFiles.length; i++) {
-          formData.append('images', imageFiles[i]);
+      // Append all managed images in exact user-configured sequence (files & URLs converted reliably)
+      for (const imgItem of managedImages) {
+        if (imgItem.type === 'file' && imgItem.file) {
+          try {
+            const base64Str = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = (err) => reject(err);
+              reader.readAsDataURL(imgItem.file!);
+            });
+            formData.append('images', base64Str);
+          } catch {
+            formData.append('images', imgItem.file);
+          }
+        } else if (imgItem.type === 'url' && imgItem.url) {
+          formData.append('images', imgItem.url);
         }
       }
 
-      let res;
       if (editingProduct) {
-        res = await updateProductAction(editingProduct.id, formData);
+        updateProductMutation.mutate({ id: editingProduct.id, formData });
       } else {
-        res = await createProductAction(formData);
-      }
-
-      if (res.success) {
-        setSuccess(editingProduct ? 'Product updated successfully.' : 'Product created successfully.');
-        setIsDrawerOpen(false);
-        loadData();
-      } else {
-        setError(res.error || 'Failed to save product.');
+        createProductMutation.mutate(formData);
       }
     });
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     if (!confirm('Are you sure you want to delete this product?')) return;
     
     setError(null);
     setSuccess(null);
 
-    const res = await deleteProductAction(id);
-    if (res.success) {
-      setSuccess('Product deleted successfully.');
-      loadData();
-    } else {
-      setError(res.error || 'Failed to delete product.');
-    }
+    deleteProductMutation.mutate(id);
   };
 
-  const handleBulkDelete = async () => {
+  const handleBulkDelete = () => {
     if (selectedIds.length === 0) return;
-    if (!confirm(`Are you sure you want to delete ${selectedIds.length} products?`)) return;
+    const totalSelected = selectedIds.length;
+    if (!confirm(`Are you sure you want to delete ${totalSelected} products?`)) return;
 
     setError(null);
     setSuccess(null);
 
     startTransition(async () => {
       let deletedCount = 0;
+      let failedCount = 0;
+      const successfullyDeletedIds: string[] = [];
+
       for (const id of selectedIds) {
-        const res = await deleteProductAction(id);
-        if (res.success) {
-          deletedCount++;
+        try {
+          const res = await deleteProductAction(id);
+          if (res && res.success) {
+            deletedCount++;
+            successfullyDeletedIds.push(id);
+          } else {
+            failedCount++;
+          }
+        } catch {
+          failedCount++;
         }
       }
-      setSuccess(`Successfully deleted ${deletedCount} products.`);
-      setSelectedIds([]);
-      loadData();
+
+      if (deletedCount > 0 && failedCount === 0) {
+        setSuccess(`Successfully deleted ${deletedCount} product${deletedCount > 1 ? 's' : ''}.`);
+      } else if (deletedCount > 0 && failedCount > 0) {
+        setSuccess(`Successfully deleted ${deletedCount} product${deletedCount > 1 ? 's' : ''}.`);
+        setError(`${failedCount} product${failedCount > 1 ? 's' : ''} could not be deleted.`);
+      } else {
+        setError(`Failed to delete the selected product${totalSelected > 1 ? 's' : ''}.`);
+      }
+
+      setSelectedIds((prev) => prev.filter((id) => !successfullyDeletedIds.includes(id)));
+      queryClient.invalidateQueries({ queryKey: adminKeys.products() });
+      queryClient.invalidateQueries({ queryKey: productKeys.lists() });
+      for (const id of successfullyDeletedIds) {
+        queryClient.invalidateQueries({ queryKey: productKeys.detail(id) });
+      }
     });
   };
 
@@ -557,7 +702,7 @@ export default function AdminProductsPage() {
                         <div className="flex items-center gap-3">
                           <div className="h-10 w-10 rounded-lg bg-muted border border-border overflow-hidden shrink-0 relative">
                             { }
-                            <img src={product.images[0]} alt={product.name} className="h-full w-full object-cover" />
+                            <img src={product.images?.[0] || 'https://images.unsplash.com/photo-1531403009284-440f080d1e12?q=80&w=600&auto=format&fit=crop'} alt={product.name || 'Product'} className="h-full w-full object-cover" />
                           </div>
                           <div>
                             <p className="font-semibold text-foreground leading-tight max-w-[200px] truncate">{product.name}</p>
@@ -568,9 +713,9 @@ export default function AdminProductsPage() {
                       <td className="p-4 text-muted-foreground capitalize">{product.category}</td>
                       <td className="p-4">
                         <div>
-                          <p className="font-bold text-foreground">{currency}{price.toLocaleString()}</p>
+                          <p className="font-bold text-foreground">{product.currency || 'USD'} {(product.discountPrice || product.price || 0).toLocaleString()}</p>
                           {product.discountPrice && (
-                            <p className="text-muted-foreground line-through text-[10px]">{currency}{product.price.toLocaleString()}</p>
+                            <p className="text-muted-foreground line-through text-[10px]">{product.currency || 'USD'} {(product.price || 0).toLocaleString()}</p>
                           )}
                         </div>
                       </td>
@@ -860,87 +1005,165 @@ export default function AdminProductsPage() {
 
                 {/* TAB 3: MEDIA & IMAGES */}
                 {activeTab === 'media' && (
-                  <div className="space-y-5 animate-in fade-in duration-150">
-                    <div className="space-y-2">
-                      <label className="text-xs font-semibold text-foreground/80 tracking-wide block">Product Photos & Gallery</label>
-                      
-                      {/* Styled Dropzone / Multiple File Picker */}
-                      <div className="relative border-2 border-dashed border-border hover:border-blue-500/60 transition-colors rounded-2xl p-6 bg-card/40 flex flex-col items-center justify-center text-center group cursor-pointer">
-                        <input 
-                          type="file" 
-                          multiple 
-                          accept="image/*" 
-                          onChange={(e) => setImageFiles(e.target.files)} 
-                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                        />
-                        <div className="h-10 w-10 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
-                          <ImageIcon className="h-5 w-5" />
+                  <div className="space-y-6 animate-in fade-in duration-150">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-semibold text-foreground/80 tracking-wide block">
+                          Product Gallery & Cover Photo
+                        </label>
+                        <span className="text-[11px] text-muted-foreground">
+                          The first photo (★ Cover) will be used as the primary thumbnail.
+                        </span>
+                      </div>
+
+                      {/* Dropzone & Direct URL input */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="sm:col-span-2 relative border-2 border-dashed border-border hover:border-blue-500/60 transition-colors rounded-2xl p-5 bg-card/40 flex flex-col items-center justify-center text-center group cursor-pointer">
+                          <input 
+                            type="file" 
+                            multiple 
+                            accept="image/*" 
+                            onChange={(e) => handleAddImageFiles(e.target.files)} 
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                          />
+                          <div className="h-9 w-9 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-1.5 group-hover:scale-110 transition-transform">
+                            <ImageIcon className="h-4 w-4" />
+                          </div>
+                          <p className="text-xs font-semibold text-foreground">
+                            Click to browse or drag & drop image files
+                          </p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            Supports PNG, JPG, WEBP, GIF. Select multiple files at once.
+                          </p>
                         </div>
-                        <p className="text-xs font-semibold text-foreground">
-                          Click to browse or drag & drop multiple images
-                        </p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                          Hold <kbd className="px-1.5 py-0.5 rounded bg-muted font-mono text-[10px]">Ctrl</kbd> or <kbd className="px-1.5 py-0.5 rounded bg-muted font-mono text-[10px]">Cmd</kbd> to select multiple photos at once. Supports PNG, JPG, WEBP.
-                        </p>
+
+                        <div className="flex flex-col justify-between p-4 rounded-2xl border border-border bg-card/40 space-y-2">
+                          <label className="text-[11px] font-semibold text-foreground">Add via Image URL</label>
+                          <div className="flex gap-2">
+                            <Input
+                              type="text"
+                              placeholder="https://..."
+                              value={imageUrlInput}
+                              onChange={(e) => setImageUrlInput(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddImageUrl(); } }}
+                              className="h-9 text-xs"
+                            />
+                            <Button type="button" size="sm" onClick={handleAddImageUrl} variant="secondary" className="h-9 px-3">
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          <span className="text-[10px] text-muted-foreground">Paste direct web links to images</span>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Live Preview of Newly Selected Local Files */}
-                    {imageFiles && imageFiles.length > 0 && (
-                      <div className="space-y-2 p-4 rounded-xl border border-blue-500/20 bg-blue-500/5">
+                    {/* Interactive Re-orderable Image Gallery */}
+                    {managedImages.length > 0 ? (
+                      <div className="space-y-3">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
-                            <Sparkles className="h-3.5 w-3.5" />
-                            {imageFiles.length} New {imageFiles.length === 1 ? 'Photo' : 'Photos'} Selected for Upload
+                          <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                            <Sparkles className="h-3.5 w-3.5 text-blue-500" />
+                            Product Photos ({managedImages.length})
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => setImageFiles(null)}
-                            className="text-[10px] text-muted-foreground hover:text-red-500 underline cursor-pointer"
-                          >
-                            Clear Selection
-                          </button>
+                          <span className="text-[10px] text-muted-foreground">
+                            Use arrows to re-arrange order, or click Star to set as Cover Photo
+                          </span>
                         </div>
 
-                        <div className="grid grid-cols-4 gap-3 pt-1">
-                          {Array.from(imageFiles).map((file, idx) => (
-                            <div key={idx} className="relative aspect-square rounded-xl border border-blue-500/30 bg-background overflow-hidden group">
-                              <img 
-                                src={URL.createObjectURL(file)} 
-                                alt={`Selected Preview ${idx + 1}`} 
-                                className="w-full h-full object-contain p-1.5"
-                              />
-                              <span className="absolute bottom-1 left-1 bg-black/70 text-white text-[9px] font-bold px-1.5 py-0.5 rounded backdrop-blur-sm">
-                                {idx === 0 ? 'Main Cover' : `#${idx + 1}`}
-                              </span>
-                            </div>
-                          ))}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                          {managedImages.map((imgItem, idx) => {
+                            const isCover = idx === 0;
+                            const displayUrl = imgItem.url.startsWith('blob:') || imgItem.url.startsWith('http') || imgItem.url.startsWith('/')
+                              ? imgItem.url
+                              : sanitizeImageUrl(imgItem.url);
+
+                            return (
+                              <div 
+                                key={imgItem.id} 
+                                className={`group relative aspect-square rounded-2xl border transition-all overflow-hidden bg-card/60 ${
+                                  isCover 
+                                    ? 'border-amber-500 shadow-md ring-2 ring-amber-500/20 bg-amber-500/5' 
+                                    : 'border-border hover:border-blue-500/50'
+                                }`}
+                              >
+                                <img 
+                                  src={displayUrl} 
+                                  alt={`Product Photo ${idx + 1}`} 
+                                  className="w-full h-full object-contain p-2"
+                                />
+
+                                {/* Badge */}
+                                <div className="absolute top-2 left-2 z-10 flex items-center gap-1">
+                                  {isCover ? (
+                                    <span className="px-2 py-0.5 rounded-full bg-amber-500 text-black text-[10px] font-extrabold flex items-center gap-1 shadow-sm">
+                                      <Star className="h-3 w-3 fill-black" />
+                                      COVER
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-full bg-black/75 text-white text-[9px] font-bold backdrop-blur-sm">
+                                      #{idx + 1}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Control Overlay */}
+                                <div className="absolute inset-0 bg-black/65 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2 z-20">
+                                  <div className="flex justify-between items-center">
+                                    {!isCover ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleMakeCover(idx)}
+                                        className="px-2 py-1 rounded bg-amber-500 text-black text-[10px] font-bold flex items-center gap-1 hover:bg-amber-400 transition-colors shadow cursor-pointer"
+                                        title="Set as Main Cover Photo"
+                                      >
+                                        <Star className="h-3 w-3 fill-black" />
+                                        Set Cover
+                                      </button>
+                                    ) : (
+                                      <span className="text-[10px] text-amber-300 font-bold px-2 py-1">Main Thumbnail</span>
+                                    )}
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveImage(idx)}
+                                      className="p-1 rounded-lg bg-red-500/80 hover:bg-red-600 text-white transition-colors cursor-pointer"
+                                      title="Remove photo"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+
+                                  {/* Reorder Arrow Controls */}
+                                  <div className="flex items-center justify-center gap-2 pt-2">
+                                    <button
+                                      type="button"
+                                      disabled={idx === 0}
+                                      onClick={() => handleMoveImage(idx, 'left')}
+                                      className="p-1.5 rounded-lg bg-white/20 hover:bg-white/40 disabled:opacity-30 disabled:hover:bg-white/20 text-white transition-colors cursor-pointer"
+                                      title="Move Left / Earlier"
+                                    >
+                                      <ArrowLeft className="h-4 w-4" />
+                                    </button>
+                                    <span className="text-[10px] font-mono text-white/80">Pos {idx + 1}</span>
+                                    <button
+                                      type="button"
+                                      disabled={idx === managedImages.length - 1}
+                                      onClick={() => handleMoveImage(idx, 'right')}
+                                      className="p-1.5 rounded-lg bg-white/20 hover:bg-white/40 disabled:opacity-30 disabled:hover:bg-white/20 text-white transition-colors cursor-pointer"
+                                      title="Move Right / Later"
+                                    >
+                                      <ArrowRight className="h-4 w-4" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
-                    )}
-
-                    {/* Saved Product Images (for existing products) */}
-                    {editingProduct && editingProduct.images && editingProduct.images.length > 0 && (
-                      <div className="space-y-2 pt-2">
-                        <div className="flex items-center justify-between">
-                          <label className="text-xs font-semibold text-foreground/80 tracking-wide block">Currently Saved Images ({editingProduct.images.length})</label>
-                          <span className="text-[10px] text-muted-foreground">Uploading new files above will replace these</span>
-                        </div>
-                        <div className="grid grid-cols-4 gap-3">
-                          {editingProduct.images.map((img, idx) => (
-                            <div key={idx} className="relative aspect-square rounded-xl border border-neutral-200/90 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 overflow-hidden group">
-                              <Image 
-                                src={img.startsWith('http') ? img : `https://ftc-db.codix.site/api/files/pbc_4092854851/${editingProduct.id}/${img}`}
-                                alt={`Saved Image ${idx + 1}`}
-                                fill
-                                className="object-contain p-1.5"
-                              />
-                              <span className="absolute bottom-1 left-1 bg-neutral-900/80 text-white text-[9px] font-bold px-1.5 py-0.5 rounded backdrop-blur-sm">
-                                {idx === 0 ? 'Main Cover' : `#${idx + 1}`}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
+                    ) : (
+                      <div className="p-6 rounded-2xl border border-dashed border-border text-center text-muted-foreground text-xs">
+                        No product images added yet. Upload files or add an image URL above.
                       </div>
                     )}
 
@@ -1522,16 +1745,16 @@ export default function AdminProductsPage() {
                     variant="ghost" 
                     onClick={() => setIsDrawerOpen(false)}
                     className="text-muted-foreground border border-border"
-                    disabled={isPending}
+                    disabled={isSubmitting}
                   >
                     Cancel
                   </Button>
                   <Button 
                     type="submit"
                     className="bg-blue-600 hover:bg-blue-500 text-white font-semibold flex items-center gap-1"
-                    disabled={isPending}
+                    disabled={isSubmitting}
                   >
-                    {isPending ? (
+                    {isSubmitting ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" /> Saving...
                       </>

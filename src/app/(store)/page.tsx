@@ -10,20 +10,35 @@ import {
   pbCategories,
   pbSiteSettings,
   pbHeroBanners,
-} from "@/lib/pb-collections";
+} from "@/lib/supabase-collections";
 import HomePageLoaderWrapper from "@/components/layout/home-page-loader-wrapper";
 import ImageParallaxBanner from "@/components/layout/image-parallax-banner";
 import LazyScrollSection from "@/components/layout/lazy-scroll-section";
 import ProductCarouselBlock from "./_components/product-carousel-block";
 import { getPbFileUrl } from "@/types/admin";
 
-// ISR: cache homepage for 60 seconds — huge speed win for repeat visitors.
-// Use /api/revalidate to bust cache after admin content updates.
-export const revalidate = 60;
+// Always server-render fresh — product prices and stock change via admin panel.
+export const dynamic = 'force-dynamic';
 
 export default async function StoreHomePage() {
-  // Fetch active homepage blocks from the database
-  const blocks = await pbHomepageBlocks.getActive();
+  // Pre-fetch all homepage blocks and shared metadata in parallel
+  const [
+    blocks,
+    allBrands,
+    rawCategories,
+    rawHeroBanners,
+    contactSetting,
+    hoursSetting,
+    generalSetting,
+  ] = await Promise.all([
+    pbHomepageBlocks.getActive().catch(() => []),
+    pbBrands.getAll().catch(() => []),
+    pbCategories.getAll().catch(() => []),
+    pbHeroBanners.getActive().catch(() => []),
+    pbSiteSettings.get<any>("contact").catch(() => null),
+    pbSiteSettings.get<any>("hours").catch(() => null),
+    pbSiteSettings.get<any>("general").catch(() => null),
+  ]);
 
   // If the database has no configured blocks, fall back to the default layout
   const activeBlocks =
@@ -101,32 +116,11 @@ export default async function StoreHomePage() {
           },
         ];
 
-  const pbUrl =
-    process.env.NEXT_PUBLIC_POCKETBASE_URL || "https://ftc-db.codix.site";
-
-  // Pre-fetch only shared/metadata data — no product fetches here.
-  // Product carousels each fetch their own data via Suspense streaming.
-  const [
-    allBrands,
-    rawCategories,
-    rawHeroBanners,
-    contactSetting,
-    hoursSetting,
-    generalSetting,
-  ] = await Promise.all([
-    pbBrands.getAll().catch(() => []),
-    pbCategories.getAll().catch(() => []),
-    pbHeroBanners.getActive().catch(() => []),
-    pbSiteSettings.get<any>("contact").catch(() => null),
-    pbSiteSettings.get<any>("hours").catch(() => null),
-    pbSiteSettings.get<any>("general").catch(() => null),
-  ]);
-
   const allCategories = rawCategories.filter((c: any) => c.isActive !== false);
 
   const activeHeroBanners = rawHeroBanners.map((banner) => ({
     ...banner,
-    imageUrl: pbHeroBanners.getImageUrl(banner, pbUrl),
+    imageUrl: pbHeroBanners.getImageUrl(banner),
   }));
 
   const locatorSettings = {
@@ -176,7 +170,6 @@ export default async function StoreHomePage() {
                   block={block}
                   allCategories={allCategories}
                   allBrands={allBrands}
-                  pbUrl={pbUrl}
                 />
               )}
 

@@ -10,15 +10,52 @@ import { getInvoicePrintPresetsAction } from '@/app/actions/admin';
 export type { InvoiceItem };
 
 export async function resolveInvoiceConfig(): Promise<InvoicePrintConfig> {
+  let baseConfig = { ...DEFAULT_INVOICE_CONFIG };
   try {
     const res = await getInvoicePrintPresetsAction();
-    if (!res.success) return DEFAULT_INVOICE_CONFIG;
-    const presets = (res.data || []) as InvoicePrintPreset[];
-    const preset = presets.find((p) => p.isDefault) || presets[0];
-    return preset ? normalizeInvoiceConfig(preset.config) : DEFAULT_INVOICE_CONFIG;
-  } catch {
-    return DEFAULT_INVOICE_CONFIG;
+    if (res.success && res.data && res.data.length > 0) {
+      const presets = res.data as InvoicePrintPreset[];
+      const preset = presets.find((p) => p.isDefault) || presets[0];
+      if (preset) {
+        baseConfig = normalizeInvoiceConfig(preset.config);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load invoice presets:', err);
   }
+
+  // Fetch branding settings to inject latest logo and store info
+  try {
+    const brandRes = await fetch('/api/settings/branding');
+    if (brandRes.ok) {
+      const { general, personalization } = await brandRes.json();
+      
+      const logoUrl = personalization?.logoUrl || personalization?.darkLogoUrl || baseConfig.logoUrl;
+      const storeName = general?.siteName || baseConfig.storeName;
+      const address = [general?.contactInfo?.address, general?.contactInfo?.city].filter(Boolean).join(', ') || baseConfig.headerAddress;
+      const phone = general?.contactInfo?.phone || baseConfig.headerPhone;
+      const email = general?.contactInfo?.email || baseConfig.headerEmail;
+
+      const bank = general?.bankDetails;
+      const dynamicBankHtml = bank 
+        ? `Bank: ${bank.bankName} | Account Name: ${bank.accountName} | Account No: ${bank.accountNo} | Branch: ${bank.branch} (${bank.branchCode})`
+        : '';
+
+      return {
+        ...baseConfig,
+        logoUrl,
+        storeName,
+        headerAddress: address,
+        headerPhone: phone,
+        headerEmail: email,
+        dynamicBankHtml,
+      };
+    }
+  } catch (err) {
+    console.error('Failed to load branding settings for invoice:', err);
+  }
+
+  return baseConfig;
 }
 
 export interface InvoiceData {
@@ -51,7 +88,7 @@ const esc = (v?: string): string =>
 function safeImageUrl(url?: string): string | undefined {
   if (!url) return undefined;
   const trimmed = url.trim();
-  return /^(https?:|data:image\/)/i.test(trimmed) ? trimmed : undefined;
+  return /^(https?:|data:image\/|\/(?!\/))/i.test(trimmed) ? trimmed : undefined;
 }
 
 const LEGACY_COMBINED_TITLE = 'TAX INVOICE / QUOTATION';
@@ -194,7 +231,7 @@ export function getInvoiceHtml(
         <div class="bottom-grid">
           <div>
             ${data.paymentMethod ? `<div class="info-block"><div class="info-block-title">Payment Method</div><div class="info-block-body">${esc(data.paymentMethod)}</div></div>` : ''}
-            ${cfg.bankDetailsText ? `<div class="info-block"><div class="info-block-title">Payment Info</div><div class="info-block-body">${esc(cfg.bankDetailsText)}</div></div>` : ''}
+            ${cfg.dynamicBankHtml ? `<div class="info-block"><div class="info-block-title">Payment Info</div><div class="info-block-body">${esc(cfg.dynamicBankHtml)}</div></div>` : ''}
             ${data.notes ? `<div class="info-block"><div class="info-block-title">Notes / Terms</div><div class="info-block-body">${esc(data.notes)}</div></div>` : ''}
             ${cfg.termsAndConditions ? `<div class="info-block"><div class="info-block-title">Terms &amp; Conditions</div><div class="info-block-body">${esc(cfg.termsAndConditions)}</div></div>` : ''}
           </div>

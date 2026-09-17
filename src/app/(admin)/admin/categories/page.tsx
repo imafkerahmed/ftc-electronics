@@ -4,8 +4,8 @@ import React, { useState, useEffect, useTransition } from 'react';
 import { Layers, Plus, Edit, Trash2, GripVertical, X, Save, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { getCategories } from '@/lib/db';
 import { 
+  getAdminCategoriesAction,
   createCategoryAction, 
   updateCategoryAction, 
   deleteCategoryAction,
@@ -73,9 +73,16 @@ export default function AdminCategoriesPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const data = await getCategories();
-      // Ensure the categories are sorted by sortOrder locally if they come unsorted
-      setCategories(data);
+      const res = await getAdminCategoriesAction();
+      if (!res.success) throw new Error(res.error);
+      // Normalize Supabase snake_case → camelCase so the rest of the UI keeps working
+      const normalized = (res.data || []).map((c: any) => ({
+        ...c,
+        isActive: c.is_active ?? c.isActive ?? true,
+        count: c.product_count ?? c.count ?? 0,
+        sortOrder: c.sort_order ?? c.sortOrder ?? 0,
+      }));
+      setCategories(normalized);
     } catch (err: any) {
       console.error(err);
     } finally {

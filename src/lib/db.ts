@@ -1,13 +1,12 @@
+'use server';
+
 /**
- * Database access layer for the FTC Electronics storefront.
- * 
- * This module provides the data access functions consumed by all storefront
- * pages and components. It queries live data from PocketBase.
+ * Database access layer for FTC Electronics storefront.
+ * Connects to live data from Supabase PostgreSQL.
  */
 
 import { Product, Category, Brand } from '../types/product';
-import { pbProducts, pbCategories, pbBrands } from './pb-collections';
-import { getPbUrl } from './pb-admin';
+import { sbProducts, sbCategories, sbBrands, pbReviews, pbAnnouncements } from './supabase-collections';
 
 /**
  * Get products with optional filters.
@@ -19,6 +18,7 @@ export async function getProducts(filters?: {
   minPrice?: number;
   maxPrice?: number;
   sortBy?: 'price-asc' | 'price-desc' | 'rating' | 'newest';
+  status?: 'draft' | 'published';
   page?: number;
   perPage?: number;
 }): Promise<Product[]> {
@@ -27,28 +27,22 @@ export async function getProducts(filters?: {
     if (filters?.sortBy === 'price-asc') sort = 'price';
     if (filters?.sortBy === 'price-desc') sort = '-price';
     if (filters?.sortBy === 'rating') sort = '-rating';
-    if (filters?.sortBy === 'newest') sort = '-created';
+    if (filters?.sortBy === 'newest') sort = '-created_at';
 
-    const filterStrings: string[] = [];
-    if (filters?.minPrice !== undefined) {
-      filterStrings.push(`price >= ${filters.minPrice}`);
-    }
-    if (filters?.maxPrice !== undefined) {
-      filterStrings.push(`price <= ${filters.maxPrice}`);
-    }
-
-    const result = await pbProducts.getAll({
+    const result = await sbProducts.getAll({
       category: filters?.category,
       brand: filters?.brand,
       search: filters?.search,
+      minPrice: filters?.minPrice,
+      maxPrice: filters?.maxPrice,
+      status: filters?.status || 'published',
       sort,
-      filter: filterStrings.length > 0 ? filterStrings.join(' && ') : undefined,
       page: filters?.page || 1,
       perPage: filters?.perPage || 100,
     });
     return result?.items || [];
   } catch (err) {
-    console.error('[db] pbProducts.getAll failed:', (err as Error).message);
+    console.error('[db] getProducts failed:', (err as Error).message);
     return [];
   }
 }
@@ -58,9 +52,9 @@ export async function getProducts(filters?: {
  */
 export async function getProductBySlug(slug: string): Promise<Product | null> {
   try {
-    return await pbProducts.getBySlug(slug);
+    return await sbProducts.getBySlug(slug, { status: 'published' });
   } catch (err) {
-    console.error(`[db] pbProducts.getBySlug failed for ${slug}:`, (err as Error).message);
+    console.error(`[db] getProductBySlug failed for ${slug}:`, (err as Error).message);
     return null;
   }
 }
@@ -70,9 +64,9 @@ export async function getProductBySlug(slug: string): Promise<Product | null> {
  */
 export async function getFeaturedProducts(): Promise<Product[]> {
   try {
-    return await pbProducts.getFeatured();
+    return await sbProducts.getFeatured();
   } catch (err) {
-    console.error('[db] pbProducts.getFeatured failed:', (err as Error).message);
+    console.error('[db] getFeaturedProducts failed:', (err as Error).message);
     return [];
   }
 }
@@ -82,9 +76,9 @@ export async function getFeaturedProducts(): Promise<Product[]> {
  */
 export async function getCategories(): Promise<Category[]> {
   try {
-    return await pbCategories.getAll();
+    return await sbCategories.getAll();
   } catch (err) {
-    console.error('[db] pbCategories.getAll failed:', (err as Error).message);
+    console.error('[db] getCategories failed:', (err as Error).message);
     return [];
   }
 }
@@ -107,17 +101,16 @@ export async function getCategoryBySlug(slug: string): Promise<Category | null> 
  */
 export async function getBrands(): Promise<Brand[]> {
   try {
-    const rawBrands = await pbBrands.getAll();
-    const pbUrl = getPbUrl();
+    const rawBrands = await sbBrands.getAll();
     return (rawBrands || []).map((b) => ({
       id: b.id,
       name: b.name,
       slug: b.slug || b.name.toLowerCase().replace(/\s+/g, '-'),
-      logo: b.logo ? `${pbUrl}/api/files/brands/${b.id}/${b.logo}` : undefined,
+      logo: b.logo || undefined,
       description: b.description,
     }));
   } catch (err) {
-    console.error('[db] pbBrands.getAll failed:', (err as Error).message);
+    console.error('[db] getBrands failed:', (err as Error).message);
     return [];
   }
 }
@@ -147,15 +140,41 @@ export async function searchProducts(query: string): Promise<Product[]> {
  * Get products for a named collection (on-sale, new-arrivals, air-purifiers).
  */
 export async function getCollectionProducts(
-  collection: 'on-sale' | 'new-arrivals' | 'air-purifiers'
+  collection: 'on-sale' | 'new-arrivals' | 'air-purifiers',
+  limit?: number
 ): Promise<Product[]> {
-  const pbCollection = collection === 'air-purifiers' ? 'featured' : collection;
+  const sbCollection = collection === 'air-purifiers' ? 'featured' : collection;
   try {
-    return await pbProducts.getByCollection(
-      pbCollection as 'on-sale' | 'new-arrivals' | 'featured'
+    return await sbProducts.getByCollection(
+      sbCollection as 'on-sale' | 'new-arrivals' | 'featured',
+      limit
     );
   } catch (err) {
-    console.error(`[db] pbProducts.getByCollection failed for ${collection}:`, (err as Error).message);
+    console.error(`[db] getCollectionProducts failed for ${collection}:`, (err as Error).message);
+    return [];
+  }
+}
+
+/**
+ * Get reviews for a product or general storefront reviews.
+ */
+export async function getReviews(productId?: string) {
+  try {
+    return await pbReviews.getByProductId(productId || "");
+  } catch (err) {
+    console.error('[db] getReviews failed:', (err as Error).message);
+    return [];
+  }
+}
+
+/**
+ * Get active announcements for modal popups.
+ */
+export async function getActiveAnnouncements() {
+  try {
+    return await pbAnnouncements.getActive();
+  } catch (err) {
+    console.error('[db] getActiveAnnouncements failed:', (err as Error).message);
     return [];
   }
 }

@@ -7,7 +7,8 @@ import { ShoppingBag, Check } from "lucide-react";
 import { Product } from "@/types/product";
 import { useCart } from "@/hooks/use-cart";
 import { useUiStore } from "@/store/use-ui-store";
-import { formatPrice } from "@/lib/utils";
+import { formatPrice, getProductThumbnail } from "@/lib/utils";
+import { Package } from "lucide-react";
 import QuickViewModal from "@/components/product/quick-view-modal";
 
 interface ProductCardProps {
@@ -39,7 +40,9 @@ export default function ProductCard({ product }: ProductCardProps) {
     ? Math.round(((price - discountPrice!) / price) * 100)
     : 0;
 
-  const secondaryImage = images.length > 1 ? images[1] : images[0];
+  const primaryImage = getProductThumbnail(images);
+  const secondaryImageRaw = Array.isArray(images) && images.length > 1 ? getProductThumbnail(images[1]) : null;
+  const secondaryImage = secondaryImageRaw && secondaryImageRaw !== primaryImage ? secondaryImageRaw : null;
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -59,7 +62,7 @@ export default function ProductCard({ product }: ProductCardProps) {
           className="flex flex-col w-full min-w-0 cursor-pointer"
         >
           {/* ── Seamless Image Stage Container ── */}
-          <div className="relative aspect-[4/5] w-full overflow-hidden rounded-xl flex items-center justify-center p-2">
+          <div className="relative aspect-[4/5] w-full overflow-hidden rounded-xl flex items-center justify-center p-2 bg-neutral-50 dark:bg-neutral-800/40">
             {/* Discount Badge */}
             {hasDiscount && (
               <span className="absolute top-2.5 left-2.5 z-10 bg-rose-500 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-md uppercase tracking-wider shadow-2xs">
@@ -67,23 +70,32 @@ export default function ProductCard({ product }: ProductCardProps) {
               </span>
             )}
 
-            {/* Primary Image */}
-            <Image
-              src={images[0]}
-              alt={name}
-              fill
-              className="object-contain p-2 transition-transform duration-500 ease-out group-hover:scale-105"
-              sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
-              priority={false}
-            />
+            {/* Primary Image or Fallback */}
+            {primaryImage ? (
+              <Image
+                src={primaryImage}
+                alt={name}
+                fill
+                className={`object-contain p-2 transition-all duration-500 ease-out ${
+                  secondaryImage ? 'group-hover:opacity-0 group-hover:scale-105' : 'group-hover:scale-105'
+                }`}
+                sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                priority={false}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center text-muted-foreground">
+                <Package className="h-10 w-10 stroke-1 mb-1 opacity-40" />
+                <span className="text-[10px] uppercase tracking-wider font-semibold opacity-50">No Image</span>
+              </div>
+            )}
 
             {/* Secondary Hover Image */}
-            {secondaryImage && secondaryImage !== images[0] && (
+            {secondaryImage && (
               <Image
                 src={secondaryImage}
                 alt={`${name} secondary`}
                 fill
-                className="object-contain p-1 absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 ease-out"
+                className="object-contain p-2 absolute inset-0 opacity-0 group-hover:opacity-100 transition-all duration-500 ease-out bg-white dark:bg-neutral-900 group-hover:scale-105"
                 sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                 priority={false}
               />
@@ -123,9 +135,9 @@ export default function ProductCard({ product }: ProductCardProps) {
           </div>
         </Link>
 
-        {/* Hover Add to Cart Button (Positioned over image stage outside Link) */}
+        {/* Hover Add to Cart Button (Positioned over lower image stage outside Link) */}
         {!isOutOfStock && (
-          <div className="absolute top-[calc(60%-1.5rem)] inset-x-5 z-20 opacity-0 translate-y-3 group-hover:opacity-100 group-hover:translate-y-0 focus-within:opacity-100 transition-all duration-300 ease-out pointer-events-none group-hover:pointer-events-auto focus-within:pointer-events-auto">
+          <div className="absolute top-[calc(72%-1.5rem)] inset-x-5 z-20 opacity-0 translate-y-3 group-hover:opacity-100 group-hover:translate-y-0 focus-within:opacity-100 transition-all duration-300 ease-out pointer-events-none group-hover:pointer-events-auto focus-within:pointer-events-auto">
             <button
               type="button"
               onClick={handleAddToCart}

@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, ChevronLeft, ChevronRight } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { sanitizeImageUrl } from "@/lib/supabase-collections";
 
 interface CampaignSlideConfig {
   eyebrow: string;
@@ -284,8 +285,8 @@ export default function CampaignHeroBanner({
               <div className="relative w-full max-w-[260px] sm:max-w-[420px] h-[120px] sm:h-[200px] lg:h-[230px] flex items-center justify-center overflow-hidden">
                 {activeSlide.imageSrc && (
                   <Image
-                    src={activeSlide.imageSrc}
-                    alt={activeSlide.imageAlt}
+                    src={sanitizeImageUrl(activeSlide.imageSrc)}
+                    alt={activeSlide.imageAlt || 'Banner Image'}
                     fill
                     className="object-contain p-2 mix-blend-multiply dark:mix-blend-screen transition-transform duration-500 hover:scale-105"
                     style={{

@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { ScrollText, Search, User, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import { pbAuditLog } from '@/lib/pb-collections';
+import { pbAuditLog } from '@/lib/supabase-collections';
 
 interface AuditRecord {
   id: string;
@@ -24,7 +24,8 @@ export default function AdminAuditLogPage() {
     try {
       setLoading(true);
       const res = await pbAuditLog.getAll();
-      setLogs((res?.items || []).map((l: any) => ({
+      const items = Array.isArray(res) ? res : (res as any)?.items || [];
+      setLogs(items.map((l: any) => ({
         id: l.id,
         actor: l.actor || 'unknown',
         action: l.action || 'update',

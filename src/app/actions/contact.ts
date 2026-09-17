@@ -1,7 +1,7 @@
 'use server';
 
-import { writeAuditLog } from '@/lib/pb-admin';
-import { pbContactInquiries } from '@/lib/pb-collections';
+import { writeAuditLog } from '@/lib/supabase-admin';
+import { pbContactInquiries } from '@/lib/supabase-collections';
 import { checkPermission } from '@/app/actions/admin';
 import type { InquiryStatus, PBContactInquiry } from '@/types/admin';
 
@@ -31,20 +31,16 @@ export async function submitContactFormAction(data: ContactFormInput): Promise<{
       return { success: false, error: 'One or more fields exceed the maximum allowed length.' };
     }
 
-    // Save inquiry to PocketBase database collection for Admin Panel view & management
     try {
       await pbContactInquiries.create({
         name,
         email,
         phone: phone || '',
         message,
-        status: 'new',
-        read: false,
       });
     } catch (dbErr) {
       console.error('[CONTACT FORM] Failed to persist inquiry:', dbErr);
 
-      // Fallback audit log recording if collection is initializing
       const logged = await writeAuditLog(
         'system',
         'create',
@@ -73,15 +69,13 @@ export async function submitContactFormAction(data: ContactFormInput): Promise<{
   }
 }
 
-// ─── Admin Panel Inquiry Actions ──────────────────────────────────────────────
-
 export async function getInquiriesAction(): Promise<{ success: boolean; inquiries?: PBContactInquiry[]; error?: string }> {
   const check = await checkPermission('inquiries', 'read');
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
     const inquiries = await pbContactInquiries.getAll();
-    return { success: true, inquiries: inquiries || [] };
+    return { success: true, inquiries };
   } catch (error: any) {
     console.error('[GET INQUIRIES ACTION ERROR]', error);
     return { success: false, error: error?.message || 'Failed to fetch inquiries' };
@@ -97,12 +91,12 @@ export async function updateInquiryStatusAction(
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const updated = await pbContactInquiries.update(id, {
-      status,
-      notes: notes !== undefined ? notes : undefined,
-      read: true,
-    });
-    return { success: true, inquiry: updated };
+    const patch: Record<string, unknown> = { status };
+    if (notes !== undefined) {
+      patch.admin_notes = notes;
+    }
+    const inquiry = await pbContactInquiries.update(id, patch);
+    return { success: true, inquiry };
   } catch (error: any) {
     console.error('[UPDATE INQUIRY ACTION ERROR]', error);
     return { success: false, error: error?.message || 'Failed to update inquiry' };
@@ -114,8 +108,8 @@ export async function deleteInquiryAction(id: string): Promise<{ success: boolea
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const deleted = await pbContactInquiries.delete(id);
-    return { success: deleted };
+    await pbContactInquiries.delete(id);
+    return { success: true };
   } catch (error: any) {
     console.error('[DELETE INQUIRY ACTION ERROR]', error);
     return { success: false, error: error?.message || 'Failed to delete inquiry' };

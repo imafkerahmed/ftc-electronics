@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { X, ArrowRight } from 'lucide-react';
-import { pbAnnouncements } from '@/lib/pb-collections';
+import { pbAnnouncements } from '@/lib/supabase-collections';
+import { getActiveAnnouncements } from '@/lib/db';
 import type { PBAnnouncement } from '@/types/admin';
 import Link from 'next/link';
 import { useUiStore } from '@/store/use-ui-store';
@@ -22,7 +23,7 @@ export default function AnnouncementModal() {
 
     async function checkAnnouncement() {
       try {
-        const activeList = await pbAnnouncements.getActive();
+        const activeList = await getActiveAnnouncements();
         if (!isMounted) return;
         if (activeList && activeList.length > 0) {
           const activeAd = activeList[0];

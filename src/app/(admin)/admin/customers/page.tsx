@@ -4,8 +4,7 @@ import React, { useState, useEffect, useTransition, useCallback } from 'react';
 import { Users, Search, Mail, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { toggleCustomerStatusAction } from '@/app/actions/admin';
-import PocketBase from 'pocketbase';
+import { toggleCustomerStatusAction, getAdminCustomersAction } from '@/app/actions/admin';
 
 interface Customer {
   id: string;
@@ -30,39 +29,35 @@ export default function AdminCustomersPage() {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const { pb } = await import('@/lib/pocketbase');
-
+      setError(null);
+      const res = await getAdminCustomersAction();
       let records: any[] = [];
-      try {
-        records = await pb.collection('customers').getFullList({
-          sort: '-created',
-        });
-      } catch {
-        try {
-          // Fallback if customers collection is empty or not yet seeded
-          records = await pb.collection('users').getFullList({
-            sort: '-created',
-          });
-        } catch (err) {
-          console.warn('Customers/Users collection unavailable:', err);
-        }
+      if (res.success && res.data) {
+        records = res.data;
+      } else if (res.error) {
+        setError(res.error);
       }
 
-      setCustomers(records.map((r: any) => ({
-        id: r.id,
-        name: r.name || 'Anonymous User',
-        email: r.email || '',
-        ordersCount: r.ordersCount || 0,
-        totalSpent: r.totalSpent || 0,
-        status: r.status === 'banned' ? 'banned' : 'active',
-        joinedDate: new Date(r.created).toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric',
-        }),
-      })));
+      setCustomers(records.map((r: any) => {
+        const rawDate = r.created_at || r.created;
+        const parsedDate = rawDate ? new Date(rawDate) : new Date();
+        const dateStr = !isNaN(parsedDate.getTime())
+          ? parsedDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+          : 'N/A';
+
+        return {
+          id: r.id,
+          name: r.name || 'Anonymous User',
+          email: r.email || '',
+          ordersCount: r.orders_count || r.ordersCount || 0,
+          totalSpent: r.total_spent || r.totalSpent || 0,
+          status: r.status === 'banned' ? 'banned' : 'active',
+          joinedDate: dateStr,
+        };
+      }));
     } catch (err: any) {
       console.error(err);
+      setError('An error occurred loading customers.');
     } finally {
       setLoading(false);
     }

@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, use, useEffect } from "react";
+import { useState, use, useEffect, useMemo } from "react";
 import { SlidersHorizontal, Search, ArrowLeft } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { useQuery } from "@tanstack/react-query";
 import { useProducts } from "@/hooks/use-products";
 import { getProducts, getCategories } from "@/lib/db";
+import { productKeys, categoryKeys } from "@/lib/query-keys";
 import type { Product } from "@/types/product";
 import FilterSidebar from "@/components/product/filter-sidebar";
 import ProductGrid from "@/components/product/product-grid";
@@ -31,22 +33,22 @@ export default function ProductsPage({ searchParams }: PageProps) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-     
     setMounted(true);
     return () => setMounted(false);
   }, []);
 
-  const [products, setProducts] = useState<Product[]>([]);
-  const [categoriesList, setCategoriesList] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: products = [], isLoading: isLoadingProducts } = useQuery({
+    queryKey: productKeys.lists(),
+    queryFn: () => getProducts(),
+  });
 
-  useEffect(() => {
-    Promise.all([getProducts(), getCategories()]).then(([prods, cats]) => {
-      setProducts(prods);
-      setCategoriesList(cats.filter(c => c.isActive !== false).map(c => c.name));
-      setIsLoading(false);
-    });
-  }, []);
+  const { data: categories = [], isLoading: isLoadingCategories } = useQuery({
+    queryKey: categoryKeys.lists(),
+    queryFn: () => getCategories(),
+  });
+
+  const categoriesList = useMemo(() => categories.filter(c => c.isActive !== false).map(c => c.name), [categories]);
+  const isLoading = isLoadingProducts || isLoadingCategories;
 
   // Initialize filtering logic
   const { filters, filteredProducts, brands, updateFilters, resetFilters } =

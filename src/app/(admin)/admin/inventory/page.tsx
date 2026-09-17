@@ -3,11 +3,11 @@
 import React, { useState, useEffect, useTransition } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { Plus, RotateCw, Edit3, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
-import { pbProducts } from '@/lib/pb-collections';
-import { updateProductStockAction } from '@/app/actions/admin';
+import { Plus, RotateCw, Edit3, Loader2, CheckCircle, AlertCircle, Package } from 'lucide-react';
+import { updateProductStockAction, getAdminProductsAction } from '@/app/actions/admin';
 import type { Product } from '@/types/product';
 import { Button } from '@/components/ui/button';
+import { getProductThumbnail } from '@/lib/utils';
 
 export default function AdminInventoryPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -22,10 +22,18 @@ export default function AdminInventoryPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const res = await pbProducts.getAll({ perPage: 200 });
-      setProducts(res.items || []);
+      setError(null);
+      const res = await getAdminProductsAction();
+      if (res.success && res.data) {
+        setProducts(res.data);
+      } else {
+        setError(res.error || 'Failed to load inventory products.');
+        setProducts([]);
+      }
     } catch (err: any) {
       console.error('Failed to load inventory products:', err);
+      setError('Failed to load inventory products.');
+      setProducts([]);
     } finally {
       setLoading(false);
     }
@@ -178,13 +186,23 @@ export default function AdminInventoryPage() {
                         <td className="p-4 font-bold text-foreground">
                           <div className="flex items-center gap-3">
                             <div className="h-10 w-10 rounded-lg bg-muted border border-border relative overflow-hidden shrink-0">
-                              <Image
-                                src={product.images[0]}
-                                alt={product.name}
-                                fill
-                                className="object-cover"
-                                sizes="40px"
-                              />
+                              {(() => {
+                                const thumb = getProductThumbnail(product.images);
+                                return thumb ? (
+                                  <Image
+                                    src={thumb}
+                                    alt={product.name}
+                                    fill
+                                    className="object-cover"
+                                    sizes="40px"
+                                    unoptimized
+                                  />
+                                ) : (
+                                  <div className="h-full w-full flex items-center justify-center">
+                                    <Package className="h-5 w-5 text-muted-foreground/50" />
+                                  </div>
+                                );
+                              })()}
                             </div>
                             <div>
                               <p className="font-semibold text-foreground leading-tight group-hover:text-blue-500 transition-colors">{product.name}</p>

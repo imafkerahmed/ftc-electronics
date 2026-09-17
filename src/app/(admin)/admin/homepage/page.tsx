@@ -18,12 +18,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  pbHomepageBlocks,
-  pbHeroBanners,
-  pbCategories,
-  pbBrands,
-} from "@/lib/pb-collections";
-import {
   updateHomepageBlocksAction,
   updateHomepageBlockConfigAction,
   createHomepageBlockAction,
@@ -33,7 +27,12 @@ import {
   deleteHeroBannerAction,
   reorderHeroBannersAction,
   updateBrandAction,
+  getHomepageBlocksAction,
+  getHeroBannersAction,
+  getAdminCategoriesAction,
+  getAdminBrandsAction,
 } from "@/app/actions/admin";
+import { sanitizeImageUrl } from "@/lib/supabase-collections";
 import { Input } from "@/components/ui/input";
 import { Plus } from "lucide-react";
 import { X } from "lucide-react";
@@ -281,15 +280,17 @@ export default function AdminHomepageBuilderPage() {
       document.body.style.overflow = "";
     };
   }, [isAddModalOpen, isConfigModalOpen, isHeroModalOpen]);
-
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await pbHomepageBlocks.getAll();
-      const heroRecords = await pbHeroBanners.getAll().catch(() => []);
+      const [res, heroRes] = await Promise.all([
+        getHomepageBlocksAction(),
+        getHeroBannersAction(),
+      ]);
+      const heroRecords = heroRes.success && heroRes.data ? heroRes.data : [];
 
       setBlocks(
-        (res || []).map((b: any) => ({
+        (res.success && res.data ? res.data : []).map((b: any) => ({
           id: b.id,
           type: b.type || b.block_type || "section",
           title: b.title || "Page Section",
@@ -300,10 +301,13 @@ export default function AdminHomepageBuilderPage() {
       );
 
       // Pre-fetch categories & brands for Product Section Builder
-      const [cats, brs] = await Promise.all([
-        pbCategories.getAll().catch(() => []),
-        pbBrands.getAll().catch(() => []),
+      const [catsRes, brsRes] = await Promise.all([
+        getAdminCategoriesAction(),
+        getAdminBrandsAction(),
       ]);
+      const cats = catsRes.success && catsRes.data ? catsRes.data : [];
+      const brs = brsRes.success && brsRes.data ? brsRes.data : [];
+
       setAvailableCategories(
         cats.map((c: any) => ({
           id: c.id,
@@ -311,23 +315,23 @@ export default function AdminHomepageBuilderPage() {
           slug: c.slug || c.id,
         })),
       );
-      const pbUrl =
-        process.env.NEXT_PUBLIC_POCKETBASE_URL || "https://ftc-db.codix.site/";
+
       setAvailableBrands(
-        brs.map((b: any) => ({
-          id: b.id,
-          name: b.name,
-          slug: b.slug || b.id,
-          show_in_strip: b.show_in_strip || false,
-          logoUrl: b.logo ? `${pbUrl.replace(/\/$/, "")}/api/files/${b.collectionId}/${b.id}/${b.logo}` : null,
-        })),
+        brs.map((b: any) => {
+          const logoUrl = sanitizeImageUrl(b.logo || b.logoUrl);
+          return {
+            id: b.id,
+            name: b.name,
+            slug: b.slug || b.id,
+            show_in_strip: b.show_in_strip || false,
+            logoUrl: logoUrl || null,
+          };
+        }),
       );
 
       const bannersFromCollection = heroRecords.length
-        ? heroRecords.map((banner, index) => {
-            const imageUrl = banner.image
-              ? `${pbUrl.replace(/\/$/, "")}/api/files/${banner.collectionId}/${banner.id}/${banner.image}`
-              : undefined;
+        ? heroRecords.map((banner: any, index: number) => {
+            const imageUrl = sanitizeImageUrl(banner.image || banner.imageSrc);
             return createHeroSlideDraft(
               {
                 id: banner.id,

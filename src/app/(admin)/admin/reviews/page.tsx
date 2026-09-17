@@ -4,8 +4,13 @@ import React, { useState, useEffect, useTransition } from 'react';
 import { Star, MessageSquare, Check, X, ShieldAlert, Loader2, CheckCircle, AlertCircle, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { pbReviews, pbProducts } from '@/lib/pb-collections';
-import { updateReviewStatusAction, deleteReviewAction, createReviewAction } from '@/app/actions/admin';
+import {
+  updateReviewStatusAction,
+  deleteReviewAction,
+  createReviewAction,
+  getAdminReviewsAction,
+  getAdminProductsAction,
+} from '@/app/actions/admin';
 
 interface Review {
   id: string;
@@ -40,22 +45,31 @@ export default function AdminReviewsPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const res = await pbReviews.getAll();
-      setReviews((res?.items || []).map((r: any) => ({
+      setError(null);
+      const res = await getAdminReviewsAction();
+      let records: any[] = [];
+      if (res.success && res.data) {
+        records = res.data;
+      } else if (res.error) {
+        setError(res.error);
+      }
+
+      setReviews((records || []).map((r: any) => ({
         id: r.id,
-        productName: r.expand?.product?.name || 'Unknown Product',
+        productName: r.productName || 'Unknown Product',
         customerName: r.customerName || 'Anonymous',
         rating: r.rating || 5,
         comment: r.comment || '',
-        date: new Date(r.created).toLocaleDateString('en-US', {
+        date: r.created ? new Date(r.created).toLocaleDateString('en-US', {
           year: 'numeric',
           month: 'short',
           day: 'numeric',
-        }),
+        }) : 'N/A',
         status: r.status || 'pending',
       })));
     } catch (err: any) {
       console.error(err);
+      setError('An error occurred loading reviews.');
     } finally {
       setLoading(false);
     }
@@ -63,8 +77,10 @@ export default function AdminReviewsPage() {
 
   const loadProducts = async () => {
     try {
-      const res = await pbProducts.getAll({ perPage: 100 });
-      setAllProducts((res?.items || []).map(p => ({ id: p.id, name: p.name })));
+      const res = await getAdminProductsAction();
+      if (res.success && res.data) {
+        setAllProducts((res.data || []).map((p: any) => ({ id: p.id, name: p.name })));
+      }
     } catch (err) {
       console.error('Failed to load products for reviews selection:', err);
     }

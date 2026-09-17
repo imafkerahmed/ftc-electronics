@@ -23,12 +23,17 @@ import {
   TrendingUp,
   ExternalLink,
 } from 'lucide-react';
-import { pbProducts, type PBStockPurchase, type PBStockManagementUnit } from '@/lib/pb-collections';
-import { pbProductToProduct } from '@/types/admin';
+import {
+  type PBStockPurchase,
+  type PBStockManagementUnit,
+  pbProductToProduct,
+} from '@/types/admin';
 import type { Product } from '@/types/product';
 import type { BarcodePrintConfig } from '@/types/barcode-config';
 import { printBarcodeLabels } from '@/lib/barcode-print';
+import { getProductThumbnail } from '@/lib/utils';
 import {
+  getAdminProductByIdAction,
   createStockPurchaseAction,
   generateBatchBarcodesAction,
   updateStockUnitStatusAction,
@@ -81,12 +86,12 @@ export default function ProductStockDetailPage({ params }: { params: Promise<{ i
   const refetchData = React.useCallback(async () => {
     try {
       setLoading(true);
-      const rawProd = await pbProducts.getById(id);
-      if (rawProd) {
-        const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'https://ftc-db.codix.site';
-        setProduct(pbProductToProduct(rawProd, pbUrl));
+      const prodRes = await getAdminProductByIdAction(id);
+
+      if (!prodRes.success || !prodRes.data) {
+        setError(prodRes.error || 'Product not found.');
       } else {
-        setError('Product not found.');
+        setProduct(prodRes.data as Product);
       }
 
       const [purchasesRes, unitsRes, salesRes] = await Promise.all([
@@ -96,10 +101,22 @@ export default function ProductStockDetailPage({ params }: { params: Promise<{ i
       ]);
 
       if (purchasesRes.data && Array.isArray(purchasesRes.data)) {
-        setPurchases(purchasesRes.data as PBStockPurchase[]);
+        // Normalize snake_case -> camelCase for display
+        setPurchases((purchasesRes.data as any[]).map((r: any) => ({
+          ...r,
+          batchNumber: r.batch_number ?? r.batchNumber ?? '',
+          unitCost: r.unit_cost ?? r.unitCost ?? 0,
+          purchaseDate: r.purchase_date ?? r.purchaseDate ?? '',
+        })));
       }
       if (unitsRes.data && Array.isArray(unitsRes.data)) {
-        setStockUnits(unitsRes.data as PBStockManagementUnit[]);
+        setStockUnits((unitsRes.data as any[]).map((r: any) => ({
+          ...r,
+          barcode: r.barcode ?? '',
+          serialNumber: r.serial_number ?? r.serialNumber ?? '',
+          batchNumber: r.batch_number ?? r.batchNumber ?? '',
+          status: r.status ?? 'available',
+        })));
       }
       if (salesRes.success && Array.isArray(salesRes.sales)) {
         setSalesHistory(salesRes.sales);
@@ -454,13 +471,23 @@ export default function ProductStockDetailPage({ params }: { params: Promise<{ i
             
             <div className="flex items-center gap-4">
               <div className="h-20 w-20 rounded-xl bg-muted border border-border relative overflow-hidden shrink-0">
-                <Image
-                  src={product.images[0]}
-                  alt={product.name}
-                  fill
-                  className="object-cover"
-                  sizes="80px"
-                />
+                {(() => {
+                  const thumb = getProductThumbnail(product.images);
+                  return thumb ? (
+                    <Image
+                      src={thumb}
+                      alt={product.name}
+                      fill
+                      className="object-cover"
+                      sizes="80px"
+                      unoptimized
+                    />
+                  ) : (
+                    <div className="h-full w-full flex items-center justify-center">
+                      <Package className="h-8 w-8 text-muted-foreground/50" />
+                    </div>
+                  );
+                })()}
               </div>
               <div className="space-y-1">
                 <p className="font-bold text-sm text-foreground leading-snug">{product.name}</p>
@@ -602,7 +629,7 @@ export default function ProductStockDetailPage({ params }: { params: Promise<{ i
                             <td className="p-3 font-mono font-bold text-blue-600 dark:text-blue-400">
                               {pur.batchNumber}
                             </td>
-                            <td className="p-3 text-muted-foreground">{pur.purchaseDate || new Date(pur.created).toLocaleDateString()}</td>
+                            <td className="p-3 text-muted-foreground">{pur.purchaseDate || (pur.created ? new Date(pur.created).toLocaleDateString() : '—')}</td>
                             <td className="p-3 font-medium">{pur.supplier || 'Official Supplier'}</td>
                             <td className="p-3 font-extrabold">
                               <span className="text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 text-[11px]">

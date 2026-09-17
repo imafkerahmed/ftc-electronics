@@ -26,7 +26,7 @@ import {
   verifyOrderForSlipUploadAction,
 } from '@/app/actions/checkout';
 import { useCartStore } from '@/store/use-cart-store';
-import { BANK_DETAILS } from '@/lib/bank-details';
+import { useSiteBranding } from '@/components/providers/site-branding-provider';
 
 type PaymentMethod = 'payhere' | 'bank_transfer' | 'cash_pickup' | 'cash_delivery';
 
@@ -47,6 +47,7 @@ const PAYMENT_METHOD_CONFIG = {
 
 export default function OrderConfirmationPage() {
   const searchParams = useSearchParams();
+  const { bankDetails } = useSiteBranding();
   const [orderInfo, setOrderInfo] = useState<OrderInfo | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -77,9 +78,11 @@ export default function OrderConfirmationPage() {
     if (methodParam === 'payhere') {
       setPayhereStatus('pending');
       confirmPayHereReturnAction(orderNumberParam).then((res) => {
-        if (res.success) {
+        if (res.success && res.isPaid) {
           setPayhereStatus('success');
           useCartStore.getState().clearCart();
+        } else if (res.success && res.status === 'pending') {
+          setPayhereStatus('pending');
         } else {
           setPayhereStatus('failed');
         }
@@ -103,7 +106,9 @@ export default function OrderConfirmationPage() {
     } catch { /* ignore */ }
 
     if (!hasLocalSession) {
-      verifyOrderForSlipUploadAction(orderNumberParam).then((res) => {
+      const emailParam = searchParams.get('email') || undefined;
+      const tokenParam = searchParams.get('token') || undefined;
+      verifyOrderForSlipUploadAction(orderNumberParam, emailParam, tokenParam).then((res) => {
         if (res.success && res.order) {
           setOrderInfo({
             orderNumber: res.order.orderNumber,
@@ -303,7 +308,13 @@ export default function OrderConfirmationPage() {
               Transfer the exact amount and use your order reference number as the payment description.
             </p>
             <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-xs pt-1">
-              {BANK_DETAILS.map(([label, value]) => (
+              {[
+                  ['Bank', bankDetails.bankName],
+                  ['Account Name', bankDetails.accountName],
+                  ['Account No.', bankDetails.accountNo],
+                  ['Branch', bankDetails.branch],
+                  ['Branch Code', bankDetails.branchCode],
+              ].map(([label, value]) => (
                 <div key={label}>
                   <div className="text-muted-foreground mb-0.5">{label}</div>
                   <div className="font-bold font-mono text-foreground">{value}</div>

@@ -3,10 +3,11 @@
 import { cookies, headers } from 'next/headers';
 import crypto from 'crypto';
 import PocketBase from 'pocketbase';
-import { getAdminPb, writeAuditLog } from '@/lib/pb-admin';
+import { getAdminSupabase, writeAuditLog } from '@/lib/supabase-admin';
 import { getTrustedClientIp } from '@/lib/get-client-ip';
 import { sendPasswordResetEmail, sendOtpEmail } from '@/lib/email';
 import { type AdminRole, ADMIN_ROLES } from '@/types/admin';
+import type { User, SupabaseClient } from '@supabase/supabase-js';
 
 function scryptAsync(password: string, salt: string, keylen: number, options: crypto.ScryptOptions): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -146,6 +147,7 @@ function clearAuthAttempts(ip: string, action: string): void {
  */
 async function setSessionCookies(params: {
   token: string;
+  refreshToken?: string;
   role: AdminRole | 'customer';
   name: string;
   avatarUrl?: string;
@@ -162,6 +164,9 @@ async function setSessionCookies(params: {
   };
 
   cookieStore.set('pb_auth_token', params.token, { ...base, httpOnly: true });
+  if (params.refreshToken) {
+    cookieStore.set('pb_auth_refresh_token', params.refreshToken, { ...base, httpOnly: true });
+  }
   cookieStore.set('pb_auth_role', params.role, { ...base, httpOnly: true });
   cookieStore.set('pb_auth_indicator', '1', { ...base, httpOnly: false });
   cookieStore.set('pb_auth_name', encodeURIComponent(params.name), { ...base, httpOnly: false });
@@ -170,6 +175,51 @@ async function setSessionCookies(params: {
     params.avatarUrl ? encodeURIComponent(params.avatarUrl) : '',
     { ...base, httpOnly: false, maxAge: params.avatarUrl ? base.maxAge : 0 }
   );
+}
+
+/**
+ * Retrieves the currently authenticated Supabase user from cookies, automatically
+ * refreshing the access token if expired using the stored refresh token.
+ */
+async function getAuthenticatedCustomerUser(supabase: SupabaseClient): Promise<{ user: User | null; token?: string }> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get('pb_auth_token')?.value;
+  const refreshToken = cookieStore.get('pb_auth_refresh_token')?.value;
+
+  if (!token && !refreshToken) {
+    return { user: null };
+  }
+
+  if (token) {
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    if (!authErr && user) {
+      return { user, token };
+    }
+  }
+
+  if (refreshToken) {
+    try {
+      const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
+      if (!error && data?.session && data?.user) {
+        const secure = process.env.NODE_ENV === 'production';
+        const base = {
+          secure,
+          sameSite: 'strict' as const,
+          path: '/',
+          maxAge: 60 * 60 * 24 * 7,
+        };
+        cookieStore.set('pb_auth_token', data.session.access_token, { ...base, httpOnly: true });
+        if (data.session.refresh_token) {
+          cookieStore.set('pb_auth_refresh_token', data.session.refresh_token, { ...base, httpOnly: true });
+        }
+        return { user: data.user, token: data.session.access_token };
+      }
+    } catch {
+      // Refresh failed
+    }
+  }
+
+  return { user: null };
 }
 
 // ─── OWASP Timing Equalization KDF Helper ────────────────────────────────────
@@ -228,14 +278,15 @@ async function saveResetTokenRecord(record: ResetTokenRecord): Promise<void> {
   memoryTokenStore.set(hashKey, record);
 
   try {
-    const pb = await getAdminPb();
-    const created = await pb.collection('password_reset_tokens').create({
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase.from('password_reset_tokens').insert({
       email: record.email,
       token_hash: record.tokenHash,
       expires_at: record.expiresAt,
       used: record.used,
-    });
-    record.id = created.id;
+    }).select().single();
+    if (error) throw error;
+    record.id = data.id;
     memoryTokenStore.set(hashKey, record);
   } catch (err) {
     console.error('[RESET TOKEN STORE ERROR] Failed to save reset token record to database:', err);
@@ -245,12 +296,14 @@ async function saveResetTokenRecord(record: ResetTokenRecord): Promise<void> {
 async function findResetTokenRecord(tokenHash: string): Promise<ResetTokenRecord | null> {
   cleanupExpiredTokens();
 
-  // 1. Query persistent PocketBase database first for multi-replica/distributed node consistency
   try {
-    const pb = await getAdminPb();
-    const record = await pb.collection('password_reset_tokens').getFirstListItem(
-      pb.filter('token_hash = {:tokenHash}', { tokenHash })
-    );
+    const supabase = getAdminSupabase();
+    const { data: record, error } = await supabase
+      .from('password_reset_tokens')
+      .select('*')
+      .eq('token_hash', tokenHash)
+      .maybeSingle();
+      
     if (record) {
       const result: ResetTokenRecord = {
         id: record.id,
@@ -266,7 +319,6 @@ async function findResetTokenRecord(tokenHash: string): Promise<ResetTokenRecord
     console.error('[RESET TOKEN STORE ERROR] Failed to fetch reset token record from database:', err);
   }
 
-  // 2. Process-memory fallback
   const memoryRecord = memoryTokenStore.get(tokenHash);
   if (memoryRecord && memoryRecord.expiresAt >= Date.now()) {
     return memoryRecord;
@@ -280,16 +332,18 @@ async function markTokenUsed(tokenHash: string, record: ResetTokenRecord): Promi
   memoryTokenStore.set(tokenHash, record);
 
   try {
-    const pb = await getAdminPb();
+    const supabase = getAdminSupabase();
     let targetId = record.id;
     if (!targetId) {
-      const dbRec = await pb.collection('password_reset_tokens').getFirstListItem(
-        pb.filter('token_hash = {:tokenHash}', { tokenHash })
-      );
+      const { data: dbRec } = await supabase
+        .from('password_reset_tokens')
+        .select('id')
+        .eq('token_hash', tokenHash)
+        .maybeSingle();
       if (dbRec) targetId = dbRec.id;
     }
     if (targetId) {
-      await pb.collection('password_reset_tokens').update(targetId, { used: true });
+      await supabase.from('password_reset_tokens').update({ used: true }).eq('id', targetId);
       record.id = targetId;
     }
   } catch (err) {
@@ -307,13 +361,13 @@ async function revokeUserTokens(email: string): Promise<void> {
   }
 
   try {
-    const pb = await getAdminPb();
-    const records = await pb.collection('password_reset_tokens').getFullList({
-      filter: pb.filter('email = {:email} && used = false && expires_at >= {:now}', { email, now }),
-    });
-    if (records.length > 0) {
-      await Promise.all(records.map((rec) => pb.collection('password_reset_tokens').update(rec.id, { used: true })));
-    }
+    const supabase = getAdminSupabase();
+    await supabase
+      .from('password_reset_tokens')
+      .update({ used: true })
+      .eq('email', email)
+      .eq('used', false)
+      .gte('expires_at', now);
   } catch (err) {
     console.error('[RESET TOKEN STORE ERROR] Failed to revoke active reset tokens in database:', err);
   }
@@ -358,57 +412,47 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
     };
   }
 
-  const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
-  if (!pbUrl) {
-    return { success: false, error: 'Server configuration error.' };
-  }
-
-  const pb = new PocketBase(pbUrl);
-  pb.autoCancellation(false);
-
   let success = false;
   let userRole: AdminRole | 'customer' = 'customer';
   let userId = '';
+  let token = '';
+  let refreshToken = '';
+  let displayName = email.split('@')[0];
 
   try {
-    const authData = await pb.collection('users').authWithPassword(email, password);
-    const record = authData.record;
-    userId = record.id;
-
-    let role = record.role as string | undefined;
-    if (role === 'admin') {
-      role = 'super_admin';
-    }
-
-    if (role && (ADMIN_ROLES as readonly string[]).includes(role)) {
+    const supabase = getAdminSupabase();
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+    if (!authError && authData?.session && authData.user) {
       success = true;
-      userRole = role as AdminRole;
-    } else if (record.isAdmin === true || record.is_admin === true) {
-      success = true;
-      userRole = 'super_admin';
+      userId = authData.user.id;
+      token = authData.session.access_token;
+      refreshToken = authData.session.refresh_token;
+      
+      const { data: publicUser } = await supabase.from('users').select('id, role, is_admin, name').eq('id', authData.user.id).maybeSingle();
+      const role = publicUser?.role || (authData.user.user_metadata?.role as string);
+      if (role && (ADMIN_ROLES as readonly string[]).includes(role)) {
+        userRole = role as AdminRole;
+      } else if (publicUser?.is_admin === true) {
+        userRole = 'super_admin';
+      } else {
+        userRole = 'customer';
+      }
+      displayName = publicUser?.name || authData.user.user_metadata?.name || email.split('@')[0];
     } else {
-      success = true;
-      userRole = 'customer';
+      await executeDummyKdf();
     }
   } catch {
-    // Execute dummy KDF to preserve constant-time execution and prevent user enumeration
     await executeDummyKdf();
   }
 
   if (success) {
     clearAuthAttempts(ip, 'login');
 
-    const model = pb.authStore.record;
-    const displayName = model?.name || email.split('@')[0];
-    const avatarUrl = model?.avatar
-      ? `${pbUrl}/api/files/_pb_users_auth_/${model.id}/${model.avatar}`
-      : undefined;
-
     await setSessionCookies({
-      token: pb.authStore.token,
+      token,
+      refreshToken,
       role: userRole,
       name: displayName,
-      avatarUrl,
     });
 
     writeAuditLog(
@@ -437,64 +481,58 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
     { ip, userAgent }
   );
 
-  // Return uniform, generic error message (OWASP Standard)
   return { success: false, error: 'Invalid email or password.' };
 }
 
 async function checkUserAuth() {
   const cookieStore = await cookies();
-  return cookieStore.get('pb_auth_token')?.value;
+  return cookieStore.get('pb_auth_token')?.value || cookieStore.get('pb_auth_refresh_token')?.value;
 }
 
 /**
  * Establishes a server session cookie after a successful client OAuth2 authentication flow.
  */
-export async function setOAuthSessionAction(token: string): Promise<AuthActionResult> {
+export async function setOAuthSessionAction(token: string, refreshToken?: string): Promise<AuthActionResult> {
   await checkUserAuth();
-  if (!token) {
+  if (!token && !refreshToken) {
     return { success: false, error: 'OAuth token is required.' };
   }
 
-  const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
-  if (!pbUrl) {
-    return { success: false, error: 'Server configuration error.' };
-  }
-
   try {
-    const pb = new PocketBase(pbUrl);
-    pb.authStore.save(token, null);
+    const supabase = getAdminSupabase();
+    let user: User | null = null;
+    let finalAccessToken = token;
+    let finalRefreshToken = refreshToken;
 
-    // Cryptographically verify token signature & refresh record against PocketBase
-    let record;
-    try {
-      const refreshed = await pb.collection('users').authRefresh();
-      record = refreshed.record;
-    } catch {
+    if (token) {
+      const { data: { user: authUser }, error: authErr } = await supabase.auth.getUser(token);
+      if (!authErr && authUser) {
+        user = authUser;
+      }
+    }
+
+    if (!user && refreshToken) {
+      const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
+      if (!refreshErr && refreshData?.session && refreshData?.user) {
+        user = refreshData.user;
+        finalAccessToken = refreshData.session.access_token;
+        finalRefreshToken = refreshData.session.refresh_token;
+      }
+    }
+    
+    if (!user) {
       return { success: false, error: 'Invalid authentication token.' };
     }
 
-    if (!record) {
-      return { success: false, error: 'Invalid authentication token.' };
-    }
-
+    const { data: publicUser } = await supabase.from('users').select('*').eq('id', user.id).maybeSingle();
     let userRole: AdminRole | 'customer' = 'customer';
-    const role = record.role as string | undefined;
-
-    // Check role validity against defined AdminRoles
+    const role = publicUser?.role || user.user_metadata?.role;
+    
     if (role && (ADMIN_ROLES as readonly string[]).includes(role)) {
       userRole = role as AdminRole;
-    } else if (record.isAdmin === true || record.is_admin === true) {
+    } else if (publicUser?.is_admin === true) {
       userRole = 'super_admin';
     } else {
-      // New OAuth customer with no role set yet -> Provision in database
-      if (!record.role && record.id) {
-        try {
-          const adminPb = await getAdminPb();
-          await adminPb.collection('users').update(record.id, { role: 'customer' });
-        } catch (provisionErr) {
-          console.error('[setOAuthSessionAction] Role provisioning failed:', provisionErr);
-        }
-      }
       userRole = 'customer';
     }
 
@@ -502,23 +540,20 @@ export async function setOAuthSessionAction(token: string): Promise<AuthActionRe
     const ip = getTrustedClientIp(headersList);
     const userAgent = headersList.get('user-agent') || 'unknown';
 
-    const displayName = record.name || record.email?.split('@')[0] || 'User';
-    const avatarUrl = record.avatar
-      ? `${pbUrl}/api/files/_pb_users_auth_/${record.id}/${record.avatar}`
-      : undefined;
+    const displayName = publicUser?.name || user.user_metadata?.name || user.email?.split('@')[0] || 'User';
 
     await setSessionCookies({
-      token,
+      token: finalAccessToken,
+      refreshToken: finalRefreshToken,
       role: userRole,
       name: displayName,
-      avatarUrl,
     });
 
     writeAuditLog(
-      record.email || 'oauth_user',
+      user.email || 'oauth_user',
       'login',
       'auth',
-      record.id,
+      user.id,
       undefined,
       { role: userRole, provider: 'google', ip },
       { ip, userAgent }
@@ -569,17 +604,10 @@ export async function signUpAction(formData: FormData): Promise<AuthActionResult
   }
 
   try {
-    const adminPb = await getAdminPb();
+    const supabase = getAdminSupabase();
     
     // Check if user already exists
-    let existingUser = null;
-    try {
-      existingUser = await adminPb.collection('users').getFirstListItem(
-        adminPb.filter('email = {:email}', { email })
-      );
-    } catch {
-      // User not found
-    }
+    const { data: existingUser } = await supabase.from('users').select('id').eq('email', email).maybeSingle();
 
     if (existingUser) {
       return { 
@@ -588,17 +616,10 @@ export async function signUpAction(formData: FormData): Promise<AuthActionResult
       };
     }
 
-    // Prune expired signup OTP records — capped at 50 to avoid unbounded sequential deletes.
+    // Prune expired signup OTP records
     try {
-      const expiredOtps = await adminPb.collection('signup_otps').getList(1, 50, {
-        filter: adminPb.filter('expiresAt < {:now}', { now: new Date().toISOString() }),
-        fields: 'id',
-      });
-      await Promise.all(
-        expiredOtps.items.map((oldOtp) =>
-          adminPb.collection('signup_otps').delete(oldOtp.id).catch(() => {})
-        )
-      );
+      const nowStr = new Date().toISOString();
+      await supabase.from('signup_otps').delete().lt('expires_at', nowStr);
     } catch (pruneErr) {
       console.error('Failed to prune expired OTPs:', pruneErr);
     }
@@ -607,15 +628,19 @@ export async function signUpAction(formData: FormData): Promise<AuthActionResult
     const code = (100000 + crypto.randomInt(900000)).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes TTL
 
-    // Create temporary record in PocketBase signup_otps collection
-    const tempSignup = await adminPb.collection('signup_otps').create({
+    // Create temporary record in Supabase signup_otps table
+    const { data: tempSignup, error: insertErr } = await supabase.from('signup_otps').insert({
       email,
       code,
       name,
       password: encryptPassword(password), // Save encrypted temporary password to create user upon verification
-      expiresAt,
+      expires_at: expiresAt,
       attempts: 0,
-    });
+    }).select().single();
+
+    if (insertErr || !tempSignup) {
+      throw insertErr || new Error('Failed to insert temporary OTP record');
+    }
 
     // Send OTP email
     const emailResult = await sendOtpEmail({
@@ -627,7 +652,7 @@ export async function signUpAction(formData: FormData): Promise<AuthActionResult
     if (!emailResult.success) {
       // Clean up on failure
       try {
-        await adminPb.collection('signup_otps').delete(tempSignup.id);
+        await supabase.from('signup_otps').delete().eq('id', tempSignup.id);
       } catch {}
       return {
         success: false,
@@ -674,22 +699,19 @@ export async function verifyOtpAction(otpId: string, code: string): Promise<Auth
   }
 
   try {
-    const adminPb = await getAdminPb();
+    const supabase = getAdminSupabase();
     
     // Fetch temp signup record
-    let record: any;
-    try {
-      record = await adminPb.collection('signup_otps').getOne(otpId);
-    } catch {
+    const { data: record, error: fetchErr } = await supabase.from('signup_otps').select('*').eq('id', otpId).maybeSingle();
+    if (fetchErr || !record) {
       return { success: false, error: 'Verification session expired. Please sign up again.' };
     }
-
     const currentAttempts = Number(record.attempts || 0);
 
-    // 2. Brute Force Protection (Check/Self-Destruct if limit exceeded)
+    // 2. Brute Force Protection
     if (currentAttempts >= 5) {
       try {
-        await adminPb.collection('signup_otps').delete(otpId);
+        await supabase.from('signup_otps').delete().eq('id', otpId);
       } catch {}
       return { success: false, error: 'Too many incorrect verification attempts. Please sign up again.' };
     }
@@ -698,18 +720,14 @@ export async function verifyOtpAction(otpId: string, code: string): Promise<Auth
     if (record.code !== code.trim()) {
       recordAuthAttempt(ip, 'verifyOtp');
 
-      // Atomic server-side increment: avoids read-modify-write race across concurrent requests.
-      let newAttempts = currentAttempts + 1;
+      const newAttempts = currentAttempts + 1;
       try {
-        const updated = await adminPb.collection('signup_otps').update(otpId, {
-          'attempts+': 1,
-        });
-        newAttempts = Number(updated.attempts ?? newAttempts);
+        await supabase.from('signup_otps').update({ attempts: newAttempts }).eq('id', otpId);
       } catch {}
 
       if (newAttempts >= 5) {
         try {
-          await adminPb.collection('signup_otps').delete(otpId);
+          await supabase.from('signup_otps').delete().eq('id', otpId);
         } catch {}
         return { success: false, error: 'Too many incorrect verification attempts. Please sign up again.' };
       }
@@ -718,94 +736,137 @@ export async function verifyOtpAction(otpId: string, code: string): Promise<Auth
     }
 
     // Check expiration
-    if (new Date(record.expiresAt).getTime() < Date.now()) {
+    if (new Date(record.expires_at).getTime() < Date.now()) {
       try {
-        await adminPb.collection('signup_otps').delete(otpId);
+        await supabase.from('signup_otps').delete().eq('id', otpId);
       } catch {}
       return { success: false, error: 'Verification code has expired. Please sign up again.' };
     }
 
     // Double check if user was created in the meantime
-    let existingUser = null;
-    try {
-      existingUser = await adminPb.collection('users').getFirstListItem(
-        adminPb.filter('email = {:email}', { email: record.email })
-      );
-    } catch {}
+    const { data: existingUser } = await supabase.from('users').select('id').eq('email', record.email).maybeSingle();
 
     if (existingUser) {
       try {
-        await adminPb.collection('signup_otps').delete(otpId);
+        await supabase.from('signup_otps').delete().eq('id', otpId);
       } catch {}
       return { success: false, error: 'An account with this email address already exists.' };
     }
 
-    // Decrypt the temporary user password — returns null if tampered or key-mismatched.
+    // Decrypt the temporary user password
     const decryptedPassword = decryptPassword(record.password);
     if (decryptedPassword === null) {
       console.error('[verifyOtpAction] decryptPassword returned null for otpId:', otpId);
       try {
-        await adminPb.collection('signup_otps').delete(otpId);
+        await supabase.from('signup_otps').delete().eq('id', otpId);
       } catch {}
       return { success: false, error: 'Verification session is invalid. Please sign up again.' };
     }
 
-    // Create real user in users collection
-    const newUser = await adminPb.collection('users').create({
+    // Create real user in Supabase Auth
+    const { data: authUser, error: authCreateErr } = await supabase.auth.admin.createUser({
       email: record.email,
       password: decryptedPassword,
-      passwordConfirm: decryptedPassword,
+      email_confirm: true,
+      user_metadata: { name: record.name, role: 'customer' }
+    });
+
+    if (authCreateErr || !authUser?.user) {
+      console.error('[verifyOtpAction] User creation in Supabase auth failed:', authCreateErr);
+      return { success: false, error: 'Unable to create user account. Please try again.' };
+    }
+
+    const newAuthUserId = authUser.user.id;
+
+    // Create user in public.users table
+    const { data: publicUser, error: publicUserErr } = await supabase.from('users').insert({
+      id: newAuthUserId,
+      email: record.email,
       name: record.name,
       role: 'customer',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).select().single();
+
+    if (publicUserErr) {
+      console.error('[verifyOtpAction] Failed to insert public user, rolling back auth user:', publicUserErr);
+      try {
+        await supabase.auth.admin.deleteUser(newAuthUserId);
+      } catch (delErr) {
+        console.error('[verifyOtpAction] Rollback deleteUser failed:', delErr);
+      }
+      return {
+        success: false,
+        error: 'Failed to create user profile. Please try again.',
+      };
+    }
+
+    // Create record in public.customers table
+    const { error: customerErr } = await supabase.from('customers').insert({
+      id: newAuthUserId,
+      name: record.name,
+      email: record.email,
+      phone: null,
+      orders_count: 0,
+      total_spent: 0,
+      status: 'active',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     });
+
+    if (customerErr) {
+      console.error('[verifyOtpAction] Failed to insert customer profile, rolling back users and auth user:', customerErr);
+      try {
+        await supabase.from('users').delete().eq('id', newAuthUserId);
+        await supabase.auth.admin.deleteUser(newAuthUserId);
+      } catch (delErr) {
+        console.error('[verifyOtpAction] Rollback failed:', delErr);
+      }
+      return {
+        success: false,
+        error: 'Failed to initialize customer account. Please try again.',
+      };
+    }
 
     // Delete temporary OTP record
     try {
-      await adminPb.collection('signup_otps').delete(otpId);
+      await supabase.from('signup_otps').delete().eq('id', otpId);
     } catch {}
 
     writeAuditLog(
       record.email,
       'create',
       'users',
-      newUser.id,
+      newAuthUserId,
       undefined,
       { email: record.email, name: record.name, role: 'customer' },
       { ip, userAgent }
     );
 
     // Authenticate new user automatically to log them in
-    const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
-    if (!pbUrl) {
-      return { success: true, message: 'Account verified successfully! Please sign in.' };
-    }
-
-    const pb = new PocketBase(pbUrl);
-
-    // Use decryptedPassword (not record.password which holds the AES-GCM ciphertext).
-    // Wrap in try/catch: a login failure must not discard the successfully created account.
-    let authData;
+    let signInData;
     try {
-      authData = await pb.collection('users').authWithPassword(record.email, decryptedPassword);
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: record.email,
+        password: decryptedPassword,
+      });
+      if (error) throw error;
+      signInData = data;
     } catch (loginErr) {
       console.error('[verifyOtpAction] Auto-login after signup failed:', loginErr);
       return { success: true, message: 'Account verified successfully! Please sign in.' };
     }
 
-    if (authData?.token) {
+    if (signInData?.session) {
       const displayName = record.name || record.email.split('@')[0] || 'User';
-      const avatarUrl = authData.record?.avatar
-        ? `${pbUrl}/api/files/_pb_users_auth_/${authData.record.id}/${authData.record.avatar}`
-        : undefined;
 
       await setSessionCookies({
-        token: authData.token,
+        token: signInData.session.access_token,
+        refreshToken: signInData.session.refresh_token,
         role: 'customer',
         name: displayName,
-        avatarUrl,
       });
       
-      // Notify navbar client-side
       return { success: true, role: 'customer' };
     }
 
@@ -858,12 +919,11 @@ export async function forgotPasswordAction(formData: FormData): Promise<AuthActi
   };
 
   try {
-    const adminPb = await getAdminPb();
+    const supabase = getAdminSupabase();
     let user = null;
     try {
-      user = await adminPb.collection('users').getFirstListItem(
-        adminPb.filter('email = {:email}', { email })
-      );
+      const { data } = await supabase.from('users').select('*').eq('email', email).maybeSingle();
+      user = data;
     } catch {
       // User not found
     }
@@ -959,16 +1019,22 @@ export async function resetPasswordAction(formData: FormData): Promise<AuthActio
   }
 
   try {
-    const adminPb = await getAdminPb();
-    const user = await adminPb.collection('users').getFirstListItem(
-      adminPb.filter('email = {:email}', { email: record.email })
-    );
+    const supabase = getAdminSupabase();
+    const { data: user, error: userErr } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', record.email)
+      .maybeSingle();
 
-    // Update user password in PocketBase (adaptive KDF applied by PB)
-    await adminPb.collection('users').update(user.id, {
-      password,
-      passwordConfirm: password,
+    if (userErr || !user) {
+      throw userErr || new Error('User not found in public database');
+    }
+
+    // Update user password in Supabase Auth
+    const { error: updateAuthErr } = await supabase.auth.admin.updateUserById(user.id, {
+      password: password,
     });
+    if (updateAuthErr) throw updateAuthErr;
 
     // Mark token as used (single-use enforcement)
     await markTokenUsed(tokenHash, record);
@@ -1021,10 +1087,12 @@ export async function logoutAction(): Promise<{ success: boolean }> {
   }
 
   cookieStore.delete('pb_auth_token');
+  cookieStore.delete('pb_auth_refresh_token');
   cookieStore.delete('pb_auth_role');
   cookieStore.delete('pb_auth_indicator');
   cookieStore.delete('pb_auth_name');
   cookieStore.delete('pb_auth_avatar');
+  cookieStore.delete('pb_auth_cache');
 
   writeAuditLog(actorEmail, 'logout', 'auth', undefined, undefined, { ip }, { ip });
 
@@ -1059,47 +1127,38 @@ export async function getCurrentUserSessionAction(): Promise<{
   error?: string;
 }> {
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get('pb_auth_token')?.value;
-
-    if (!token) {
+    const supabase = getAdminSupabase();
+    const { user } = await getAuthenticatedCustomerUser(supabase);
+    
+    if (!user) {
       return { success: false, error: 'Not authenticated.' };
     }
 
-    const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
-    if (!pbUrl) return { success: false, error: 'Server error.' };
+    // Load extra fields from public.users database table if available, or fallback to user metadata
+    const { data: publicUser } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle();
 
-    // Instantiate client with user's own token to verify signature authenticity
-    const pb = new PocketBase(pbUrl);
-    pb.authStore.save(token, null);
-
-    // authRefresh will validate the token against PocketBase's secret and throw if forged/expired
-    const authData = await pb.collection('users').authRefresh();
-    const record = authData.record;
-
-    if (!record) {
-      return { success: false, error: 'Not authenticated.' };
-    }
-
-    const avatarUrl = record.avatar
-      ? `${pbUrl}/api/files/_pb_users_auth_/${record.id}/${record.avatar}`
-      : undefined;
-
-    const fullName = record.name || record.username || record.email?.split('@')[0] || 'Customer';
+    const fullName = publicUser?.name || user.user_metadata?.name || user.email?.split('@')[0] || 'Customer';
     const nameParts = fullName.trim().split(' ');
     const firstName = nameParts[0] || '';
     const lastName = nameParts.slice(1).join(' ') || '';
 
-    let addressLine1 = record.address || '';
+    const phone = publicUser?.phone || user.user_metadata?.phone || '';
+    const address = publicUser?.address || user.user_metadata?.address || '';
+    
+    let addressLine1 = address;
     let addressLine2 = '';
     let city = '';
     let state = '';
     let postalCode = '';
     let country = 'Sri Lanka';
 
-    if (record.address && record.address.trim().startsWith('{')) {
+    if (address && address.trim().startsWith('{')) {
       try {
-        const parsed = JSON.parse(record.address);
+        const parsed = JSON.parse(address);
         addressLine1 = parsed.addressLine1 || '';
         addressLine2 = parsed.addressLine2 || '';
         city = parsed.city || '';
@@ -1107,7 +1166,6 @@ export async function getCurrentUserSessionAction(): Promise<{
         postalCode = parsed.postalCode || '';
         country = parsed.country || 'Sri Lanka';
       } catch {
-        // Stored value is malformed JSON — clear raw JSON text from addressLine1
         addressLine1 = '';
       }
     }
@@ -1115,25 +1173,26 @@ export async function getCurrentUserSessionAction(): Promise<{
     return {
       success: true,
       user: {
-        id: record.id,
-        email: record.email || '',
+        id: user.id,
+        email: user.email || '',
         name: fullName,
         firstName,
         lastName,
-        phone: record.phone || '',
-        address: record.address || '',
+        phone,
+        address,
         addressLine1,
         addressLine2,
         city,
         state,
         postalCode,
         country,
-        role: record.role || 'read_only',
-        created: record.created || new Date().toISOString(),
-        avatar: avatarUrl,
+        role: publicUser?.role || user.user_metadata?.role || 'customer',
+        created: user.created_at || new Date().toISOString(),
+        avatar: undefined,
       },
     };
-  } catch {
+  } catch (err) {
+    console.error('[getCurrentUserSessionAction] error:', err);
     return { success: false, error: 'Failed to load user profile.' };
   }
 }
@@ -1156,33 +1215,23 @@ export async function updateUserProfilePageAction(data: {
 }): Promise<{ success: boolean; error?: string }> {
   await checkUserAuth();
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get('pb_auth_token')?.value;
-
-    if (!token) return { success: false, error: 'Not authenticated.' };
-
-    const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
-    if (!pbUrl) return { success: false, error: 'Server error.' };
-
-    // Instantiate client with user's own token to verify signature authenticity
-    const pb = new PocketBase(pbUrl);
-    pb.authStore.save(token, null);
-
-    // authRefresh will validate the token against PocketBase's secret and throw if forged/expired
-    const authData = await pb.collection('users').authRefresh();
-    const record = authData.record;
-
-    if (!record) {
+    const supabase = getAdminSupabase();
+    const { user } = await getAuthenticatedCustomerUser(supabase);
+    
+    if (!user) {
       return { success: false, error: 'Not authenticated.' };
     }
 
-    const existingNameParts = (record.name || '').trim().split(' ');
+    // Load existing user details
+    const { data: publicUser } = await supabase.from('users').select('*').eq('id', user.id).maybeSingle();
+
+    const existingNameParts = ((publicUser?.name || user.user_metadata?.name || '').trim()).split(' ');
     const existingFirstName = existingNameParts[0] || '';
     const existingLastName = existingNameParts.slice(1).join(' ') || '';
 
     const finalFirstName = data.firstName !== undefined ? data.firstName : (data.name ? data.name.split(' ')[0] : existingFirstName);
     const finalLastName = data.lastName !== undefined ? data.lastName : (data.name ? data.name.split(' ').slice(1).join(' ') : existingLastName);
-    const fullName = `${finalFirstName} ${finalLastName}`.trim() || record.name || 'Customer';
+    const fullName = `${finalFirstName} ${finalLastName}`.trim() || publicUser?.name || user.user_metadata?.name || 'Customer';
 
     const hasAddressInput =
       data.addressLine1 !== undefined ||
@@ -1193,41 +1242,81 @@ export async function updateUserProfilePageAction(data: {
       data.country !== undefined ||
       data.address !== undefined;
 
-    const payload: Record<string, string> = { name: fullName };
-    if (data.phone !== undefined) {
-      payload.phone = data.phone;
-    }
-
+    let finalAddress = publicUser?.address || '';
     if (hasAddressInput) {
       if (typeof data.address === 'string' && data.address.trim().length > 0) {
-        payload.address = data.address.trim();
+        finalAddress = data.address.trim();
       } else {
         let existingAddr: Record<string, string> = {};
-        if (record.address) {
+        const oldAddr = publicUser?.address || '';
+        if (oldAddr) {
           try {
-            existingAddr = typeof record.address === 'string' && record.address.startsWith('{')
-              ? JSON.parse(record.address)
-              : { addressLine1: record.address };
+            existingAddr = typeof oldAddr === 'string' && oldAddr.startsWith('{')
+              ? JSON.parse(oldAddr)
+              : { addressLine1: oldAddr };
           } catch {
-            existingAddr = { addressLine1: record.address };
+            existingAddr = { addressLine1: oldAddr };
           }
         }
 
-        payload.address = JSON.stringify({
-          addressLine1: data.addressLine1 ?? existingAddr.addressLine1 ?? '',
-          addressLine2: data.addressLine2 ?? existingAddr.addressLine2 ?? '',
-          city: data.city ?? existingAddr.city ?? '',
-          state: data.state ?? existingAddr.state ?? '',
-          postalCode: data.postalCode ?? existingAddr.postalCode ?? '',
-          country: data.country ?? existingAddr.country ?? 'Sri Lanka',
-        });
+        const merged = {
+          addressLine1: data.addressLine1 !== undefined ? data.addressLine1 : (existingAddr.addressLine1 || ''),
+          addressLine2: data.addressLine2 !== undefined ? data.addressLine2 : (existingAddr.addressLine2 || ''),
+          city: data.city !== undefined ? data.city : (existingAddr.city || ''),
+          state: data.state !== undefined ? data.state : (existingAddr.state || ''),
+          postalCode: data.postalCode !== undefined ? data.postalCode : (existingAddr.postalCode || ''),
+          country: data.country !== undefined ? data.country : (existingAddr.country || 'Sri Lanka'),
+        };
+        finalAddress = JSON.stringify(merged);
       }
     }
 
-    // Perform update on the authenticated client instance to enforce PB policy security rules
-    await pb.collection('users').update(record.id, payload);
+    const payload: { name: string; phone?: string | null; address?: string } = {
+      name: fullName,
+    };
+    if (data.phone !== undefined) {
+      payload.phone = data.phone;
+    }
+    if (hasAddressInput) {
+      payload.address = finalAddress;
+    }
 
-    // Also update the name cookie so navbar avatar reflects new name
+    // Update public.users table in Supabase
+    const { error: userUpdateErr } = await supabase.from('users').update(payload).eq('id', user.id);
+    if (userUpdateErr) {
+      console.error('[updateUserProfilePageAction] users update failed:', userUpdateErr);
+      return { success: false, error: 'Failed to update user profile.' };
+    }
+
+    // Also update public.customers table if exists
+    const { error: customerUpdateErr } = await supabase.from('customers').update({
+      name: fullName,
+      phone: data.phone ?? publicUser?.phone ?? null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', user.id);
+
+    if (customerUpdateErr) {
+      console.error('[updateUserProfilePageAction] customers update failed:', customerUpdateErr);
+      return { success: false, error: 'Failed to update customer profile.' };
+    }
+
+    // Update Supabase Auth user metadata
+    const { error: authMetaErr } = await supabase.auth.admin.updateUserById(user.id, {
+      user_metadata: {
+        ...user.user_metadata,
+        name: fullName,
+        phone: data.phone ?? user.user_metadata?.phone,
+        address: finalAddress,
+      },
+    });
+
+    if (authMetaErr) {
+      console.error('[updateUserProfilePageAction] auth metadata update failed:', authMetaErr);
+      return { success: false, error: 'Failed to update account metadata.' };
+    }
+
+    // Only update cookie AFTER all writes have successfully completed
+    const cookieStore = await cookies();
     cookieStore.set('pb_auth_name', encodeURIComponent(fullName), {
       httpOnly: false,
       secure: process.env.NODE_ENV === 'production',
@@ -1252,54 +1341,63 @@ export async function getCustomerOrdersAction(): Promise<{
   error?: string;
 }> {
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get('pb_auth_token')?.value;
-
-    if (!token) return { success: false, orders: [], error: 'Not authenticated.' };
-
-    const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
-    if (!pbUrl) return { success: false, orders: [], error: 'Server error.' };
-
-    // Instantiate client with user's own token to verify signature authenticity
-    const pb = new PocketBase(pbUrl);
-    pb.authStore.save(token, null);
-
-    // authRefresh will validate the token against PocketBase's secret and throw if forged/expired
-    const authData = await pb.collection('users').authRefresh();
-    const record = authData.record;
-
-    if (!record) {
+    const supabase = getAdminSupabase();
+    const { user } = await getAuthenticatedCustomerUser(supabase);
+    
+    if (!user) {
       return { success: false, orders: [], error: 'Not authenticated.' };
     }
 
-    const userEmail = record.email || '';
+    const userEmail = user.email || '';
     if (!userEmail) return { success: false, orders: [], error: 'User email not found.' };
 
-    const adminPb = await getAdminPb();
-    let records: any[] = [];
-    try {
-      records = await adminPb.collection('orders').getFullList({
-        filter: adminPb.filter(
-          'customer.email = {:email} || shippingAddress.email = {:email} || user = {:userId} || customer.userId = {:userId}',
-          { email: userEmail, userId: record.id }
-        ),
-        sort: '-created',
-      });
-    } catch (filterErr) {
-      console.warn('[getCustomerOrdersAction] Order query error:', filterErr);
-      try {
-        // Narrower fallback search matching only on user relation
-        records = await adminPb.collection('orders').getFullList({
-          filter: adminPb.filter('user = {:userId}', { userId: record.id }),
-          sort: '-created',
-        });
-      } catch (fallbackErr) {
-        console.error('[getCustomerOrdersAction] Fallback query failed:', fallbackErr);
-        return { success: false, orders: [], error: 'Failed to load orders.' };
+    // Query orders from Supabase using parameter-safe separate equality lookups
+    const [custRes, shipRes, uidRes] = await Promise.all([
+      supabase.from('orders').select('*').eq('customer->>email', userEmail),
+      supabase.from('orders').select('*').eq('shipping_address->>email', userEmail),
+      supabase.from('orders').select('*').eq('customer->>userId', user.id),
+    ]);
+
+    if (custRes.error) throw custRes.error;
+    if (shipRes.error) throw shipRes.error;
+    if (uidRes.error) throw uidRes.error;
+
+    // Deduplicate records by order id
+    const orderMap = new Map<string, any>();
+    for (const rec of [...(custRes.data || []), ...(shipRes.data || []), ...(uidRes.data || [])]) {
+      if (rec && rec.id) {
+        orderMap.set(rec.id, rec);
       }
     }
 
-    return { success: true, orders: records };
+    const records = Array.from(orderMap.values()).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    const mappedOrders = records.map((row: any) => ({
+      id: row.id,
+      orderId: row.order_id,
+      customer: row.customer || {},
+      items: row.items || [],
+      shippingAddress: row.shipping_address || {},
+      paymentDetails: row.payment_details || {},
+      subtotal: row.subtotal,
+      shipping: row.shipping,
+      tax: row.tax,
+      total: row.total,
+      status: row.status,
+      isPaid: row.is_paid,
+      paidAt: row.paid_at || undefined,
+      isDelivered: row.is_delivered,
+      deliveredAt: row.delivered_at || undefined,
+      notes: row.notes || undefined,
+      created: row.created_at,
+      updated: row.updated_at,
+      collectionId: "orders",
+      collectionName: "orders",
+    }));
+
+    return { success: true, orders: mappedOrders };
   } catch (err: any) {
     console.error('[getCustomerOrdersAction] Failed:', err);
     return { success: false, orders: [], error: 'Failed to load orders.' };

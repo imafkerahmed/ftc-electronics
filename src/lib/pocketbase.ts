@@ -1,34 +1,57 @@
-import PocketBase, { BaseAuthStore } from 'pocketbase';
+import { supabase } from './supabase';
 
-const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
+export const pb: any = {
+  authStore: {
+    isValid: false,
+    model: null,
+    clear: () => {
+      supabase.auth.signOut().catch(() => null);
+    },
+  },
+  autoCancellation: () => {},
+  collection: (table: string) => ({
+    authWithPassword: async () => ({ token: '', record: null }),
+    authRefresh: async () => ({ token: '', record: null }),
+    getFullList: async () => {
+      const { data } = await supabase.from(table).select('*');
+      return data || [];
+    },
+    getList: async (page = 1, perPage = 50) => {
+      const from = (page - 1) * perPage;
+      const to = from + perPage - 1;
+      const { data, count } = await supabase.from(table).select('*', { count: 'exact' }).range(from, to);
+      return { items: data || [], totalItems: count || 0, totalPages: Math.ceil((count || 0) / perPage) };
+    },
+    getOne: async (id: string) => {
+      const { data } = await supabase.from(table).select('*').eq('id', id).maybeSingle();
+      return data;
+    },
+    getFirstListItem: async () => {
+      const { data } = await supabase.from(table).select('*').limit(1).maybeSingle();
+      return data;
+    },
+    create: async (data: any) => {
+      const { data: res } = await supabase.from(table).insert(data).select().single();
+      return res;
+    },
+    update: async (id: string, data: any) => {
+      const { data: res } = await supabase.from(table).update(data).eq('id', id).select().single();
+      return res;
+    },
+    delete: async (id: string) => {
+      const { error } = await supabase.from(table).delete().eq('id', id);
+      return !error;
+    },
+  }),
+  filter: (): never => {
+    throw new Error('[pocketbase-compat] pb.filter() is not supported. Use native Supabase queries instead.');
+  },
+};
 
-if (!pbUrl) {
-  throw new Error('NEXT_PUBLIC_POCKETBASE_URL is not set in the environment variables.');
-}
-
-/**
- * Reusable OWASP-Compliant PocketBase Client Instance.
- * - Enforces in-memory AuthStore (BaseAuthStore) on the client side.
- * - Prevents sensitive auth tokens from being saved to localStorage (protecting against XSS token theft).
- * - Automatically purges legacy localStorage tokens on client initialization.
- */
-if (typeof window !== 'undefined') {
-  try {
-    window.localStorage.removeItem('pocketbase_auth');
-  } catch {
-    // Ignore storage access errors
-  }
-}
-
-export const pb = new PocketBase(pbUrl, new BaseAuthStore());
-pb.autoCancellation(false);
-
-// Optional: Helper to check if a user is currently logged in
 export function isUserAuthenticated(): boolean {
-  return pb.authStore.isValid;
+  return false;
 }
 
-// Optional: Helper to get current authenticated user data
 export function getCurrentUser() {
-  return pb.authStore.model;
+  return null;
 }

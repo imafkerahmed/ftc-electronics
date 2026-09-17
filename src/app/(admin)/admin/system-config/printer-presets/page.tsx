@@ -785,10 +785,6 @@ function InvoicePresetEditor({
           <p className="text-[10px] font-bold text-foreground/40 uppercase tracking-widest">Bank Details & Terms</p>
           <div className="space-y-2">
             <div className="space-y-1">
-              <label className="text-[10px] text-muted-foreground font-medium">Bank Transfer Info</label>
-              <Input value={cfg.bankDetailsText} onChange={(e) => set('bankDetailsText', e.target.value)} placeholder="Bank: Commercial Bank | Account: 1000293847" className="h-8 text-xs" />
-            </div>
-            <div className="space-y-1">
               <label className="text-[10px] text-muted-foreground font-medium">Terms & Conditions / Validity Notes</label>
               <textarea
                 value={cfg.termsAndConditions}

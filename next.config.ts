@@ -11,6 +11,14 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
+        hostname: 'supa-ftc.codix.site',
+      },
+      {
+        protocol: 'https',
+        hostname: '*.supabase.co',
+      },
+      {
+        protocol: 'https',
         hostname: 'images.unsplash.com',
       },
       {

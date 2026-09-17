@@ -563,16 +563,14 @@ export function getPbFileUrl(
     filename.startsWith("http://") ||
     filename.startsWith("https://") ||
     filename.startsWith("data:") ||
-    filename.startsWith("/")
+    (filename.startsWith("/") && !filename.startsWith("//"))
   ) {
     return filename;
   }
-  const rawBase = process.env.NEXT_PUBLIC_POCKETBASE_URL || "https://ftc-db.codix.site";
-  const base = rawBase.replace(/\/+$/, "");
-  const collection = record?.collectionId || record?.collectionName || "products";
-  const recId = record?.id || "";
-  if (!recId) return fallback;
-  return `${base}/api/files/${collection}/${recId}/${filename}`;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  if (!supabaseUrl) return fallback;
+  const encodedPath = filename.split("/").map(encodeURIComponent).join("/");
+  return `${supabaseUrl}/storage/v1/object/public/ftc-media/${encodedPath}`;
 }
 
 /**
@@ -599,12 +597,7 @@ export function pbProductToProduct(record: PBProduct, pbUrl: string): Product {
     price: record.price,
     discountPrice: record.discountPrice || undefined,
     wholesalePrice: record.wholesalePrice || record.wholesale_price || undefined,
-    images:
-      imageUrls.length > 0
-        ? imageUrls
-        : [
-            "https://images.unsplash.com/photo-1531403009284-440f080d1e12?q=80&w=600&auto=format&fit=crop",
-          ],
+    images: imageUrls,
     category: record.expand?.category?.name || record.category,
     brand: record.expand?.brand?.name || record.brand,
     specs: record.specs || {},
@@ -671,6 +664,8 @@ export interface PBQuotation extends PBRecord {
   subtotal: number;
   tax_amount?: number;
   discount_amount?: number;
+  discount_type?: 'flat' | 'percent';
+  discount_value?: number;
   total_amount: number;
   valid_until: string;
   status: "draft" | "sent" | "accepted" | "rejected" | "expired";
@@ -703,4 +698,41 @@ export interface DealerSaleRecord {
   discount?: number;
   total?: number;
   items?: DealerSaleItem[];
+}
+
+// ─── Stock Purchases & Management ─────────────────────────────────────────────
+export interface PBStockPurchase extends Partial<PBRecord> {
+  id: string;
+  created?: string;
+  updated?: string;
+  created_at?: string;
+  updated_at?: string;
+  product_id?: string;
+  batch_number?: string;
+  batchNumber?: string;
+  quantity: number;
+  unit_cost?: number;
+  unitCost?: number;
+  supplier?: string;
+  purchase_date?: string;
+  purchaseDate?: string;
+  notes?: string;
+}
+
+export type StockUnitStatus = 'available' | 'reserved' | 'sold' | 'defective' | 'returned';
+
+export interface PBStockManagementUnit extends Partial<PBRecord> {
+  id: string;
+  created?: string;
+  updated?: string;
+  created_at?: string;
+  updated_at?: string;
+  product_id?: string;
+  barcode: string;
+  serial_number?: string;
+  serialNumber?: string;
+  batch_number?: string;
+  batchNumber?: string;
+  status: StockUnitStatus;
+  notes?: string;
 }

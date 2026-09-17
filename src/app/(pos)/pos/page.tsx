@@ -8,7 +8,7 @@ import {
   clearPosSession,
   isPosSessionValid,
 } from "@/lib/pos-session";
-import { pbSiteSettings } from "@/lib/pb-collections";
+import { pbSiteSettings } from "@/lib/supabase-collections";
 import EmployeeLockScreen from "./employee-lock-screen";
 import PosScanTerminal from "@/components/pos/pos-scan-terminal";
 import PosCart from "@/components/pos/pos-cart";
@@ -39,7 +39,6 @@ export default function PosPage() {
   const [currency, setCurrency] = useState("LKR");
   const [showPayment, setShowPayment] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
 
   // Coupon states
   const [couponCode, setCouponCode] = useState("");
@@ -274,7 +273,6 @@ export default function PosPage() {
     } catch {
       /* ignore */
     }
-    setRefreshKey((k) => k + 1);
   };
 
   const billData = (() => {
@@ -377,7 +375,6 @@ export default function PosPage() {
           <PosScanTerminal
             onAddToCart={handleAddToCart}
             cartItems={cart}
-            refreshTrigger={refreshKey}
             currency={currency}
           />
         </div>
@@ -444,7 +441,6 @@ export default function PosPage() {
           onSuccess={() => {
             setShowPayment(false);
             handleClearCart();
-            setRefreshKey((k) => k + 1);
           }}
         />
       )}

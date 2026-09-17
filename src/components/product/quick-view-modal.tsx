@@ -5,7 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { X, Star, ArrowRight } from 'lucide-react';
 import { Product } from '@/types/product';
-import { formatPrice } from '@/lib/utils';
+import { formatPrice, getProductThumbnail } from '@/lib/utils';
 import AddToCartButton from '@/components/product/add-to-cart-button';
 import WhatsAppOrderButton from '@/components/product/whatsapp-order-button';
 
@@ -64,31 +64,44 @@ export default function QuickViewModal({ product, isOpen, onClose }: QuickViewMo
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
           {/* Gallery Column */}
           <div className="space-y-4">
-            <div className="relative aspect-square w-full overflow-hidden rounded-2xl bg-neutral-900/50 border border-border/80">
-              <Image
-                src={selectedImage || product.images[0]}
-                alt={product.name}
-                fill
-                className="object-cover object-center"
-              />
+            <div className="relative aspect-square w-full overflow-hidden rounded-2xl bg-neutral-900/50 border border-border/80 flex items-center justify-center">
+              {(() => {
+                const activeSrc = getProductThumbnail(selectedImageOverride || product.images);
+                return activeSrc ? (
+                  <Image
+                    src={activeSrc}
+                    alt={product.name}
+                    fill
+                    className="object-cover object-center"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-muted-foreground">
+                    <span className="text-xs uppercase tracking-wider font-semibold opacity-50">No Image Available</span>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Thumbnail Strip */}
-            {product.images.length > 1 && (
+            {Array.isArray(product.images) && product.images.length > 1 && (
               <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-                {product.images.map((img, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => setSelectedImageOverride(img)}
-                    className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border transition-all ${
-                      selectedImage === img
-                        ? 'border-blue-500 ring-2 ring-blue-500/30'
-                        : 'border-border/80 opacity-70 hover:opacity-100'
-                    }`}
-                  >
-                    <Image src={img} alt={`Thumbnail ${idx + 1}`} fill className="object-cover" />
-                  </button>
-                ))}
+                {product.images.map((img, idx) => {
+                  const thumbSrc = getProductThumbnail(img);
+                  if (!thumbSrc) return null;
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => setSelectedImageOverride(img)}
+                      className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border transition-all ${
+                        selectedImage === img
+                          ? 'border-blue-500 ring-2 ring-blue-500/30'
+                          : 'border-border/80 opacity-70 hover:opacity-100'
+                      }`}
+                    >
+                      <Image src={thumbSrc} alt={`Thumbnail ${idx + 1}`} fill className="object-cover" />
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>

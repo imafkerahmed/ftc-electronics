@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { pbSiteSettings } from '@/lib/supabase-collections';
 
 /**
  * Email Service Helper
@@ -301,6 +302,70 @@ export interface ShippingAddressObject {
   country?: string;
 }
 
+export interface BankDetails {
+  bankName: string;
+  accountName: string;
+  accountNo: string;
+  branch: string;
+  branchCode: string;
+}
+
+export const DEFAULT_BANK_DETAILS: BankDetails = {
+  bankName: '',
+  accountName: '',
+  accountNo: '',
+  branch: '',
+  branchCode: '',
+};
+
+export interface EmailItemRow {
+  name: string;
+  qty: number;
+  unitPrice: number;
+  discount?: number;
+}
+
+export function formatShippingAddress(shippingAddress: string | ShippingAddressObject | null | undefined): string {
+  if (!shippingAddress) return '';
+  if (typeof shippingAddress === 'string') {
+    return escapeHtml(shippingAddress);
+  }
+  if (typeof shippingAddress === 'object') {
+    const parts = [
+      shippingAddress.addressLine1,
+      shippingAddress.addressLine2,
+      shippingAddress.address,
+      shippingAddress.city,
+      shippingAddress.state,
+      shippingAddress.postalCode,
+      shippingAddress.country,
+    ];
+    return parts
+      .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
+      .map((p) => escapeHtml(p.trim()))
+      .join(', ');
+  }
+  return '';
+}
+
+export function renderItemRows(items: EmailItemRow[], currency: string = 'Rs.'): string {
+  return items.map((item) => {
+    const unitPrice = item.unitPrice || 0;
+    const qty = item.qty || 1;
+    const discount = item.discount || 0;
+    const total = (unitPrice * qty) - discount;
+    return `
+      <tr>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: left; font-size: 14px; color: #18181b;">${escapeHtml(item.name || 'Item')}</td>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: center; font-size: 14px; color: #52525b;">${qty}</td>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; color: #52525b;">${currency} ${unitPrice.toLocaleString('en-LK')}</td>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; color: #52525b;">${discount > 0 ? `-${currency} ${discount.toLocaleString('en-LK')}` : '—'}</td>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; font-weight: 600; color: #18181b;">${currency} ${total.toLocaleString('en-LK')}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
 interface SendQuotationEmailParams {
   to: string;
   quoteNumber: string;
@@ -499,23 +564,7 @@ export async function sendOrderInvoiceEmail(params: SendOrderInvoiceEmailParams)
   const safeTo = escapeHtml(params.to);
   const safeOrderNumber = escapeHtml(params.orderNumber);
   const safeCustomerName = escapeHtml(params.customerName);
-  
-  let formattedAddress = '';
-  if (typeof params.shippingAddress === 'string') {
-    formattedAddress = escapeHtml(params.shippingAddress);
-  } else if (params.shippingAddress && typeof params.shippingAddress === 'object') {
-    const addr = params.shippingAddress;
-    const parts = [];
-    if (addr.addressLine1) parts.push(addr.addressLine1);
-    if (addr.addressLine2) parts.push(addr.addressLine2);
-    if (addr.address) parts.push(addr.address);
-    if (addr.city) parts.push(addr.city);
-    if (addr.state) parts.push(addr.state);
-    if (addr.postalCode) parts.push(addr.postalCode);
-    if (addr.country) parts.push(addr.country);
-    
-    formattedAddress = parts.filter(Boolean).map(escapeHtml).join(', ');
-  }
+  const formattedAddress = formatShippingAddress(params.shippingAddress);
 
   const rawStoreName = params.storeName || 'FTC Electronics';
   const safeStoreName = escapeHtml(rawStoreName);
@@ -525,22 +574,7 @@ export async function sendOrderInvoiceEmail(params: SendOrderInvoiceEmailParams)
   const safePaymentMethod = escapeHtml(params.paymentMethod || 'Paid');
 
   const currency = 'Rs.';
-
-  const itemsHtml = params.items.map((item) => {
-    const unitPrice = item.unitPrice || 0;
-    const qty = item.qty || 1;
-    const discount = item.discount || 0;
-    const total = (unitPrice * qty) - discount;
-    return `
-      <tr>
-        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: left; font-size: 14px; color: #18181b;">${escapeHtml(item.name || 'Item')}</td>
-        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: center; font-size: 14px; color: #52525b;">${qty}</td>
-        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; color: #52525b;">${currency} ${unitPrice.toLocaleString('en-LK')}</td>
-        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; color: #52525b;">${discount > 0 ? `-${currency} ${discount.toLocaleString('en-LK')}` : '—'}</td>
-        <td style="padding: 10px 0; border-bottom: 1px solid #f4f4f5; text-align: right; font-size: 14px; font-weight: 600; color: #18181b;">${currency} ${total.toLocaleString('en-LK')}</td>
-      </tr>
-    `;
-  }).join('');
+  const itemsHtml = renderItemRows(params.items, currency);
 
   return sendEmail({
     to: params.to,
@@ -646,6 +680,328 @@ export async function sendOrderInvoiceEmail(params: SendOrderInvoiceEmailParams)
     },
     devFallbackMessage: `Order Invoice #${params.orderNumber} to ${params.to} for amount ${currency} ${params.totalAmount.toLocaleString('en-LK')}`,
     prodErrorMessage: 'Failed to send order invoice email.',
+  });
+}
+
+export interface SendBankTransferEmailParams {
+  to: string;
+  orderNumber: string;
+  customerName: string;
+  shippingAddress: string | ShippingAddressObject | null | undefined;
+  items: Array<{ name: string; qty: number; unitPrice: number; discount?: number }>;
+  totalAmount: number;
+  uploadSlipUrl: string;
+  storeName?: string;
+  storePhone?: string;
+  storeEmail?: string;
+  storeAddress?: string;
+}
+
+export async function sendBankTransferInstructionsEmail(params: SendBankTransferEmailParams): Promise<{ success: boolean; error?: string }> {
+  const safeTo = escapeHtml(params.to);
+  const safeOrderNumber = escapeHtml(params.orderNumber);
+  const safeCustomerName = escapeHtml(params.customerName);
+  const safeUploadSlipUrl = escapeHtml(encodeURI(params.uploadSlipUrl));
+  const formattedAddress = formatShippingAddress(params.shippingAddress);
+
+  const rawStoreName = params.storeName || 'FTC Electronics';
+  const safeStoreName = escapeHtml(rawStoreName);
+  const safeStorePhone = params.storePhone ? escapeHtml(params.storePhone) : '';
+  const safeStoreEmail = params.storeEmail ? escapeHtml(params.storeEmail) : '';
+  const safeStoreAddress = params.storeAddress ? escapeHtml(params.storeAddress) : '';
+
+  const settings = await pbSiteSettings.get<{ bankDetails?: Partial<BankDetails> }>('general').catch(() => null);
+  const bankDetails: BankDetails = {
+    ...DEFAULT_BANK_DETAILS,
+    ...(settings?.bankDetails ?? {}),
+  };
+  const hasValidBankDetails = Boolean(bankDetails.bankName.trim() && bankDetails.accountNo.trim());
+
+  const currency = 'Rs.';
+  const itemsHtml = renderItemRows(params.items, currency);
+
+  return sendEmail({
+    to: params.to,
+    subject: `[Action Required] Bank Transfer Instructions - Order #${params.orderNumber}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 40px 20px; }
+            .card { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e4e4e7; padding: 40px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+            .header-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+            .brand { font-size: 22px; font-weight: 900; color: #09090b; letter-spacing: -0.5px; }
+            .brand-sub { font-size: 13px; color: #71717a; margin-top: 4px; line-height: 1.4; }
+            .doc-type { font-size: 18px; font-weight: 800; color: #d97706; text-align: right; text-transform: uppercase; letter-spacing: 0.5px; }
+            .doc-meta { font-size: 13px; color: #71717a; text-align: right; margin-top: 4px; font-family: monospace; }
+            .bank-box { background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 20px; margin: 24px 0; }
+            .bank-title { font-weight: 800; font-size: 15px; color: #1e40af; margin-bottom: 10px; }
+            .bank-details { font-size: 13px; color: #1e3a8a; line-height: 1.8; }
+            .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #a1a1aa; letter-spacing: 1px; margin-bottom: 8px; border-bottom: 1px solid #f4f4f5; padding-bottom: 6px; }
+            .client-info { font-size: 14px; color: #18181b; line-height: 1.5; margin-bottom: 30px; }
+            .client-name { font-weight: 700; }
+            .items-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+            .items-table th { padding: 10px 0; border-bottom: 2px solid #e4e4e7; color: #71717a; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+            .totals-table { width: 240px; float: right; border-collapse: collapse; margin-bottom: 30px; }
+            .totals-table td { padding: 6px 0; font-size: 14px; color: #52525b; }
+            .grand-row td { font-size: 16px; font-weight: 900; color: #09090b; padding-top: 12px; border-top: 2px solid #e4e4e7; }
+            .button { display: inline-block; background-color: #2563eb; color: #ffffff !important; text-decoration: none; padding: 14px 28px; border-radius: 8px; font-size: 15px; font-weight: 700; box-shadow: 0 4px 12px rgba(37,99,235,0.25); }
+            .footer { margin-top: 40px; font-size: 12px; color: #a1a1aa; text-align: center; border-top: 1px solid #f4f4f5; padding-top: 20px; line-height: 1.5; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <!-- Header Table -->
+            <table class="header-table">
+              <tr>
+                <td style="vertical-align: top;">
+                  <div class="brand">${safeStoreName}</div>
+                  ${safeStoreAddress ? `<div class="brand-sub">${safeStoreAddress}</div>` : ''}
+                  ${safeStorePhone ? `<div class="brand-sub">Tel: ${safeStorePhone}</div>` : ''}
+                  ${safeStoreEmail ? `<div class="brand-sub">Email: ${safeStoreEmail}</div>` : ''}
+                </td>
+                <td style="vertical-align: top; text-align: right;">
+                  <div class="doc-type">Bank Transfer Needed</div>
+                  <div class="doc-meta">#${safeOrderNumber}</div>
+                  <div class="doc-meta" style="margin-top: 2px;">Date: ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                </td>
+              </tr>
+            </table>
+
+            <p style="font-size: 15px; color: #18181b; line-height: 1.6; margin-bottom: 20px;">
+              Hello <strong>${safeCustomerName}</strong>,<br/>
+              Thank you for placing order <strong>#${safeOrderNumber}</strong>. Please complete your bank transfer using the bank details below and upload your deposit slip using the direct link provided.
+            </p>
+
+            <!-- Bank Details Box -->
+            <div class="bank-box">
+              <div class="bank-title">🏦 Bank Transfer Account Details</div>
+              <div class="bank-details">
+                ${hasValidBankDetails ? `
+                  <strong>Bank:</strong> ${escapeHtml(bankDetails.bankName)}<br/>
+                  ${bankDetails.accountName ? `<strong>Account Name:</strong> ${escapeHtml(bankDetails.accountName)}<br/>` : ''}
+                  <strong>Account No.:</strong> ${escapeHtml(bankDetails.accountNo)}<br/>
+                  ${bankDetails.branch ? `<strong>Branch:</strong> ${escapeHtml(bankDetails.branch)}<br/>` : ''}
+                  ${bankDetails.branchCode ? `<strong>Branch Code:</strong> ${escapeHtml(bankDetails.branchCode)}<br/>` : ''}
+                ` : `
+                  <em>Bank account details are pending configuration. Please contact store support for transfer instructions.</em><br/>
+                `}
+                <br/>
+                <strong>Reference Note:</strong> ${safeOrderNumber}
+              </div>
+            </div>
+
+            <!-- Upload Slip Button -->
+            <div style="text-align: center; margin: 32px 0;">
+              <a href="${safeUploadSlipUrl}" class="button" target="_blank">
+                📤 Upload Payment Slip Now
+              </a>
+              <p style="font-size: 12px; color: #71717a; margin-top: 10px;">Please upload your slip within 24 hours to confirm your order.</p>
+            </div>
+
+            <!-- Customer Details -->
+            <div class="section-title">Shipping To</div>
+            <div class="client-info">
+              <div class="client-name">${safeCustomerName}</div>
+              ${formattedAddress ? `<div style="margin-top: 4px;">${formattedAddress}</div>` : ''}
+            </div>
+
+            <!-- Items Table -->
+            <div class="section-title">Order Items</div>
+            <table class="items-table">
+              <thead>
+                <tr>
+                  <th style="text-align: left;">Item Description</th>
+                  <th style="text-align: center; width: 60px;">Qty</th>
+                  <th style="text-align: right; width: 100px;">Price</th>
+                  <th style="text-align: right; width: 80px;">Disc</th>
+                  <th style="text-align: right; width: 110px;">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itemsHtml}
+              </tbody>
+            </table>
+
+            <!-- Totals -->
+            <table class="totals-table">
+              <tr class="grand-row">
+                <td>Total Amount</td>
+                <td style="text-align: right;">${currency} ${params.totalAmount.toLocaleString('en-LK')}</td>
+              </tr>
+            </table>
+
+            <div style="clear: both;"></div>
+
+            <!-- Footer -->
+            <div class="footer">
+              <p>If the button above doesn't work, copy and paste this link into your browser:</p>
+              <p style="word-break: break-all; color: #2563eb;">${safeUploadSlipUrl}</p>
+              <p>© ${new Date().getFullYear()} ${safeStoreName}. All rights reserved.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `,
+    devLog: () => {
+      console.log('\n==================================================');
+      console.log(`[DEV MAIL SENDER] Bank Transfer Email sent for: ${params.to}`);
+      console.log(`[DEV MAIL SENDER] Order: #${params.orderNumber} | Slip URL: ${params.uploadSlipUrl}`);
+      console.log('==================================================\n');
+    },
+    devFallbackMessage: `Bank Transfer Email #${params.orderNumber} to ${params.to}`,
+    prodErrorMessage: 'Failed to send bank transfer instructions email.',
+  });
+}
+
+export interface SendCashOrderEmailParams {
+  to: string;
+  orderNumber: string;
+  customerName: string;
+  shippingAddress: string | ShippingAddressObject | null | undefined;
+  items: Array<{ name: string; qty: number; unitPrice: number; discount?: number }>;
+  totalAmount: number;
+  paymentMethod: 'cash_pickup' | 'cash_delivery' | string;
+  storeName?: string;
+  storePhone?: string;
+  storeEmail?: string;
+  storeAddress?: string;
+}
+
+export async function sendCashOrderEmail(params: SendCashOrderEmailParams): Promise<{ success: boolean; error?: string }> {
+  const safeTo = escapeHtml(params.to);
+  const safeOrderNumber = escapeHtml(params.orderNumber);
+  const safeCustomerName = escapeHtml(params.customerName);
+  const isPickup = params.paymentMethod === 'cash_pickup';
+  const methodTitle = isPickup ? 'Cash on Pickup' : 'Cash on Delivery';
+  const formattedAddress = formatShippingAddress(params.shippingAddress);
+
+  const rawStoreName = params.storeName || 'FTC Electronics';
+  const safeStoreName = escapeHtml(rawStoreName);
+  const safeStorePhone = params.storePhone ? escapeHtml(params.storePhone) : '';
+  const safeStoreEmail = params.storeEmail ? escapeHtml(params.storeEmail) : '';
+  const safeStoreAddress = params.storeAddress ? escapeHtml(params.storeAddress) : '';
+
+  const currency = 'Rs.';
+  const itemsHtml = renderItemRows(params.items, currency);
+
+  return sendEmail({
+    to: params.to,
+    subject: `Order Confirmed #${params.orderNumber} - ${methodTitle}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 40px 20px; }
+            .card { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e4e4e7; padding: 40px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+            .header-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+            .brand { font-size: 22px; font-weight: 900; color: #09090b; letter-spacing: -0.5px; }
+            .brand-sub { font-size: 13px; color: #71717a; margin-top: 4px; line-height: 1.4; }
+            .doc-type { font-size: 18px; font-weight: 800; color: #2563eb; text-align: right; text-transform: uppercase; letter-spacing: 0.5px; }
+            .doc-meta { font-size: 13px; color: #71717a; text-align: right; margin-top: 4px; font-family: monospace; }
+            .info-box { background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px; padding: 20px; margin: 24px 0; }
+            .info-title { font-weight: 800; font-size: 15px; color: #166534; margin-bottom: 6px; }
+            .info-desc { font-size: 13px; color: #14532d; line-height: 1.6; }
+            .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #a1a1aa; letter-spacing: 1px; margin-bottom: 8px; border-bottom: 1px solid #f4f4f5; padding-bottom: 6px; }
+            .client-info { font-size: 14px; color: #18181b; line-height: 1.5; margin-bottom: 30px; }
+            .client-name { font-weight: 700; }
+            .items-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+            .items-table th { padding: 10px 0; border-bottom: 2px solid #e4e4e7; color: #71717a; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+            .totals-table { width: 240px; float: right; border-collapse: collapse; margin-bottom: 30px; }
+            .totals-table td { padding: 6px 0; font-size: 14px; color: #52525b; }
+            .grand-row td { font-size: 16px; font-weight: 900; color: #09090b; padding-top: 12px; border-top: 2px solid #e4e4e7; }
+            .footer { margin-top: 40px; font-size: 12px; color: #a1a1aa; text-align: center; border-top: 1px solid #f4f4f5; padding-top: 20px; line-height: 1.5; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <!-- Header Table -->
+            <table class="header-table">
+              <tr>
+                <td style="vertical-align: top;">
+                  <div class="brand">${safeStoreName}</div>
+                  ${safeStoreAddress ? `<div class="brand-sub">${safeStoreAddress}</div>` : ''}
+                  ${safeStorePhone ? `<div class="brand-sub">Tel: ${safeStorePhone}</div>` : ''}
+                  ${safeStoreEmail ? `<div class="brand-sub">Email: ${safeStoreEmail}</div>` : ''}
+                </td>
+                <td style="vertical-align: top; text-align: right;">
+                  <div class="doc-type">${methodTitle}</div>
+                  <div class="doc-meta">#${safeOrderNumber}</div>
+                  <div class="doc-meta" style="margin-top: 2px;">Date: ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                </td>
+              </tr>
+            </table>
+
+            <p style="font-size: 15px; color: #18181b; line-height: 1.6; margin-bottom: 20px;">
+              Hello <strong>${safeCustomerName}</strong>,<br/>
+              Your order <strong>#${safeOrderNumber}</strong> has been received and is being processed for ${isPickup ? 'Store Pickup' : 'Cash on Delivery'}.
+            </p>
+
+            <div class="info-box">
+              <div class="info-title">📦 ${isPickup ? 'Store Pickup Instructions' : 'Cash on Delivery Instructions'}</div>
+              <div class="info-desc">
+                ${isPickup
+                  ? `Please visit our store at ${safeStoreAddress || 'FTC Electronics Main Store'} with exact cash amount of <strong>${currency} ${params.totalAmount.toLocaleString('en-LK')}</strong> and present your Order ID #${safeOrderNumber}.`
+                  : `Please prepare exact cash amount of <strong>${currency} ${params.totalAmount.toLocaleString('en-LK')}</strong> for our delivery agent upon receiving your order package.`
+                }
+              </div>
+            </div>
+
+            <!-- Customer Details -->
+            <div class="section-title">${isPickup ? 'Customer Details' : 'Shipping To'}</div>
+            <div class="client-info">
+              <div class="client-name">${safeCustomerName}</div>
+              ${formattedAddress ? `<div style="margin-top: 4px;">${formattedAddress}</div>` : ''}
+            </div>
+
+            <!-- Items Table -->
+            <div class="section-title">Order Items</div>
+            <table class="items-table">
+              <thead>
+                <tr>
+                  <th style="text-align: left;">Item Description</th>
+                  <th style="text-align: center; width: 60px;">Qty</th>
+                  <th style="text-align: right; width: 100px;">Price</th>
+                  <th style="text-align: right; width: 80px;">Disc</th>
+                  <th style="text-align: right; width: 110px;">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itemsHtml}
+              </tbody>
+            </table>
+
+            <!-- Totals -->
+            <table class="totals-table">
+              <tr class="grand-row">
+                <td>Total Payable</td>
+                <td style="text-align: right;">${currency} ${params.totalAmount.toLocaleString('en-LK')}</td>
+              </tr>
+            </table>
+
+            <div style="clear: both;"></div>
+
+            <!-- Footer -->
+            <div class="footer">
+              <p>Thank you for shopping with ${safeStoreName}!</p>
+              <p>© ${new Date().getFullYear()} ${safeStoreName}. All rights reserved.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `,
+    devLog: () => {
+      console.log('\n==================================================');
+      console.log(`[DEV MAIL SENDER] Cash Order Email sent for: ${params.to}`);
+      console.log(`[DEV MAIL SENDER] Order: #${params.orderNumber} | Method: ${params.paymentMethod}`);
+      console.log('==================================================\n');
+    },
+    devFallbackMessage: `Cash Order #${params.orderNumber} to ${params.to}`,
+    prodErrorMessage: 'Failed to send cash order email.',
   });
 }
 

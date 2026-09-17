@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { MapPin, Phone, Mail, Clock, ExternalLink, MessageCircle } from "lucide-react";
 import { motion } from "motion/react";
-import { pbSiteSettings } from "@/lib/pb-collections";
+import { pbSiteSettings } from "@/lib/supabase-collections";
 
 interface SiteGeneralSettings {
   location?: {
@@ -131,7 +131,9 @@ export default function LocationMap({ settings: propSettings }: LocationMapProps
       const parsed = new URL(trimmed);
       const allowedHosts = ["www.google.com", "google.com", "maps.google.com"];
       if (parsed.protocol === "https:" && allowedHosts.includes(parsed.hostname)) {
-        return parsed.toString();
+        if (parsed.pathname.includes('/embed') || parsed.searchParams.get('output') === 'embed') {
+          return parsed.toString();
+        }
       }
     } catch {
       // invalid URL — use fallback below

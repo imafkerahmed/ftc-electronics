@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { LenisProvider } from "@/components/layout/lenis-provider";
 import { SiteBrandingProvider } from "@/components/providers/site-branding-provider";
 import { FramerMotionConfigProvider } from "@/components/providers/framer-motion-config-provider";
+import { QueryProvider } from "@/components/providers/query-provider";
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
 
@@ -26,6 +27,8 @@ export const metadata: Metadata = {
   description: "Official online store for FTC Electronics.",
 };
 
+import { AuthListener } from "@/components/auth/auth-listener";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -42,13 +45,16 @@ export default function RootLayout({
         <link rel="dns-prefetch" href="https://ftc-db.codix.site" />
       </head>
       <body className="min-h-full flex flex-col">
-        <SiteBrandingProvider>
-          <FramerMotionConfigProvider>
-            <LenisProvider>
-              {children}
-            </LenisProvider>
-          </FramerMotionConfigProvider>
-        </SiteBrandingProvider>
+        <QueryProvider>
+          <SiteBrandingProvider>
+            <FramerMotionConfigProvider>
+              <LenisProvider>
+                <AuthListener />
+                {children}
+              </LenisProvider>
+            </FramerMotionConfigProvider>
+          </SiteBrandingProvider>
+        </QueryProvider>
       </body>
     </html>
   );

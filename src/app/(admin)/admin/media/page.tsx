@@ -4,9 +4,9 @@ import React, { useState, useEffect, useTransition } from 'react';
 import { Image as ImageIcon, Upload, Search, Trash2, Eye, FolderPlus, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { getPbUrl } from '@/lib/pb-admin';
+import { getSupabaseUrl } from '@/lib/supabase-admin';
 import { uploadMediaAction, deleteMediaAction } from '@/app/actions/admin';
-import PocketBase from 'pocketbase';
+import { supabase } from '@/lib/supabase';
 
 interface MediaItem {
   id: string;
@@ -32,20 +32,17 @@ export default function AdminMediaLibraryPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const { pb } = await import('@/lib/pocketbase');
-      
       let records: any[] = [];
       try {
-        records = await pb.collection('media').getFullList({
-          sort: '-created',
-        });
+        const { data } = await supabase.from('media').select('*').order('created_at', { ascending: false });
+        records = data || [];
       } catch (err) {
         console.warn('Media collection empty or not created yet:', err);
       }
 
       setMedia(records.map((r: any) => ({
         id: r.id,
-        url: `${getPbUrl()}/api/files/${r.collectionId}/${r.id}/${r.file}`,
+        url: r.url || r.file || '',
         name: r.filename || r.file || 'Unnamed Asset',
         size: r.sizeBytes ? `${Math.round(r.sizeBytes / 1024)} KB` : 'N/A',
         type: r.mimeType || 'image/jpeg',

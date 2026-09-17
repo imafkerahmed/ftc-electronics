@@ -45,7 +45,8 @@ import { printInvoice, resolveInvoiceConfig, type InvoiceData, type InvoiceItem 
 import type { PBWholesaleDealer, PBQuotation } from '@/types/admin';
 import type { PaymentMethod } from '@/types/pos';
 import type { Product } from '@/types/product';
-import { pbProducts } from '@/lib/pb-collections';
+import { pbProducts, sanitizeImageUrl } from '@/lib/supabase-collections';
+import { supabase } from '@/lib/supabase';
 
 interface CustomerOption {
   id: string;
@@ -71,6 +72,8 @@ interface Quotation {
   subtotal: number;
   taxAmount: number;
   discountAmount: number;
+  discountType?: 'flat' | 'percent';
+  discountValue?: number;
   totalAmount: number;
   notes: string;
   status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
@@ -112,6 +115,7 @@ export default function AdminQuotationsPage() {
   const [selectedDealerId, setSelectedDealerId] = useState<string>('');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
   const [createIfNew, setCreateIfNew] = useState(false);
+  const [formStep, setFormStep] = useState<1 | 2>(1);
 
   const [custName, setCustName] = useState('');
   const [custCompany, setCustCompany] = useState('');
@@ -121,8 +125,10 @@ export default function AdminQuotationsPage() {
   const [validDays, setValidDays] = useState(14);
   const [notes, setNotes] = useState('Quotation valid for 14 days from issue date. Prices subject to stock availability.');
   const [lineItems, setLineItems] = useState<InvoiceItem[]>([
-    { name: '', qty: 1, unitPrice: 0, discount: 0 },
+    { name: '', qty: 1, unitPrice: 0 },
   ]);
+  const [globalDiscount, setGlobalDiscount] = useState<number>(0);
+  const [globalDiscountType, setGlobalDiscountType] = useState<'flat' | 'percent'>('flat');
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [focusedLineItemIndex, setFocusedLineItemIndex] = useState<number | null>(null);
   const [activeSuggestionIdx, setActiveSuggestionIdx] = useState<number>(-1);
@@ -149,15 +155,40 @@ export default function AdminQuotationsPage() {
         getQuotationsAction().catch(() => ({ success: false, data: [] })),
         getWholesaleDealersAction().catch(() => ({ success: false, data: [] })),
         searchPosCustomersAction('').catch(() => ({ success: false, data: [] })),
-        pbProducts.getAll({ perPage: 300, status: 'published' }).catch(() => ({ items: [] })),
+        fetch('/api/pos/products')
+          .then(async (res) => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            return data && Array.isArray(data.products) ? data : { products: [] };
+          })
+          .catch((err) => {
+            console.warn('[loadInitialData] Could not load POS product suggestions:', err);
+            return { products: [] };
+          }),
       ]);
 
-      if (pRes && pRes.items) {
-        setAllProducts(pRes.items);
+      if (pRes && pRes.products) {
+        setAllProducts(pRes.products.map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          slug: p.sku,
+          price: p.price,
+          discountPrice: p.price,
+          wholesalePrice: p.wholesalePrice,
+          images: p.imageUrl ? [p.imageUrl] : [],
+          description: '',
+          category: p.category || '',
+          brand: '',
+          specs: {},
+          rating: 0,
+          numReviews: 0,
+          countInStock: p.countInStock || 0,
+          createdAt: ''
+        })) as Product[]);
       }
 
       if (qRes.success && qRes.data) {
-        const formatted = (qRes.data as PBQuotation[]).map((q) => ({
+        const formatted: Quotation[] = (qRes.data as PBQuotation[]).map((q) => ({
           id: q.id,
           quoteNumber: q.quote_number,
           quoteType: (q.quote_type as 'wholesale' | 'direct') || (q.customer_company ? 'wholesale' : 'direct'),
@@ -174,6 +205,8 @@ export default function AdminQuotationsPage() {
           subtotal: q.subtotal || 0,
           taxAmount: q.tax_amount || 0,
           discountAmount: q.discount_amount || 0,
+          discountType: (q.discount_type as 'flat' | 'percent') || 'flat',
+          discountValue: q.discount_value !== undefined ? q.discount_value : (q.discount_amount || 0),
           totalAmount: q.total_amount || 0,
           notes: q.notes || '',
           status: q.status || 'draft',
@@ -252,6 +285,8 @@ export default function AdminQuotationsPage() {
   };
 
   const handleOpenModal = (quote?: Quotation) => {
+    setEditingQuote(quote || null);
+    setFormStep(1);
     if (quote) {
       setEditingQuote(quote);
       setQuoteType(quote.quoteType || 'wholesale');
@@ -267,7 +302,9 @@ export default function AdminQuotationsPage() {
         ? Math.max(1, Math.round((new Date(quote.validUntil).getTime() - Date.now()) / 86400000))
         : 14;
       setValidDays(remaining);
-      setLineItems(quote.items && quote.items.length > 0 ? quote.items : [{ name: '', qty: 1, unitPrice: 0, discount: 0 }]);
+      setLineItems(quote.items && quote.items.length > 0 ? quote.items : [{ name: '', qty: 1, unitPrice: 0 }]);
+      setGlobalDiscount(quote.discountValue !== undefined ? quote.discountValue : (quote.discountAmount || 0));
+      setGlobalDiscountType(quote.discountType || 'flat');
     } else {
       setEditingQuote(null);
       setQuoteType('wholesale');
@@ -281,13 +318,16 @@ export default function AdminQuotationsPage() {
       setCustAddress('');
       setValidDays(14);
       setNotes('Quotation valid for 14 days from issue date. Prices subject to stock availability.');
-      setLineItems([{ name: '', qty: 1, unitPrice: 0, discount: 0 }]);
+      setLineItems([{ name: '', qty: 1, unitPrice: 0 }]);
+      setGlobalDiscount(0);
+      setGlobalDiscountType('flat');
     }
+    setFormStep(1);
     setIsModalOpen(true);
   };
 
   const handleAddLineItem = () => {
-    setLineItems((prev) => [...prev, { name: '', qty: 1, unitPrice: 0, discount: 0 }]);
+    setLineItems((prev) => [...prev, { name: '', qty: 1, unitPrice: 0 }]);
   };
 
   const handleRemoveLineItem = (index: number) => {
@@ -303,30 +343,57 @@ export default function AdminQuotationsPage() {
     });
   };
 
-  const dealerRate =
-    quoteType === 'wholesale'
-      ? wholesaleDealers.find((d) => d.id === selectedDealerId)?.discount_rate || 0
-      : 0;
-
-  const lineDiscount = (item: InvoiceItem) =>
-    typeof item.discount === 'number' && item.discount > 0
-      ? item.discount
-      : (item.unitPrice * (item.qty || 1) * dealerRate) / 100;
-
   const calculateSubtotal = () =>
-    lineItems.reduce((acc, item) => acc + (item.qty || 1) * (item.unitPrice || 0), 0);
+    Math.round(
+      lineItems.reduce((acc, item) => acc + Math.max(0, item.qty || 1) * Math.max(0, item.unitPrice || 0), 0)
+    );
 
-  const calculateTotalDiscount = () =>
-    lineItems.reduce((acc, item) => acc + lineDiscount(item), 0);
+  const calculateTotalDiscount = () => {
+    const sub = calculateSubtotal();
+    if (sub <= 0) return 0;
+    const val = Number(globalDiscount);
+    if (isNaN(val) || !isFinite(val) || val <= 0) return 0;
 
-  const calculateTotal = () =>
-    Math.max(0, calculateSubtotal() - calculateTotalDiscount());
+    let raw = 0;
+    if (globalDiscountType === 'percent') {
+      const clampedPercent = Math.min(Math.max(val, 0), 100);
+      raw = (sub * clampedPercent) / 100;
+    } else {
+      raw = Math.min(Math.max(val, 0), sub);
+    }
+    const rounded = Math.round(raw);
+    return Math.min(Math.max(rounded, 0), sub);
+  };
+
+  const calculateTotal = () => {
+    const sub = calculateSubtotal();
+    const disc = calculateTotalDiscount();
+    return Math.max(0, sub - disc);
+  };
 
   const handleSaveQuotation = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!custName.trim() || lineItems.some((i) => !i.name.trim() || i.unitPrice <= 0)) {
-      alert('Please fill out customer name and at least one valid line item with price.');
+    if (!custName.trim()) {
+      alert('Please fill out customer name.');
       return;
+    }
+
+    const validLines = lineItems.filter((i) => i.name.trim().length > 0);
+    if (validLines.length === 0) {
+      alert('Please add at least one line item.');
+      return;
+    }
+
+    for (const item of validLines) {
+      const qtyNum = Number(item.qty);
+      if (!Number.isInteger(qtyNum) || qtyNum <= 0 || !Number.isFinite(qtyNum)) {
+        alert(`Invalid quantity for item "${item.name}". Quantity must be a positive whole number.`);
+        return;
+      }
+      if (item.unitPrice < 0) {
+        alert(`Invalid price for item "${item.name}".`);
+        return;
+      }
     }
 
     startTransition(async () => {
@@ -335,6 +402,15 @@ export default function AdminQuotationsPage() {
         : `QUO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
       const expiryDateISO = new Date(Date.now() + validDays * 86400000).toISOString();
+
+      const sub = calculateSubtotal();
+      const disc = calculateTotalDiscount();
+      const tot = calculateTotal();
+      const rawVal = Number(globalDiscount);
+      const safeVal = isNaN(rawVal) || !isFinite(rawVal) ? 0 : Math.max(0, rawVal);
+      const clampedDiscountVal = globalDiscountType === 'percent'
+        ? Math.min(safeVal, 100)
+        : Math.min(safeVal, sub);
 
       const payload = {
         quote_number: quoteNo,
@@ -345,17 +421,23 @@ export default function AdminQuotationsPage() {
         customer_email: custEmail.trim(),
         customer_phone: custPhone.trim(),
         customer_address: custAddress.trim(),
-        items: lineItems
-          .filter((i) => i.name.trim().length > 0)
-          .map((i) => ({
+        items: validLines.map((i) => {
+          const validQty = Math.floor(Number(i.qty));
+          const validPrice = Number(i.unitPrice) || 0;
+          return {
             ...i,
-            discount: lineDiscount(i),
-            total: Math.max(0, (i.qty || 1) * (i.unitPrice || 0) - lineDiscount(i)),
-          })),
-        subtotal: calculateSubtotal(),
+            name: i.name.trim(),
+            qty: validQty,
+            unitPrice: validPrice,
+            total: validQty * validPrice,
+          };
+        }),
+        subtotal: sub,
         tax_amount: 0,
-        discount_amount: calculateTotalDiscount(),
-        total_amount: calculateTotal(),
+        discount_amount: disc,
+        discount_type: globalDiscountType,
+        discount_value: clampedDiscountVal,
+        total_amount: tot,
         valid_until: expiryDateISO,
         status: editingQuote ? editingQuote.status : ('draft' as const),
         notes: notes.trim(),
@@ -417,7 +499,6 @@ export default function AdminQuotationsPage() {
         name: i.name,
         qty: i.qty,
         unitPrice: i.unitPrice,
-        discount: i.discount || undefined,
       })),
       subtotal: quote.subtotal,
       taxAmount: quote.taxAmount,
@@ -445,7 +526,6 @@ export default function AdminQuotationsPage() {
         name: i.name,
         qty: i.qty,
         unitPrice: i.unitPrice,
-        discount: i.discount || undefined,
       })),
       subtotal: quote.subtotal,
       taxAmount: quote.taxAmount,
@@ -798,7 +878,7 @@ export default function AdminQuotationsPage() {
             aria-modal="true"
             aria-label="Create / Edit Quotation"
             onClick={(e) => e.stopPropagation()}
-            className="bg-card border border-border rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200"
+            className="bg-card border border-border rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200"
           >
             {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20">
@@ -818,7 +898,11 @@ export default function AdminQuotationsPage() {
 
             {/* Modal Form Body */}
             <form onSubmit={handleSaveQuotation} className="p-6 overflow-y-auto space-y-5 flex-1 text-xs">
-              {/* Quotation Type Selector */}
+              
+              {/* --- STEP 1: Customer Details --- */}
+              {formStep === 1 && (
+                <>
+                  {/* Quotation Type Selector */}
               <div className="space-y-2">
                 <label className="text-[11px] font-bold text-foreground block uppercase tracking-wider text-muted-foreground">
                   Quotation Type *
@@ -1016,8 +1100,33 @@ export default function AdminQuotationsPage() {
                 </div>
               </div>
 
+              {/* Actions Step 1 */}
+              <div className="flex justify-end gap-2 pt-2 border-t border-border">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsModalOpen(false)}
+                  className="h-9 px-4 rounded-xl text-xs font-bold"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => setFormStep(2)}
+                  disabled={!custName.trim() || (quoteType === 'wholesale' && !custCompany.trim())}
+                  className="h-9 px-5 rounded-xl bg-foreground text-background hover:bg-foreground/90 font-bold text-xs flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next: Line Items <ArrowRightCircle className="ml-2 h-4 w-4" />
+                </Button>
+              </div>
+            </>
+          )}
+
+          {/* --- STEP 2: Line Items & Totals --- */}
+          {formStep === 2 && (
+            <>
               {/* Line Items Section */}
-              <div className="space-y-3 pt-2 border-t border-border">
+              <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h4 className="text-[10px] font-black uppercase text-muted-foreground tracking-wider">
                     Quotation Line Items
@@ -1034,12 +1143,18 @@ export default function AdminQuotationsPage() {
                 </div>
 
                 <div className="space-y-2">
+                  {/* Table Header */}
+                  <div className="grid grid-cols-12 gap-4 pb-2 border-b border-border/50 text-[10px] font-black uppercase text-muted-foreground tracking-wider items-center">
+                    <div className="col-span-6 pl-2">Product Details</div>
+                    <div className="col-span-2 text-center">Qty</div>
+                    <div className="col-span-2 text-right">Unit Price</div>
+                    <div className="col-span-2 text-right pr-12">Line Total</div>
+                  </div>
+
                   {lineItems.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="grid grid-cols-12 gap-2 items-center bg-muted/20 p-2.5 rounded-xl border border-border"
-                    >
-                      <div className="col-span-5 relative">
+                    <div key={idx} className="grid grid-cols-12 gap-4 items-center group relative p-2 rounded-xl hover:bg-accent/30 transition-colors border border-transparent hover:border-border/50">
+                      
+                      <div className="col-span-6 relative">
                         {(() => {
                           const term = item.name.toLowerCase().trim();
                           const suggestions =
@@ -1147,8 +1262,21 @@ export default function AdminQuotationsPage() {
                                           isSelected ? 'bg-amber-500/15 font-bold' : 'hover:bg-muted/70'
                                         }`}
                                       >
-                                        <span className="font-semibold text-foreground truncate mr-2">{prod.name}</span>
-                                        <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+                                        <div className="flex items-center gap-3 overflow-hidden">
+                                          {prod.images && prod.images[0] ? (
+                                            <img
+                                              src={sanitizeImageUrl(prod.images[0])}
+                                              alt={prod.name}
+                                              className="w-8 h-8 object-cover rounded-md bg-white shrink-0"
+                                            />
+                                          ) : (
+                                            <div className="w-8 h-8 bg-muted rounded-md flex items-center justify-center shrink-0">
+                                              <ShoppingBag className="w-4 h-4 text-muted-foreground" />
+                                            </div>
+                                          )}
+                                          <span className="font-semibold text-foreground truncate">{prod.name}</span>
+                                        </div>
+                                        <span className="text-[10px] font-mono text-muted-foreground shrink-0 ml-2">
                                           {quoteType === 'wholesale' && prod.wholesalePrice ? (
                                             <span className="text-amber-500 font-bold">WS: {fmt(prod.wholesalePrice)}</span>
                                           ) : (
@@ -1165,7 +1293,7 @@ export default function AdminQuotationsPage() {
                         })()}
                       </div>
 
-                      <div className="col-span-1">
+                      <div className="col-span-2">
                         <Input
                           type="number"
                           min="1"
@@ -1181,39 +1309,26 @@ export default function AdminQuotationsPage() {
                         <Input
                           type="number"
                           min="0"
-                          step="100"
-                          placeholder="Unit Price"
+                          placeholder="Price"
                           value={item.unitPrice || ''}
-                          onChange={(e) => handleUpdateLineItem(idx, 'unitPrice', parseFloat(e.target.value) || 0)}
-                          className="text-xs bg-background text-right font-mono"
+                          className="text-xs bg-background text-right font-medium"
+                          onChange={(e) => handleUpdateLineItem(idx, 'unitPrice', e.target.value ? Number(e.target.value) : 0)}
                           required
                         />
                       </div>
 
-                      <div className="col-span-2">
-                        <Input
-                          type="number"
-                          min="0"
-                          step="10"
-                          placeholder={dealerRate > 0 ? `e.g. ${Math.round((item.unitPrice||0)*(item.qty||1)*dealerRate/100)} (LKR)` : 'Discount (LKR)'}
-                          value={item.discount !== undefined && item.discount > 0 ? item.discount : ''}
-                          onChange={(e) => handleUpdateLineItem(idx, 'discount', parseFloat(e.target.value) || 0)}
-                          className="text-xs bg-background text-right font-mono text-emerald-400"
-                        />
+                      <div className="col-span-2 text-right font-bold pr-12 text-sm flex items-center justify-end">
+                        LKR {((item.qty || 1) * (item.unitPrice || 0)).toLocaleString()}
                       </div>
-
-                      <div className="col-span-1 text-right font-bold text-foreground font-mono text-[11px]">
-                        {fmt(Math.max(0, (item.unitPrice || 0) * (item.qty || 1) - lineDiscount(item)))}
-                      </div>
-
-                      <div className="col-span-1 text-center">
+                      
+                      <div className="absolute right-0 top-0 bottom-0 flex items-center pr-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
                           type="button"
                           onClick={() => handleRemoveLineItem(idx)}
                           disabled={lineItems.length <= 1}
                           className="text-red-400 hover:text-red-300 disabled:opacity-30 p-1"
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
                     </div>
@@ -1222,20 +1337,50 @@ export default function AdminQuotationsPage() {
               </div>
 
               {/* Quotation Summary */}
-              <div className="bg-muted/40 p-3.5 rounded-xl border border-border space-y-1.5 text-xs font-medium">
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Subtotal</span>
-                  <span className="font-mono text-foreground">{fmt(calculateSubtotal())}</span>
+                <div className="p-4 bg-muted/40 rounded-xl border border-border/50 space-y-3">
+                  <div className="flex justify-between items-center text-sm font-medium">
+                    <span className="text-muted-foreground">Subtotal</span>
+                    <span>LKR {calculateSubtotal().toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                    <span className="flex items-center gap-2">
+                      Global Discount
+                      <div className="flex items-center gap-1 bg-background border border-border rounded-md p-0.5 ml-4">
+                        <button
+                          type="button"
+                          onClick={() => setGlobalDiscountType('flat')}
+                          className={`px-2 py-0.5 text-[10px] rounded uppercase font-bold transition-colors ${globalDiscountType === 'flat' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                        >
+                          LKR
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setGlobalDiscountType('percent')}
+                          className={`px-2 py-0.5 text-[10px] rounded uppercase font-bold transition-colors ${globalDiscountType === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                        >
+                          %
+                        </button>
+                      </div>
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground text-xs">{globalDiscountType === 'percent' ? '-' : '- LKR'}</span>
+                      <Input
+                        type="number"
+                        min="0"
+                        className="w-24 h-7 text-right text-xs"
+                        value={globalDiscount || ''}
+                        onChange={(e) => setGlobalDiscount(e.target.value ? Number(e.target.value) : 0)}
+                      />
+                      {globalDiscountType === 'percent' && <span className="text-muted-foreground text-xs">%</span>}
+                    </div>
+                  </div>
+                  <div className="pt-3 border-t border-border flex justify-between items-center">
+                    <span className="text-lg font-black tracking-tight">Total Quoted Amount</span>
+                    <span className="text-xl font-black text-primary">
+                      LKR {calculateTotal().toLocaleString()}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Line Item Discounts</span>
-                  <span className="font-mono text-emerald-400">-{fmt(calculateTotalDiscount())}</span>
-                </div>
-                <div className="flex justify-between pt-1 border-t border-border text-sm font-black text-foreground">
-                  <span>Total Quoted Amount</span>
-                  <span className="font-mono text-amber-500">{fmt(calculateTotal())}</span>
-                </div>
-              </div>
 
               {/* Terms & Notes */}
               <div>
@@ -1248,25 +1393,37 @@ export default function AdminQuotationsPage() {
                 />
               </div>
 
-              {/* Actions */}
-              <div className="flex justify-end gap-2 pt-2 border-t border-border">
+              {/* Actions Step 2 */}
+              <div className="flex justify-between items-center pt-2 border-t border-border">
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setIsModalOpen(false)}
+                  onClick={() => setFormStep(1)}
                   className="h-9 px-4 rounded-xl text-xs font-bold"
                 >
-                  Cancel
+                  Back to Details
                 </Button>
-                <Button
-                  type="submit"
-                  disabled={isPending}
-                  className="h-9 px-5 rounded-xl bg-amber-500 hover:bg-amber-600 text-black font-bold text-xs"
-                >
-                  {isPending ? 'Saving...' : editingQuote ? 'Update Quotation' : 'Save & Issue Quotation'}
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsModalOpen(false)}
+                    className="h-9 px-4 rounded-xl text-xs font-bold"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={isPending}
+                    className="h-9 px-5 rounded-xl bg-amber-500 hover:bg-amber-600 text-black font-bold text-xs"
+                  >
+                    {isPending ? 'Saving...' : editingQuote ? 'Update Quotation' : 'Save & Issue Quotation'}
+                  </Button>
+                </div>
               </div>
-            </form>
+            </>
+          )}
+        </form>
           </div>
         </div>
       )}
