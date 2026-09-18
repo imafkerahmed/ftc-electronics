@@ -36,6 +36,7 @@ interface OrderInfo {
   paymentMethod: PaymentMethod;
   customerEmail: string;
   total: number;
+  slipUploadToken?: string;
 }
 
 const PAYMENT_METHOD_CONFIG = {
@@ -67,7 +68,7 @@ export default function OrderConfirmationPage() {
   useEffect(() => {
     const orderNumberParam = searchParams.get('order') || searchParams.get('order_id');
     const methodParam = (searchParams.get('method') || 'bank_transfer') as PaymentMethod;
-
+    const tokenParam = searchParams.get('token') || undefined;
     if (!orderNumberParam) {
       setNotFound(true);
       return;
@@ -88,9 +89,12 @@ export default function OrderConfirmationPage() {
         }
       });
     } else {
-      // Clear cart only after validating that a valid order reference exists
       useCartStore.getState().clearCart();
     }
+
+    const payhereStatusParam = searchParams.get('payhere');
+    if (payhereStatusParam === 'success') setPayhereStatus('success');
+    else if (payhereStatusParam === 'cancel') setPayhereStatus('failed');
 
     let hasLocalSession = false;
     try {
@@ -98,7 +102,7 @@ export default function OrderConfirmationPage() {
       if (raw) {
         const stored = JSON.parse(raw);
         if (stored.orderNumber === orderNumberParam) {
-          setOrderInfo({ ...stored, paymentMethod: methodParam });
+          setOrderInfo({ ...stored, paymentMethod: methodParam, slipUploadToken: stored.slipUploadToken || tokenParam });
           setIsAuthorizedForSlip(true);
           hasLocalSession = true;
         }
@@ -107,7 +111,6 @@ export default function OrderConfirmationPage() {
 
     if (!hasLocalSession) {
       const emailParam = searchParams.get('email') || undefined;
-      const tokenParam = searchParams.get('token') || undefined;
       verifyOrderForSlipUploadAction(orderNumberParam, emailParam, tokenParam).then((res) => {
         if (res.success && res.order) {
           setOrderInfo({
@@ -116,6 +119,7 @@ export default function OrderConfirmationPage() {
             paymentMethod: (res.order.paymentMethod || methodParam) as PaymentMethod,
             customerEmail: res.order.customerEmail,
             total: res.order.total,
+            slipUploadToken: res.order.slipUploadToken || tokenParam,
           });
           setIsAuthorizedForSlip(res.isAuthorized);
         } else {
@@ -178,6 +182,7 @@ export default function OrderConfirmationPage() {
     formData.append('orderNumber', orderInfo.orderNumber);
     if (orderInfo.orderId) formData.append('orderId', orderInfo.orderId);
     if (orderInfo.customerEmail) formData.append('customerEmail', orderInfo.customerEmail);
+    if (orderInfo.slipUploadToken) formData.append('token', orderInfo.slipUploadToken);
 
     const result = await uploadPaymentSlipAction(formData);
     setUploading(false);

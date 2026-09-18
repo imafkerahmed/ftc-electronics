@@ -17,9 +17,11 @@ import {
   getAdminOrdersAction,
   getReceiptPrintPresetsAction,
   sendOrderInvoiceEmailAction,
+  downloadOrderInvoicePdfAction,
   markOrderAsReturnedAction,
   cancelOrderAction,
   cancelExpiredUnpaidOrdersAction,
+  getPaymentSlipSignedUrlAction,
 } from '@/app/actions/admin';
 import { DEFAULT_RECEIPT_CONFIG, normalizeReceiptConfig, type ReceiptPrintConfig } from '@/types/receipt-config';
 import { printReceipt } from '@/lib/receipt-print';
@@ -100,6 +102,7 @@ export default function AdminOrdersPage() {
   const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
   const [selectedFulfillOrderId, setSelectedFulfillOrderId] = useState<string | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [loadingSlipId, setLoadingSlipId] = useState<string | null>(null);
 
   // Confirmation Modals State
   const [deliverConfirmOrder, setDeliverConfirmOrder] = useState<{ id: string; orderId: string } | null>(null);
@@ -143,7 +146,7 @@ export default function AdminOrdersPage() {
 
             const method = o.payment_details?.method || o.paymentDetails?.method || o.paymentMethod || 'Unknown';
             const isPaid = o.is_paid || o.isPaid || false;
-            const slip = o.payment_details?.paymentSlipUrl || o.paymentDetails?.paymentSlipUrl || o.paymentSlip || '';
+            const slip = o.payment_details?.paymentSlipPath || o.payment_details?.paymentSlipUrl || o.paymentDetails?.paymentSlipPath || o.paymentDetails?.paymentSlipUrl || o.paymentSlip || '';
 
             return {
               id: o.id,
@@ -175,6 +178,22 @@ export default function AdminOrdersPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  const handleViewSlip = async (orderId: string) => {
+    try {
+      setLoadingSlipId(orderId);
+      const res = await getPaymentSlipSignedUrlAction(orderId);
+      if (res.success && res.signedUrl) {
+        window.open(res.signedUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        setError(res.error || 'Failed to open payment slip.');
+      }
+    } catch {
+      setError('Failed to open payment slip.');
+    } finally {
+      setLoadingSlipId(null);
+    }
+  };
 
   const handleMarkPaid = (id: string) => {
     setError(null);
@@ -408,18 +427,31 @@ export default function AdminOrdersPage() {
     }
   };
 
+  const isPendingPayment = (o: Order) => {
+    if (o.shippingStatus === 'cancelled' || o.shippingStatus === 'refunded') return false;
+    if (o.paymentStatus === 'paid') return false;
+    return o.paymentMethod === 'bank_transfer' || o.paymentMethod === 'payhere' || o.paymentMethod === 'stripe';
+  };
+
+  const isProcessingOrder = (o: Order) => {
+    if (o.shippingStatus === 'cancelled' || o.shippingStatus === 'refunded') return false;
+    if (o.shippingStatus === 'processing') return true;
+    if (o.shippingStatus === 'pending' && o.paymentStatus === 'paid') return true;
+    return false;
+  };
+
   const counts = {
     all: orders.length,
-    pending: orders.filter((o) => o.paymentStatus === 'pending' && o.shippingStatus !== 'cancelled').length,
-    processing: orders.filter((o) => (o.shippingStatus === 'processing' || o.shippingStatus === 'pending') && o.paymentStatus === 'paid').length,
+    pending: orders.filter(isPendingPayment).length,
+    processing: orders.filter(isProcessingOrder).length,
     shipped: orders.filter((o) => o.shippingStatus === 'shipped').length,
     delivered: orders.filter((o) => o.shippingStatus === 'delivered').length,
     cancelled: orders.filter((o) => o.shippingStatus === 'cancelled' || o.shippingStatus === 'refunded').length,
   };
 
   const filteredOrders = orders.filter((o) => {
-    if (activeTab === 'pending' && (o.paymentStatus !== 'pending' || o.shippingStatus === 'cancelled')) return false;
-    if (activeTab === 'processing' && !((o.shippingStatus === 'processing' || o.shippingStatus === 'pending') && o.paymentStatus === 'paid')) return false;
+    if (activeTab === 'pending' && !isPendingPayment(o)) return false;
+    if (activeTab === 'processing' && !isProcessingOrder(o)) return false;
     if (activeTab === 'shipped' && o.shippingStatus !== 'shipped') return false;
     if (activeTab === 'delivered' && o.shippingStatus !== 'delivered') return false;
     if (activeTab === 'cancelled' && o.shippingStatus !== 'cancelled' && o.shippingStatus !== 'refunded') return false;
@@ -608,7 +640,7 @@ export default function AdminOrdersPage() {
                           <td className="p-4">{getShippingBadge(order)}</td>
                           <td className="p-4 text-right">
                             <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                              {/* Mark Paid button */}
+                              {/* Mark Paid button — for bank transfer approval or direct cash collection */}
                               {order.paymentStatus === 'pending' && order.shippingStatus !== 'cancelled' && (
                                 <Button
                                   size="sm"
@@ -624,18 +656,37 @@ export default function AdminOrdersPage() {
                               )}
 
                               {/* View Slip button — only for bank transfer orders with uploaded slip */}
-                              {isBankTransfer && hasSlip && order.paymentSlip && order.pbCollectionId && (
+                              {isBankTransfer && hasSlip && (
                                 <Button
                                   size="icon"
                                   variant="outline"
-                                  onClick={() => {
-                                    const slipUrl = buildSlipUrl(order.id, order.pbCollectionId!, order.paymentSlip!);
-                                    window.open(slipUrl, '_blank', 'noopener,noreferrer');
-                                  }}
+                                  disabled={loadingSlipId === order.id}
+                                  onClick={() => handleViewSlip(order.id)}
                                   className="h-8 w-8 shrink-0 text-blue-400 border border-blue-500/30 hover:bg-blue-500/10 cursor-pointer"
-                                  title="View customer's uploaded bank transfer slip"
+                                  title="View customer's uploaded bank transfer slip securely"
                                 >
-                                  <Eye className="h-4 w-4" />
+                                  {loadingSlipId === order.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+                                  ) : (
+                                    <Eye className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              )}
+
+                              {/* Store Pickup Handover button */}
+                              {(order.paymentMethod === 'cash_pickup' || order.paymentMethod === 'pickup') &&
+                                order.shippingStatus !== 'delivered' &&
+                                order.shippingStatus !== 'cancelled' &&
+                                order.shippingStatus !== 'refunded' && (
+                                <Button
+                                  size="sm"
+                                  onClick={() => setDeliverConfirmOrder({ id: order.id, orderId: order.orderId })}
+                                  disabled={isPending || sendingEmailId === order.id}
+                                  className="h-8 text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
+                                  title="Confirm in-store cash payment collected & hand over product to customer"
+                                >
+                                  <CheckCircle2 className="h-3 w-3 mr-1" />
+                                  {order.paymentStatus === 'paid' ? 'Confirm Handover' : 'Pay & Handover'}
                                 </Button>
                               )}
 
@@ -657,20 +708,27 @@ export default function AdminOrdersPage() {
                                 </Button>
                               )}
 
-                              {/* Ship Order button */}
-                              {order.paymentStatus === 'paid' && order.shippingStatus !== 'shipped' && order.shippingStatus !== 'delivered' && order.shippingStatus !== 'cancelled' && (
+                              {/* Ship Order button — available for paid orders and Cash on Delivery */}
+                              {order.paymentMethod !== 'cash_pickup' &&
+                                order.paymentMethod !== 'pickup' &&
+                                (order.paymentStatus === 'paid' || order.paymentMethod === 'cash_delivery' || order.paymentMethod === 'cod') &&
+                                order.shippingStatus !== 'shipped' &&
+                                order.shippingStatus !== 'delivered' &&
+                                order.shippingStatus !== 'cancelled' &&
+                                order.shippingStatus !== 'refunded' && (
                                 <Button
                                   size="sm"
                                   onClick={() => setSelectedFulfillOrderId(order.id)}
                                   disabled={isPending}
                                   className="h-8 text-[11px] font-semibold bg-blue-600 hover:bg-blue-500 text-white cursor-pointer"
+                                  title={order.paymentStatus === 'paid' ? 'Ship order with serial numbers' : 'Fulfill and ship Cash on Delivery order'}
                                 >
                                   <Truck className="h-3 w-3 mr-1" />
                                   Ship Order
                                 </Button>
                               )}
 
-                              {/* Mark Delivered button */}
+                              {/* Mark Delivered button — for shipped orders */}
                               {order.shippingStatus === 'shipped' && (
                                 <Button
                                   size="sm"
@@ -678,15 +736,21 @@ export default function AdminOrdersPage() {
                                   onClick={() => setDeliverConfirmOrder({ id: order.id, orderId: order.orderId })}
                                   disabled={isPending || sendingEmailId === order.id}
                                   className="h-8 text-[11px] font-semibold text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/10 cursor-pointer"
-                                  title="Confirm package has been delivered to customer"
+                                  title={
+                                    order.paymentMethod === 'cash_delivery' || order.paymentMethod === 'cod'
+                                      ? 'Confirm package delivered & COD cash collected from courier'
+                                      : 'Confirm package has been delivered to customer'
+                                  }
                                 >
                                   <CheckCircle2 className="h-3 w-3 mr-1" />
-                                  Mark Delivered
+                                  {order.paymentMethod === 'cash_delivery' || order.paymentMethod === 'cod'
+                                    ? 'Mark Delivered (Paid)'
+                                    : 'Mark Delivered'}
                                 </Button>
                               )}
 
                               {/* Mark Returned button */}
-                              {order.paymentStatus === 'paid' && order.shippingStatus !== 'cancelled' && (
+                              {order.shippingStatus !== 'cancelled' && order.shippingStatus !== 'refunded' && (
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -703,61 +767,109 @@ export default function AdminOrdersPage() {
                                 </Button>
                               )}
 
+                              {/* Print Invoice / Estimate button */}
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => handlePrintOrderInvoice(order, 'Invoice')}
-                                className="h-8 text-[11px] font-semibold flex items-center gap-1 cursor-pointer border-border hover:bg-muted text-indigo-400 border-indigo-500/30"
-                                title="Print Paid Invoice"
+                                onClick={() => handlePrintOrderInvoice(order, order.paymentStatus === 'paid' ? 'Invoice' : 'Quotation')}
+                                className={`h-8 text-[11px] font-semibold flex items-center gap-1 cursor-pointer border-border hover:bg-muted ${
+                                  order.paymentStatus === 'paid' ? 'text-indigo-400 border-indigo-500/30' : 'text-amber-400 border-amber-500/30'
+                                }`}
+                                title={order.paymentStatus === 'paid' ? 'Print Official Paid Invoice (A4)' : 'Print Order Confirmation / Estimate'}
                               >
-                                <FileText className="h-3 w-3" /> Invoice
+                                <Printer className="h-3 w-3" /> {order.paymentStatus === 'paid' ? 'Print Invoice' : 'Print Estimate'}
                               </Button>
 
-                              {/* Email — opens confirmation dialog */}
+                              {/* Download PDF button (for Paid Orders) */}
+                              {order.paymentStatus === 'paid' && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={async () => {
+                                    try {
+                                      const res = await downloadOrderInvoicePdfAction(order.id);
+                                      if (res.success && res.pdfBase64) {
+                                        const byteCharacters = atob(res.pdfBase64);
+                                        const byteNumbers = new Array(byteCharacters.length);
+                                        for (let i = 0; i < byteCharacters.length; i++) {
+                                          byteNumbers[i] = byteCharacters.charCodeAt(i);
+                                        }
+                                        const byteArray = new Uint8Array(byteNumbers);
+                                        const blob = new Blob([byteArray], { type: 'application/pdf' });
+                                        const url = URL.createObjectURL(blob);
+                                        const a = document.createElement('a');
+                                        a.href = url;
+                                        a.download = res.filename || `FTC-Invoice-${order.orderId}.pdf`;
+                                        document.body.appendChild(a);
+                                        a.click();
+                                        document.body.removeChild(a);
+                                        setTimeout(() => URL.revokeObjectURL(url), 1000);
+                                      } else {
+                                        setError(res.error || 'Failed to download invoice PDF.');
+                                      }
+                                    } catch (pdfErr: any) {
+                                      setError(pdfErr.message || 'Error downloading PDF.');
+                                    }
+                                  }}
+                                  className="h-8 text-[11px] font-semibold flex items-center gap-1 cursor-pointer border-border hover:bg-muted text-purple-400 border-purple-500/30"
+                                  title="Download Official Vector PDF Invoice"
+                                >
+                                  <FileText className="h-3 w-3" /> Download PDF
+                                </Button>
+                              )}
+
+                              {/* Email button — opens confirmation dialog */}
                               <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={() => handleEmailButtonClick(order)}
                                 disabled={sendingEmailId === order.id || !order.email || order.email === 'guest@example.com'}
                                 className="h-8 text-[11px] font-semibold flex items-center gap-1 cursor-pointer border-border hover:bg-muted text-blue-400 border-blue-500/30 disabled:opacity-40"
-                                title={order.email && order.email !== 'guest@example.com' ? 'Send confirmation email to customer' : 'Customer email not configured'}
+                                title={
+                                  order.paymentStatus === 'paid'
+                                    ? 'Email Paid Invoice with attached PDF to customer'
+                                    : 'Email Order Confirmation & instructions to customer'
+                                }
                               >
                                 {sendingEmailId === order.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Mail className="h-3 w-3" />}
-                                Email
+                                {order.paymentStatus === 'paid' ? 'Email Invoice' : 'Email Instructions'}
                               </Button>
 
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  const receiptItems =
-                                    order.rawItems && order.rawItems.length > 0
-                                      ? order.rawItems.map((item) => {
-                                          const serialsList = collectSerials(item);
-                                          return {
-                                            name: serialsList.length > 0 ? `${item.name || 'Product Item'} (S/N: ${serialsList.join(', ')})` : item.name || 'Product Item',
-                                            unitPrice: item.price || 0,
-                                            qty: item.quantity || 1,
-                                            lineTotal: (item.price || 0) * (item.quantity || 1),
-                                          };
-                                        })
-                                      : [{ name: `Order ${order.orderId}`, unitPrice: order.total, qty: 1, lineTotal: order.total }];
+                              {/* Thermal Receipt button (only for Paid Orders) */}
+                              {order.paymentStatus === 'paid' && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    const receiptItems =
+                                      order.rawItems && order.rawItems.length > 0
+                                        ? order.rawItems.map((item) => {
+                                            const serialsList = collectSerials(item);
+                                            return {
+                                              name: serialsList.length > 0 ? `${item.name || 'Product Item'} (S/N: ${serialsList.join(', ')})` : item.name || 'Product Item',
+                                              unitPrice: item.price || 0,
+                                              qty: item.quantity || 1,
+                                              lineTotal: (item.price || 0) * (item.quantity || 1),
+                                            };
+                                          })
+                                        : [{ name: `Order ${order.orderId}`, unitPrice: order.total, qty: 1, lineTotal: order.total }];
 
-                                  printReceipt(defaultReceiptConfig, {
-                                    orderNumber: order.orderId,
-                                    customerName: order.customerName || order.email,
-                                    date: getFallbackInvoiceDate(order.date),
-                                    items: receiptItems,
-                                    subtotal: order.total,
-                                    total: order.total,
-                                    paymentMethod: getPaymentMethodLabel(order.paymentMethod),
-                                  });
-                                }}
-                                className="h-8 text-[11px] font-semibold flex items-center gap-1 cursor-pointer border-border hover:bg-muted text-emerald-400 border-emerald-500/30"
-                                title="Print Thermal 80mm/58mm Receipt"
-                              >
-                                <Printer className="h-3 w-3" /> Receipt
-                              </Button>
+                                    printReceipt(defaultReceiptConfig, {
+                                      orderNumber: order.orderId,
+                                      customerName: order.customerName || order.email,
+                                      date: getFallbackInvoiceDate(order.date),
+                                      items: receiptItems,
+                                      subtotal: order.total,
+                                      total: order.total,
+                                      paymentMethod: getPaymentMethodLabel(order.paymentMethod),
+                                    });
+                                  }}
+                                  className="h-8 text-[11px] font-semibold flex items-center gap-1 cursor-pointer border-border hover:bg-muted text-emerald-400 border-emerald-500/30"
+                                  title="Print Thermal 80mm/58mm POS Receipt"
+                                >
+                                  <Printer className="h-3 w-3" /> Print Receipt
+                                </Button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -853,14 +965,16 @@ export default function AdminOrdersPage() {
           <div className="py-2">
             <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg text-xs text-blue-300 space-y-1">
               <p className="font-semibold text-blue-400">What will be sent:</p>
-              {emailConfirmOrder?.paymentMethod === 'bank_transfer' ? (
+              {emailConfirmOrder?.paymentStatus === 'paid' ? (
+                <p>Official Final PAID Invoice email with attached PDF invoice and warranty statement.</p>
+              ) : emailConfirmOrder?.paymentMethod === 'bank_transfer' ? (
                 <p>Bank transfer instructions with account details and a direct &quot;Upload Slip&quot; link.</p>
               ) : emailConfirmOrder?.paymentMethod === 'cash_pickup' || emailConfirmOrder?.paymentMethod === 'cash_delivery' ? (
                 <p>Order confirmation with{' '}
-                  {emailConfirmOrder?.paymentMethod === 'cash_pickup' ? 'store pickup' : 'cash on delivery'} instructions and item breakdown.
+                  {emailConfirmOrder?.paymentMethod === 'cash_pickup' ? 'store pickup' : 'cash on delivery'} instructions and amount due.
                 </p>
               ) : (
-                <p>Tax invoice / order confirmation with full item breakdown.</p>
+                <p>Order confirmation with order summary and payment details.</p>
               )}
             </div>
           </div>
@@ -896,7 +1010,8 @@ export default function AdminOrdersPage() {
               Confirm Order Delivery
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground leading-relaxed pt-1">
-              Are you sure order <strong className="text-foreground font-mono">#{deliverConfirmOrder?.orderId}</strong> has been successfully delivered to the customer?
+              Are you sure order <strong className="text-foreground font-mono">#{deliverConfirmOrder?.orderId}</strong> has been successfully delivered / handed over to the customer?
+              For Cash on Delivery and Cash on Pickup orders, this will also record cash collection as Paid and issue the official Final PAID Invoice with attached PDF.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="pt-4 border-t border-border flex items-center justify-end gap-2">

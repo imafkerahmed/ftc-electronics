@@ -96,13 +96,11 @@ export default function Navbar() {
       void check();
     });
 
-    window.addEventListener("focus", check);
     window.addEventListener("auth-change", check);
 
     return () => {
       isMounted = false;
       subscription.unsubscribe();
-      window.removeEventListener("focus", check);
       window.removeEventListener("auth-change", check);
     };
   }, []);

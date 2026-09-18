@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { productKeys } from "@/lib/query-keys";
 
@@ -30,6 +30,8 @@ interface Product {
   countInStock: number;
   availableUnits?: { id: string; barcode: string; serialNumber?: string }[];
 }
+
+const EMPTY_PRODUCTS: Product[] = [];
 
 interface ScanEvent {
   id: string;
@@ -127,22 +129,28 @@ export default function PosScanTerminal({
     refetchInterval: 8000,
   });
 
-  const products = posData?.products ?? [];
+  const products = useMemo(
+    () => posData?.products ?? EMPTY_PRODUCTS,
+    [posData?.products],
+  );
   const productsLoaded = productsSuccess || (!productsLoading && !productsError && !!posData);
 
   // Derive categories from the product list
-  const categories = [
-    "All",
-    ...new Set<string>(products.map((p: Product) => p.category).filter(Boolean)),
-  ];
+  const categories = useMemo(
+    () => [
+      "All",
+      ...new Set<string>(products.map((p: Product) => p.category).filter(Boolean)),
+    ],
+    [products],
+  );
 
 
   // ── Live search as user types ─────────────────────────────────────
   useEffect(() => {
     const q = scanInput.trim().toLowerCase();
     if (!q || q.length < 2) {
-      setSearchSuggestions([]);
-      setShowSuggestions(false);
+      setSearchSuggestions((prev) => (prev.length === 0 ? prev : EMPTY_PRODUCTS));
+      setShowSuggestions((prev) => (prev ? false : prev));
       return;
     }
 

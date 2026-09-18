@@ -59,11 +59,24 @@ export async function proxy(request: NextRequest) {
 
   // 1. Refresh Supabase SSR session tokens
   const { supabaseResponse, user } = await updateSession(request);
+  const hasValidSession = Boolean(user);
 
-  let hasValidSession = Boolean(user);
+  // ── Customer account route protection ──────────────────────────────────────
+  // Customer routes only require a valid session; avoid querying profiles.role over the network.
+  if (pathname === '/account' || pathname.startsWith('/account/')) {
+    if (!hasValidSession) {
+      const homeUrl = new URL('/', request.url);
+      return NextResponse.redirect(homeUrl);
+    }
+    return addSecurityHeaders(supabaseResponse);
+  }
+
+  // ── Role resolution (Only executed when accessing /admin or /auth) ──────────
   let resolvedRole: AdminRole | 'customer' = 'customer';
+  let isAdminUser = false;
+  const requiresAdminCheck = pathname.startsWith('/admin') || pathname === '/auth';
 
-  if (user) {
+  if (user && requiresAdminCheck) {
     try {
       const adminSb = getAdminSupabase();
       const { data: profile } = await adminSb
@@ -75,24 +88,12 @@ export async function proxy(request: NextRequest) {
       const roleStr = profile?.role;
       if (roleStr && (ADMIN_ROLES as readonly string[]).includes(roleStr)) {
         resolvedRole = roleStr as AdminRole;
-      } else {
-        resolvedRole = 'customer';
+        isAdminUser = true;
       }
     } catch {
       resolvedRole = 'customer';
+      isAdminUser = false;
     }
-  }
-
-  const isAdminUser = hasValidSession && (ADMIN_ROLES as readonly string[]).includes(resolvedRole);
-
-  // ── Customer account route protection ──────────────────────────────────────
-  if (pathname === '/account' || pathname.startsWith('/account/')) {
-    if (!hasValidSession) {
-      const homeUrl = new URL('/', request.url);
-      const redirectResponse = NextResponse.redirect(homeUrl);
-      return redirectResponse;
-    }
-    return addSecurityHeaders(supabaseResponse);
   }
 
   // ── Admin route protection ──────────────────────────────────────────────────

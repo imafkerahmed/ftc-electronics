@@ -44,14 +44,21 @@ function logError(context: string, err: any) {
       hint: err.hint || null,
       code: err.code || null,
     });
-    if (err.stack) console.error(`  Stack: ${err.stack}`);
   } else {
     console.error(`${context} failed:`, err);
   }
 }
 
 function getClient(useAdmin = false) {
-  return useAdmin ? getAdminSupabase() : supabase;
+  if (useAdmin) {
+    if (typeof window !== "undefined") {
+      throw new Error(
+        "[supabase-collections] Administrative queries cannot be executed directly from browser components. Use a protected Server Action instead."
+      );
+    }
+    return getAdminSupabase();
+  }
+  return supabase;
 }
 
 export function sanitizeImageUrl(rawUrl?: string | null): string {
@@ -1497,51 +1504,120 @@ export const pbEmployees = {
   async getAll(): Promise<PBEmployee[]> {
     const client = getClient(true);
     // Never expose PINs to public POS cashier selection dropdowns
-    const { data } = await client
+    // Select only active employees
+    const { data, error } = await client
       .from("employees")
-      .select("id, name, role, is_active, isActive, avatar, email, phone, created_at, updated_at");
+      .select("id, name, role, is_active, created_at, updated_at")
+      .eq("is_active", true)
+      .order("name", { ascending: true });
+    if (error) {
+      console.error("[pbEmployees.getAll] Error loading employees:", error);
+      return [];
+    }
     return (data || []).map((e: any) => ({
       id: e.id,
       name: e.name || '',
       pin: '', // Omitted for client security
       role: (e.role === 'manager' ? 'manager' : 'cashier') as EmployeeRole,
-      isActive: Boolean(e.isActive ?? e.is_active ?? true),
+      isActive: Boolean(e.is_active ?? true),
       created: e.created_at || new Date().toISOString(),
       updated: e.updated_at || new Date().toISOString(),
       collectionId: 'employees',
       collectionName: 'employees',
     }));
   },
-  async getAllAdmin() {
+  async getAllAdmin(): Promise<PBEmployee[]> {
     const client = getClient(true);
-    const { data } = await client.from("employees").select("*");
-    return data || [];
+    const { data, error } = await client
+      .from("employees")
+      .select("id, name, role, is_active, created_at, updated_at, profile_id")
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.error("[pbEmployees.getAllAdmin] Error loading employees:", error);
+      throw error;
+    }
+    return (data || []).map((e: any) => ({
+      id: e.id,
+      name: e.name || '',
+      pin: '', // Never expose PIN to admin list view
+      role: (e.role === 'manager' ? 'manager' : 'cashier') as EmployeeRole,
+      isActive: Boolean(e.is_active ?? true),
+      profile_id: e.profile_id,
+      created: e.created_at || new Date().toISOString(),
+      updated: e.updated_at || new Date().toISOString(),
+      collectionId: 'employees',
+      collectionName: 'employees',
+    }));
   },
   async create(data: any) {
     const client = getClient(true);
+    const payload: Record<string, any> = {};
+    if (data.name !== undefined) payload.name = data.name;
+    if (data.role !== undefined) payload.role = data.role;
+    if (data.pin !== undefined) payload.pin = data.pin;
+    if (data.profile_id !== undefined) payload.profile_id = data.profile_id;
+    if (data.is_active !== undefined) {
+      payload.is_active = Boolean(data.is_active);
+    } else if (data.isActive !== undefined) {
+      payload.is_active = Boolean(data.isActive);
+    } else {
+      payload.is_active = true;
+    }
+
     const { data: res, error } = await client
       .from("employees")
-      .insert(data)
+      .insert(payload)
       .select()
       .single();
-    if (error) throw error;
+    if (error) {
+      console.error("[pbEmployees.create] Supabase insert error:", {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
+      throw error;
+    }
     return res;
   },
   async update(id: string, data: any) {
     const client = getClient(true);
+    const payload: Record<string, any> = {};
+    if (data.name !== undefined) payload.name = data.name;
+    if (data.role !== undefined) payload.role = data.role;
+    if (data.pin !== undefined) payload.pin = data.pin;
+    if (data.profile_id !== undefined) payload.profile_id = data.profile_id;
+    if (data.is_active !== undefined) {
+      payload.is_active = Boolean(data.is_active);
+    } else if (data.isActive !== undefined) {
+      payload.is_active = Boolean(data.isActive);
+    }
+
     const { data: res, error } = await client
       .from("employees")
-      .update(data)
+      .update(payload)
       .eq("id", id)
       .select()
       .single();
-    if (error) throw error;
+    if (error) {
+      console.error("[pbEmployees.update] Supabase update error:", {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
+      throw error;
+    }
     return res;
   },
   async delete(id: string) {
     const client = getClient(true);
     const { error } = await client.from("employees").delete().eq("id", id);
-    return !error;
+    if (error) {
+      console.error("[pbEmployees.delete] Supabase delete error:", error);
+      throw error;
+    }
+    return true;
   },
 };
 

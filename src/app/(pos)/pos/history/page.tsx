@@ -36,11 +36,11 @@ export default function PosHistoryPage() {
 
   useEffect(() => { void loadSales(); }, [loadSales]);
 
-  const handleConfirmVoid = (pin: string) => {
+  const handleConfirmVoid = (pin: string, managerId?: string) => {
     if (!voidTargetId) return;
     const saleId = voidTargetId;
     startTransition(async () => {
-      const res = await voidSaleAction(saleId, pin);
+      const res = await voidSaleAction(saleId, pin, managerId);
       if (res.success) {
         setVoidTargetId(null);
         setVoidError(null);
@@ -201,10 +201,10 @@ export default function PosHistoryPage() {
 
       <ManagerPinModal
         title="Manager Approval Needed"
-        description="Please enter a Manager or Admin PIN to void this completed sale."
+        description="Please select a manager and enter their PIN to void this completed sale."
         isOpen={Boolean(voidTargetId)}
         onClose={() => setVoidTargetId(null)}
-        onSuccess={(pin) => handleConfirmVoid(pin)}
+        onSuccess={(pin, _name, managerId) => handleConfirmVoid(pin, managerId)}
       />
     </div>
   );

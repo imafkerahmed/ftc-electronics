@@ -12,8 +12,8 @@ import {
 import {
   getAdminOrdersAction,
   getLowStockProductsCountAction,
+  getAdminAuditLogsAction,
 } from "@/app/actions/admin";
-import { pbAuditLog } from "@/lib/supabase-collections";
 
 export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(true);
@@ -26,10 +26,10 @@ export default function AdminDashboardPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [ordersRes, lowStockRes, auditLogs] = await Promise.all([
+      const [ordersRes, lowStockRes, auditRes] = await Promise.all([
         getAdminOrdersAction(),
         getLowStockProductsCountAction(5),
-        pbAuditLog.getAll(5),
+        getAdminAuditLogsAction(5),
       ]);
 
       const ordersList =
@@ -50,9 +50,10 @@ export default function AdminDashboardPage() {
       // 2. Count low stock items (<= 5) from server-side query
       setLowStockCount(lowStockRes.success ? lowStockRes.count : 0);
 
-      const logItems = Array.isArray(auditLogs)
-        ? auditLogs
-        : (auditLogs as any)?.items || [];
+      const logItems =
+        auditRes.success && Array.isArray(auditRes.data)
+          ? auditRes.data
+          : [];
       setRecentLogs(
         logItems.map((l: any) => ({
           id: l.id,

@@ -1,21 +1,28 @@
 'use client';
 
-import React, { useState } from 'react';
-import { ShieldAlert, X, KeyRound, Lock } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ShieldAlert, X, KeyRound, Lock, UserCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { verifyManagerPinAction } from '@/app/actions/admin';
+import { verifyManagerPinAction, getEligibleManagersAction } from '@/app/actions/admin';
+
+interface ManagerAccount {
+  id: string;
+  name: string;
+  role: string;
+  avatar?: string;
+}
 
 interface ManagerPinModalProps {
   title?: string;
   description?: string;
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (pin: string, managerName?: string) => void;
+  onSuccess: (pin: string, managerName?: string, managerId?: string) => void;
 }
 
 export default function ManagerPinModal({
   title = 'Manager Authorization Required',
-  description = 'Please enter a Manager or Admin PIN to authorize this action.',
+  description = 'Please select a manager and enter their PIN to authorize this action.',
   isOpen,
   onClose,
   onSuccess,
@@ -23,6 +30,25 @@ export default function ManagerPinModal({
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [verifying, setVerifying] = useState(false);
+  const [managers, setManagers] = useState<ManagerAccount[]>([]);
+  const [selectedManagerId, setSelectedManagerId] = useState<string>('');
+
+  useEffect(() => {
+    if (isOpen) {
+      setPin('');
+      setError('');
+      getEligibleManagersAction()
+        .then((res) => {
+          if (res.success && res.data && res.data.length > 0) {
+            setManagers(res.data);
+            setSelectedManagerId(res.data[0].id);
+          }
+        })
+        .catch(() => {
+          // ignore background load errors
+        });
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -54,9 +80,9 @@ export default function ManagerPinModal({
     setError('');
 
     try {
-      const res = await verifyManagerPinAction(pin.trim());
+      const res = await verifyManagerPinAction(pin.trim(), selectedManagerId || undefined);
       if (res.success) {
-        onSuccess(pin.trim(), res.managerName);
+        onSuccess(pin.trim(), res.managerName, selectedManagerId || undefined);
         setPin('');
       } else {
         setError(res.error || 'Invalid Manager PIN');
@@ -81,10 +107,39 @@ export default function ManagerPinModal({
           </Button>
         </div>
 
-        <div className="text-center mb-5">
+        <div className="text-center mb-4">
           <h3 className="text-base font-extrabold text-foreground tracking-tight">{title}</h3>
           <p className="text-[11px] text-muted-foreground mt-1 leading-snug">{description}</p>
         </div>
+
+        {/* Manager Selector if multiple available */}
+        {managers.length > 1 && (
+          <div className="mb-3 space-y-1">
+            <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider block">
+              Approving Manager
+            </label>
+            <div className="flex gap-1.5 flex-wrap">
+              {managers.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedManagerId(m.id);
+                    setError('');
+                  }}
+                  className={`text-xs px-2.5 py-1 rounded-lg border font-semibold transition-all flex items-center gap-1 ${
+                    selectedManagerId === m.id
+                      ? 'bg-amber-500/15 border-amber-500/50 text-amber-500'
+                      : 'bg-muted/40 border-border text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <UserCheck className="h-3 w-3" />
+                  <span>{m.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Display masked dots */}

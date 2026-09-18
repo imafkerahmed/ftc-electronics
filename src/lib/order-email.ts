@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { getAdminSupabase } from '@/lib/supabase-admin';
-import { sendOrderInvoiceEmail, sendBankTransferInstructionsEmail, sendCashOrderEmail } from '@/lib/email';
+import { sendOrderInvoiceEmail, sendPaidInvoiceEmail, sendBankTransferInstructionsEmail, sendCashOrderEmail } from '@/lib/email';
+import { ensureInvoiceForPaidOrder } from '@/lib/invoice-service';
 
 /**
  * Generates an HMAC-SHA256 signed token for guest slip uploads valid for 14 days.
@@ -40,6 +41,24 @@ export function verifySlipUploadToken(orderIdentifier: string, token: string): b
   }
 }
 
+export function requiresPaymentBeforeShipment(method?: string | null): boolean {
+  if (!method) return true;
+  const clean = method.toLowerCase().trim();
+  return (
+    clean === 'bank_transfer' ||
+    clean === 'online_payment' ||
+    clean === 'payhere' ||
+    clean === 'stripe' ||
+    clean === 'paypal'
+  );
+}
+
+export function isCashPaymentMethod(method?: string | null): boolean {
+  if (!method) return false;
+  const clean = method.toLowerCase().trim();
+  return clean === 'cash_delivery' || clean === 'cod' || clean === 'cash' || clean === 'cash_pickup' || clean === 'pickup';
+}
+
 interface OrderItemRecord {
   name?: string;
   quantity?: number;
@@ -69,6 +88,8 @@ interface OrderRecord {
 
 /**
  * Helper to fetch order details from Supabase and send invoice/confirmation email.
+ * - If order is unpaid: sends appropriate Order Confirmation & payment instructions.
+ * - If order is paid: atomically ensures invoice issuance, generates PDF, and sends finalized Invoice email.
  */
 export async function sendInvoiceEmailForOrder(orderId: string): Promise<{ success: boolean; error?: string }> {
   try {
@@ -98,7 +119,7 @@ export async function sendInvoiceEmailForOrder(orderId: string): Promise<{ succe
         shippingAddress: data.shipping_address || '',
         paymentDetails: data.payment_details || {},
         total: data.total,
-        isPaid: data.is_paid || false,
+        isPaid: Boolean(data.is_paid || data.payment_details?.status === 'paid'),
       };
     } else {
       console.error('[sendInvoiceEmailForOrder] Could not find order:', orderId);
@@ -154,7 +175,8 @@ export async function sendInvoiceEmailForOrder(orderId: string): Promise<{ succe
 
     let emailResult: { success: boolean; error?: string };
 
-    if (method === 'bank_transfer' && !order.isPaid) {
+    // 1. UNPAID BANK TRANSFER: Send Deposit Instructions & Slip Upload Link
+    if (!order.isPaid && method === 'bank_transfer') {
       const slipToken = generateSlipUploadToken(orderNum);
       const uploadSlipUrl = `${siteUrl}/checkout/confirmation?order=${orderNum}&uploadSlip=true&token=${slipToken}`;
       emailResult = await sendBankTransferInstructionsEmail({
@@ -170,7 +192,9 @@ export async function sendInvoiceEmailForOrder(orderId: string): Promise<{ succe
         storeEmail,
         storeAddress,
       });
-    } else if ((method === 'cash_pickup' || method === 'cash_delivery') && !order.isPaid) {
+    }
+    // 2. UNPAID CASH / ONLINE / OTHER: Send Order Confirmation (Amount Due / Pending)
+    else if (!order.isPaid) {
       emailResult = await sendCashOrderEmail({
         to: customerEmail,
         orderNumber: orderNum,
@@ -184,22 +208,19 @@ export async function sendInvoiceEmailForOrder(orderId: string): Promise<{ succe
         storeEmail,
         storeAddress,
       });
-    } else {
-      const status = order.paymentDetails?.status || (order.isPaid ? 'paid' : 'pending');
-      const paymentMethodLabel = `${method.toUpperCase()} (${status})`;
+    }
+    // 3. AUTHORITATIVELY PAID ORDER (order.isPaid === true): Issue final PAID Invoice & attach PDF
+    else {
+      const invoiceRes = await ensureInvoiceForPaidOrder(order.id);
+      if (!invoiceRes.success || !invoiceRes.invoiceData) {
+        console.error('[sendInvoiceEmailForOrder] Failed to ensure invoice for paid order:', invoiceRes.error);
+        return { success: false, error: invoiceRes.error || 'Failed to issue invoice.' };
+      }
 
-      emailResult = await sendOrderInvoiceEmail({
+      emailResult = await sendPaidInvoiceEmail({
         to: customerEmail,
-        orderNumber: orderNum,
-        customerName,
-        shippingAddress: order.shippingAddress || '',
-        items,
-        totalAmount: order.total || 0,
-        paymentMethod: paymentMethodLabel,
-        storeName,
-        storePhone,
-        storeEmail,
-        storeAddress,
+        invoiceData: invoiceRes.invoiceData,
+        pdfBuffer: invoiceRes.pdfBuffer,
       });
     }
 

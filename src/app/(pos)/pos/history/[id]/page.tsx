@@ -122,10 +122,10 @@ export default function SaleDetailPage() {
     printInvoice(cfg, invoiceData, isVoided ? 'POS Voided Invoice' : 'POS Paid Invoice');
   };
 
-  const handleConfirmVoid = async (pin: string) => {
+  const handleConfirmVoid = async (pin: string, managerId?: string) => {
     if (!sale) return;
     setVoiding(true);
-    const res = await voidSaleAction(sale.id, pin);
+    const res = await voidSaleAction(sale.id, pin, managerId);
     setVoiding(false);
     if (res.success) {
       setShowVoidPinModal(false);
@@ -344,10 +344,10 @@ export default function SaleDetailPage() {
 
       <ManagerPinModal
         title="Manager Approval Needed"
-        description="Please enter a Manager or Admin PIN to void this completed sale."
+        description="Please select a manager and enter their PIN to void this completed sale."
         isOpen={showVoidPinModal}
         onClose={() => setShowVoidPinModal(false)}
-        onSuccess={(pin) => handleConfirmVoid(pin)}
+        onSuccess={(pin, _name, managerId) => handleConfirmVoid(pin, managerId)}
       />
     </div>
   );

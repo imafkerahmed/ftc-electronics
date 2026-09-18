@@ -10,8 +10,10 @@ import type { AdminRole, AuditAction, DealerSaleRecord } from '@/types/admin';
 import type { BarcodePrintConfig } from '@/types/barcode-config';
 import { DEFAULT_RECEIPT_CONFIG, type ReceiptPrintConfig, type ReceiptPrintPreset } from '@/types/receipt-config';
 import { DEFAULT_INVOICE_CONFIG, type InvoicePrintConfig, type InvoicePrintPreset } from '@/types/invoice-config';
-import { sendQuotationEmail, sendOrderInvoiceEmail, sendOrderShippingEmail } from '@/lib/email';
-import { sendInvoiceEmailForOrder } from '@/lib/order-email';
+import { sendQuotationEmail, sendOrderInvoiceEmail, sendOrderShippingEmail, sendOrderReturnEmail, formatPaymentMethod } from '@/lib/email';
+import { sendInvoiceEmailForOrder, requiresPaymentBeforeShipment, isCashPaymentMethod } from '@/lib/order-email';
+import { ensureInvoiceForPaidOrder, generateSampleInvoiceData } from '@/lib/invoice-service';
+import { generateInvoicePdf } from '@/lib/invoice-pdf';
 import { deductStockForConfirmedOrderAction } from '@/app/actions/checkout';
 import {
   pbProducts,
@@ -30,7 +32,15 @@ import {
   pbEmployees,
   pbSales,
 } from '@/lib/supabase-collections';
-import type { PaymentMethod, PBSale, PBSaleItem, SalePayload } from '@/types/pos';
+import type { PaymentMethod, PBSale, PBSaleItem, SalePayload, EmployeeRole, PosEmployeeSession } from '@/types/pos';
+import {
+  hashPin,
+  verifyPinWithLegacyMigration,
+  checkPinRateLimit,
+  recordFailedPinAttempt,
+  resetPinRateLimit,
+  isBcryptHash,
+} from '@/lib/pin-security';
 
 // Helper to cast fields safely for audit logging
 function toRecord(obj: any): Record<string, unknown> | undefined {
@@ -53,15 +63,28 @@ export async function checkPermission(
   module: keyof typeof ROLE_PERMISSIONS[AdminRole],
   action: 'read' | 'write' | 'delete'
 ): Promise<{ allowed: boolean; role?: AdminRole; actorEmail?: string; actorId?: string; ip?: string; userAgent?: string }> {
-  const headersList = await headers();
-  const ip = getTrustedClientIp(headersList);
-  const userAgent = headersList.get('user-agent') || 'unknown';
+  let ip = '127.0.0.1';
+  let userAgent = 'unknown';
 
   try {
-    const supabase = await createServerSupabase();
-    const { data: { user }, error: authErr } = await supabase.auth.getUser();
+    const headersList = await headers();
+    ip = getTrustedClientIp(headersList);
+    userAgent = headersList.get('user-agent') || 'unknown';
+  } catch {
+    // Outside request context
+  }
 
-    if (authErr || !user) {
+  try {
+    let user: any = null;
+    try {
+      const supabase = await createServerSupabase();
+      const authRes = await supabase.auth.getUser();
+      user = authRes.data?.user;
+    } catch {
+      // In isolated environments or test runners without cookie stores
+    }
+
+    if (!user) {
       return { allowed: false, ip, userAgent };
     }
 
@@ -2118,11 +2141,39 @@ export async function updateOrderStatusAction(id: string, status: 'pending' | 'p
       .maybeSingle();
     if (getErr || !oldRecord) throw new Error('Order not found.');
     
+    const paymentMethod = oldRecord.payment_details?.method;
+    const isCash = isCashPaymentMethod(paymentMethod);
     const updateData: Record<string, any> = { status, updated_at: new Date().toISOString() };
+
+    let justPaidOnDelivery = false;
+
     if (status === 'delivered') {
       updateData.is_delivered = true;
       updateData.delivered_at = new Date().toISOString();
+
+      // For Cash on Delivery and Store Pickup, marking as delivered confirms cash collection
+      if (isCash && !oldRecord.is_paid) {
+        updateData.is_paid = true;
+        updateData.paid_at = new Date().toISOString();
+        updateData.payment_details = {
+          ...(oldRecord.payment_details || {}),
+          status: 'paid',
+        };
+        justPaidOnDelivery = true;
+      }
     } else if (status === 'shipped') {
+      if (requiresPaymentBeforeShipment(paymentMethod) && !oldRecord.is_paid) {
+        return {
+          success: false,
+          error: `Cannot mark a ${formatPaymentMethod(paymentMethod)} order as shipped before payment is verified and marked as paid.`,
+        };
+      }
+      if (paymentMethod === 'cash_pickup') {
+        return {
+          success: false,
+          error: 'Cash on Pickup orders are fulfilled and handed over in-store upon payment, not shipped via courier.',
+        };
+      }
       updateData.is_delivered = false;
     }
 
@@ -2134,6 +2185,20 @@ export async function updateOrderStatusAction(id: string, status: 'pending' | 'p
       .single();
     if (updateErr) throw updateErr;
 
+    if (justPaidOnDelivery) {
+      try {
+        await deductStockForConfirmedOrderAction(id);
+      } catch (stockErr) {
+        console.error('[updateOrderStatusAction] Stock check error on delivery:', stockErr);
+      }
+
+      try {
+        await sendInvoiceEmailForOrder(id);
+      } catch (emailErr) {
+        console.error('[updateOrderStatusAction] Failed to send payment receipt email on delivery:', emailErr);
+      }
+    }
+
     if (status === 'shipped') {
       try {
         const customerEmail = oldRecord.customer?.email || oldRecord.customerEmail || oldRecord.email;
@@ -2144,7 +2209,14 @@ export async function updateOrderStatusAction(id: string, status: 'pending' | 'p
             orderNumber: oldRecord.order_id || oldRecord.id,
             customerName: oldRecord.customer?.name || 'Customer',
             shippingAddress: oldRecord.shipping_address,
-            items: orderItems.map((i: any) => ({ name: i.name || 'Product', qty: i.quantity || i.qty || 1 })),
+            paymentMethod: oldRecord.payment_details?.method,
+            isPaid: oldRecord.is_paid,
+            totalAmount: oldRecord.total,
+            items: orderItems.map((i: any) => ({
+              name: i.name || 'Product',
+              qty: i.quantity || i.qty || 1,
+              serials: Array.isArray(i.assignedSerials) ? i.assignedSerials : [],
+            })),
           });
         }
       } catch (shippingEmailErr) {
@@ -2182,10 +2254,19 @@ export async function markOrderAsPaidAction(id: string) {
       .maybeSingle();
     if (getErr || !oldRecord) throw new Error('Order not found.');
 
+    const currentPaymentDetails = oldRecord.payment_details || oldRecord.paymentDetails || {};
+    const nextStatus = oldRecord.status === 'pending' || oldRecord.status === 'checkout_draft'
+      ? 'processing'
+      : oldRecord.status;
+
     const updateData: Record<string, any> = {
       is_paid: true,
       paid_at: new Date().toISOString(),
-      status: 'processing',
+      payment_details: {
+        ...currentPaymentDetails,
+        status: 'paid',
+      },
+      status: nextStatus,
       updated_at: new Date().toISOString(),
     };
 
@@ -2197,14 +2278,14 @@ export async function markOrderAsPaidAction(id: string) {
       .single();
     if (updateErr) throw updateErr;
 
-    // Approve the order (previously pocketbase version also ran deductStockForConfirmedOrderAction)
+    // Deduct stock idempotently for confirmed order
     try {
       await deductStockForConfirmedOrderAction(id);
     } catch (stockErr) {
       console.error('[markOrderAsPaidAction] Stock deduction error:', stockErr);
     }
 
-    // Send confirmation email to customer now that payment is confirmed
+    // Send confirmation/receipt email to customer now that payment is confirmed
     try {
       await sendInvoiceEmailForOrder(id);
     } catch (emailErr) {
@@ -2225,6 +2306,78 @@ export async function markOrderAsPaidAction(id: string) {
     return { success: true, data: record };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to mark order as paid.' };
+  }
+}
+
+export async function getPaymentSlipSignedUrlAction(orderId: string): Promise<{
+  success: boolean;
+  signedUrl?: string;
+  error?: string;
+}> {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) {
+    return { success: false, error: 'Unauthorized: Read orders permission required.' };
+  }
+
+  try {
+    const cleanOrderId = (orderId || '').replace(/[^a-zA-Z0-9-]/g, '');
+    if (!cleanOrderId) {
+      return { success: false, error: 'Invalid order reference.' };
+    }
+
+    const supabase = getAdminSupabase();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanOrderId);
+    let query = supabase.from('orders').select('id, order_id, payment_details, paymentDetails');
+    if (isUuid) {
+      query = query.or(`id.eq.${cleanOrderId},order_id.eq.${cleanOrderId}`);
+    } else {
+      query = query.eq('order_id', cleanOrderId);
+    }
+    const { data: order, error } = await query.maybeSingle();
+
+    if (error || !order) {
+      return { success: false, error: 'Order not found.' };
+    }
+
+    const pd = order.payment_details || order.paymentDetails || {};
+    const slipPath = pd.paymentSlipPath;
+    const slipUrl = pd.paymentSlipUrl || pd.paymentSlip;
+
+    if (slipPath) {
+      const { data, error: signErr } = await supabase.storage
+        .from('ftc-payment-slips')
+        .createSignedUrl(slipPath, 120); // 120s TTL
+
+      if (signErr || !data?.signedUrl) {
+        console.error('[getPaymentSlipSignedUrlAction] Failed to sign URL:', signErr);
+        return { success: false, error: 'Failed to generate secure signed URL for payment slip.' };
+      }
+
+      try {
+        await writeAuditLog(
+          check.actorEmail!,
+          'update',
+          'orders',
+          order.id,
+          undefined,
+          { action: 'view_payment_slip' },
+          { ip: check.ip, userAgent: check.userAgent }
+        );
+      } catch {
+        // non-blocking
+      }
+
+      return { success: true, signedUrl: data.signedUrl };
+    }
+
+    if (slipUrl && typeof slipUrl === 'string') {
+      return { success: true, signedUrl: slipUrl };
+    }
+
+    return { success: false, error: 'No payment slip attached to this order.' };
+  } catch (err: unknown) {
+    console.error('[getPaymentSlipSignedUrlAction] Error:', err);
+    return { success: false, error: 'Failed to access payment slip.' };
   }
 }
 
@@ -2317,6 +2470,23 @@ export async function markOrderAsReturnedAction(id: string, reason = 'Returned /
     revalidatePath('/admin/orders');
     revalidatePath('/admin/inventory');
     revalidatePath('/products');
+
+    // Send return confirmation email to customer if email is valid (non-blocking)
+    const custEmail = (order.customer?.email || order.customerEmail || order.email || order.customer_email || '').trim();
+    const custName = (order.customer?.name || order.customerName || order.customer_name || order.name || 'Customer').trim();
+    const refundTotal = Number(order.total ?? order.total_amount ?? 0);
+
+    if (custEmail && custEmail !== 'guest@example.com' && !custEmail.endsWith('@customer.local')) {
+      sendOrderReturnEmail({
+        to: custEmail,
+        orderNumber: order.order_id || order.id,
+        customerName: custName,
+        refundAmount: refundTotal,
+        returnReason: reason,
+      }).catch((emailErr) => {
+        console.warn('[markOrderAsReturnedAction] Non-blocking return email error:', emailErr);
+      });
+    }
 
     return { success: true };
   } catch (err: any) {
@@ -2948,6 +3118,13 @@ export async function getPosEmployeesAdminAction() {
   }
 }
 
+function parseStrictBoolean(val: unknown, fallback: boolean): boolean {
+  if (typeof val === 'boolean') return val;
+  if (val === 'true' || val === '1' || val === 1) return true;
+  if (val === 'false' || val === '0' || val === 0) return false;
+  return fallback;
+}
+
 export async function createPosEmployeeAction(data: {
   name: string;
   pin: string;
@@ -2959,10 +3136,41 @@ export async function createPosEmployeeAction(data: {
     return { success: false, error: 'Unauthorized: Employee write permission required.' };
   }
   try {
-    const emp = await pbEmployees.create(data);
+    const cleanName = (data.name || '').trim();
+    if (!cleanName) {
+      return { success: false, error: 'Employee name is required.' };
+    }
+    const cleanRole = data.role === 'manager' ? 'manager' : 'cashier';
+    let hashedPin = '';
+    if (data.pin && data.pin.trim()) {
+      hashedPin = isBcryptHash(data.pin) ? data.pin : await hashPin(data.pin.trim());
+    } else {
+      return { success: false, error: 'PIN is required for new employee.' };
+    }
+
+    const dbPayload = {
+      name: cleanName,
+      role: cleanRole,
+      pin: hashedPin,
+      is_active: data.isActive !== undefined ? parseStrictBoolean(data.isActive, true) : true,
+    };
+
+    const emp = await pbEmployees.create(dbPayload);
     revalidatePath('/admin/system-config/employees');
-    return { success: true, data: emp };
+    return {
+      success: true,
+      data: {
+        id: emp.id,
+        name: emp.name,
+        role: emp.role,
+        isActive: Boolean(emp.is_active ?? true),
+        pin: '', // Never expose to browser
+        created: emp.created_at || new Date().toISOString(),
+        updated: emp.updated_at || new Date().toISOString(),
+      },
+    };
   } catch (err: any) {
+    console.error('[createPosEmployeeAction] Error:', err);
     return { success: false, error: err.message || 'Failed to create employee.' };
   }
 }
@@ -2976,10 +3184,45 @@ export async function updatePosEmployeeAction(
     return { success: false, error: 'Unauthorized: Employee write permission required.' };
   }
   try {
-    const emp = await pbEmployees.update(id, data);
+    const cleanId = (id || '').trim();
+    if (!cleanId) {
+      return { success: false, error: 'Employee ID is required.' };
+    }
+
+    const dbPayload: Record<string, any> = {};
+    if (data.name !== undefined) {
+      const cleanName = data.name.trim();
+      if (!cleanName) return { success: false, error: 'Employee name cannot be empty.' };
+      dbPayload.name = cleanName;
+    }
+    if (data.role !== undefined) {
+      dbPayload.role = data.role === 'manager' ? 'manager' : 'cashier';
+    }
+    if (data.isActive !== undefined) {
+      dbPayload.is_active = parseStrictBoolean(data.isActive, true);
+    }
+    if (data.pin !== undefined) {
+      if (data.pin && data.pin.trim()) {
+        dbPayload.pin = isBcryptHash(data.pin) ? data.pin : await hashPin(data.pin.trim());
+      }
+    }
+
+    const emp = await pbEmployees.update(cleanId, dbPayload);
     revalidatePath('/admin/system-config/employees');
-    return { success: true, data: emp };
+    return {
+      success: true,
+      data: {
+        id: emp.id,
+        name: emp.name,
+        role: emp.role,
+        isActive: Boolean(emp.is_active ?? true),
+        pin: '', // Never expose to browser
+        created: emp.created_at || new Date().toISOString(),
+        updated: emp.updated_at || new Date().toISOString(),
+      },
+    };
   } catch (err: any) {
+    console.error('[updatePosEmployeeAction] Error:', err);
     return { success: false, error: err.message || 'Failed to update employee.' };
   }
 }
@@ -2995,6 +3238,93 @@ export async function deletePosEmployeeAction(id: string) {
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to delete employee.' };
+  }
+}
+
+export async function verifyPosEmployeePinAction(
+  employeeId: string,
+  pin: string
+): Promise<{
+  success: boolean;
+  session?: PosEmployeeSession;
+  error?: string;
+}> {
+  try {
+    const cleanId = typeof employeeId === 'string' ? employeeId.trim() : '';
+    const cleanPin = typeof pin === 'string' ? pin.trim() : '';
+
+    if (!cleanId || !cleanPin || cleanPin.length < 4 || cleanPin.length > 8) {
+      return { success: false, error: 'Invalid ID or PIN format.' };
+    }
+
+    let ip = '127.0.0.1';
+    try {
+      const headersList = await headers();
+      ip = getTrustedClientIp(headersList);
+    } catch {
+      // Outside request context
+    }
+
+    const rateLimitKey = `pos_emp_${cleanId}_${ip}`;
+    const rateCheck = checkPinRateLimit(rateLimitKey);
+    if (!rateCheck.allowed) {
+      return {
+        success: false,
+        error: `Too many failed attempts. Please try again in ${rateCheck.retryAfterSeconds || 60} seconds.`,
+      };
+    }
+
+    const supabase = getAdminSupabase();
+    const { data: employee, error: empErr } = await supabase
+      .from('employees')
+      .select('id, name, role, pin, is_active')
+      .eq('id', cleanId)
+      .maybeSingle();
+
+    if (empErr || !employee) {
+      recordFailedPinAttempt(rateLimitKey);
+      return { success: false, error: 'Incorrect PIN or unauthorized staff account.' };
+    }
+
+    const isActive = employee.is_active !== false;
+    if (!isActive) {
+      recordFailedPinAttempt(rateLimitKey);
+      return { success: false, error: 'This employee account is inactive. Please contact your manager.' };
+    }
+
+    const verifyResult = await verifyPinWithLegacyMigration(cleanPin, employee.pin);
+    if (!verifyResult.valid) {
+      recordFailedPinAttempt(rateLimitKey);
+      return { success: false, error: 'Incorrect PIN. Try again.' };
+    }
+
+    // Success - reset rate limit tracker
+    resetPinRateLimit(rateLimitKey);
+
+    // If legacy plaintext, seamlessly upgrade to bcrypt hash in background
+    if (verifyResult.wasLegacyPlaintext) {
+      try {
+        const hashed = await hashPin(cleanPin);
+        await supabase
+          .from('employees')
+          .update({ pin: hashed })
+          .eq('id', cleanId);
+      } catch (upgradeErr) {
+        console.error('[verifyPosEmployeePinAction] Failed to upgrade legacy PIN hash:', upgradeErr);
+      }
+    }
+
+    const session: PosEmployeeSession = {
+      id: employee.id,
+      name: employee.name || 'Staff',
+      role: (employee.role === 'manager' ? 'manager' : 'cashier') as EmployeeRole,
+      loginTime: new Date().toISOString(),
+    };
+
+    return { success: true, session };
+  } catch (err) {
+    console.error('[verifyPosEmployeePinAction] Unexpected error:', err);
+    return { success: false, error: 'Authentication verification failed.' };
   }
 }
 
@@ -3058,6 +3388,8 @@ export async function sendPosSaleEmailAction(saleId: string, emailAddress?: stri
       items,
       totalAmount: sale.total,
       paymentMethod: `Paid via ${sale.payment_method?.toUpperCase() || 'POS'}`,
+      paymentStatus: 'Paid',
+      isPaid: true,
       storeName,
       storePhone,
       storeEmail,
@@ -3117,75 +3449,196 @@ export async function getSaleByIdAction(
   }
 }
 
-export async function verifyManagerPinAction(pin: string): Promise<{
+export async function getEligibleManagersAction(): Promise<{
+  success: boolean;
+  data?: Array<{ id: string; name: string; role: string; avatar?: string }>;
+  error?: string;
+}> {
+  try {
+    const supabase = getAdminSupabase();
+    const managers: Array<{ id: string; name: string; role: string; avatar?: string }> = [];
+
+    // Query active managers/admins from employees table
+    const { data: employees } = await supabase
+      .from('employees')
+      .select('id, name, role, avatar, is_active')
+      .in('role', ['manager', 'admin'])
+      .neq('is_active', false);
+
+    if (employees && employees.length > 0) {
+      for (const e of employees) {
+        managers.push({
+          id: e.id,
+          name: e.name || 'Manager',
+          role: e.role,
+          avatar: e.avatar,
+        });
+      }
+    }
+
+    // Query admin/super_admin accounts from profiles table
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, name, role, avatar')
+      .in('role', ['manager', 'admin', 'super_admin', 'superuser', 'owner', 'store_manager']);
+
+    if (profiles && profiles.length > 0) {
+      for (const p of profiles) {
+        if (!managers.some((m) => m.id === p.id)) {
+          managers.push({
+            id: p.id,
+            name: p.name || 'Admin',
+            role: p.role,
+            avatar: p.avatar,
+          });
+        }
+      }
+    }
+
+    return { success: true, data: managers };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to load eligible managers.' };
+  }
+}
+
+export async function verifyManagerPinAction(
+  pin: string,
+  managerId?: string
+): Promise<{
   success: boolean;
   managerName?: string;
   error?: string;
 }> {
   try {
     const cleanPin = typeof pin === 'string' ? pin.trim() : '';
-    if (!cleanPin || cleanPin.length < 4) {
+    if (!cleanPin || cleanPin.length < 4 || cleanPin.length > 8) {
       return { success: false, error: 'Valid PIN is required.' };
+    }
+
+    let ip = '127.0.0.1';
+    try {
+      const headersList = await headers();
+      ip = getTrustedClientIp(headersList);
+    } catch {
+      // Outside request context
+    }
+
+    const rateLimitKey = `mgr_pin_${ip}`;
+    const rateCheck = checkPinRateLimit(rateLimitKey);
+    if (!rateCheck.allowed) {
+      return {
+        success: false,
+        error: `Too many failed attempts. Please try again in ${rateCheck.retryAfterSeconds || 60} seconds.`,
+      };
     }
 
     const supabase = getAdminSupabase();
 
-    // 1. Query profiles table for privileged manager/admin matching PIN
-    const { data: profiles, error: profileErr } = await supabase
-      .from('profiles')
-      .select('id, name, role, pin')
-      .eq('pin', cleanPin)
-      .limit(10);
+    // TARGETED FLOW: If managerId is supplied, verify only that specific manager account (single bcrypt comparison)
+    if (managerId && managerId.trim()) {
+      const cleanManagerId = managerId.trim();
 
-    if (profileErr) {
-      console.error('[verifyManagerPinAction] Database error querying profiles:', profileErr);
-      return { success: false, error: 'Authentication verification failed.' };
+      // Check employee record
+      const { data: emp } = await supabase
+        .from('employees')
+        .select('id, name, pin, role, is_active')
+        .eq('id', cleanManagerId)
+        .maybeSingle();
+
+      if (emp) {
+        if (emp.is_active === false) {
+          return { success: false, error: 'This manager account is inactive.' };
+        }
+        if (!['manager', 'admin'].includes(emp.role)) {
+          return { success: false, error: 'Selected account does not have manager authorization.' };
+        }
+        if (!emp.pin) {
+          return { success: false, error: 'Manager has no PIN configured.' };
+        }
+
+        const verifyRes = await verifyPinWithLegacyMigration(cleanPin, emp.pin);
+        if (verifyRes.valid) {
+          resetPinRateLimit(rateLimitKey);
+          if (verifyRes.wasLegacyPlaintext) {
+            try {
+              const hashed = await hashPin(cleanPin);
+              await supabase.from('employees').update({ pin: hashed }).eq('id', emp.id);
+            } catch (upgradeErr) {
+              console.error('[verifyManagerPinAction] Failed to upgrade employee PIN hash:', upgradeErr);
+            }
+          }
+          return { success: true, managerName: emp.name || 'Manager' };
+        } else {
+          recordFailedPinAttempt(rateLimitKey);
+          return { success: false, error: 'Invalid PIN entered for selected manager.' };
+        }
+      }
+
+      // Check profile record
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('id, name, role, pin')
+        .eq('id', cleanManagerId)
+        .maybeSingle();
+
+      if (profile) {
+        if (!['manager', 'admin', 'super_admin', 'superuser', 'owner', 'store_manager'].includes(profile.role)) {
+          return { success: false, error: 'Selected account does not have manager authorization.' };
+        }
+        if (!profile.pin) {
+          return { success: false, error: 'Account has no PIN configured.' };
+        }
+
+        const verifyRes = await verifyPinWithLegacyMigration(cleanPin, profile.pin);
+        if (verifyRes.valid) {
+          resetPinRateLimit(rateLimitKey);
+          if (verifyRes.wasLegacyPlaintext) {
+            try {
+              const hashed = await hashPin(cleanPin);
+              await supabase.from('profiles').update({ pin: hashed }).eq('id', profile.id);
+            } catch (upgradeErr) {
+              console.error('[verifyManagerPinAction] Failed to upgrade profile PIN hash:', upgradeErr);
+            }
+          }
+          return { success: true, managerName: profile.name || 'Admin' };
+        } else {
+          recordFailedPinAttempt(rateLimitKey);
+          return { success: false, error: 'Invalid PIN entered for selected account.' };
+        }
+      }
+
+      recordFailedPinAttempt(rateLimitKey);
+      return { success: false, error: 'Selected manager account was not found.' };
     }
 
-    const privilegedUser = (profiles || []).find((p) => {
-      const role = typeof p.role === 'string' ? p.role.toLowerCase() : '';
-      return (
-        role === 'manager' ||
-        role === 'admin' ||
-        role === 'super_admin' ||
-        role === 'superuser' ||
-        role === 'owner' ||
-        role === 'store_manager'
-      );
-    });
-
-    if (privilegedUser) {
-      return {
-        success: true,
-        managerName: privilegedUser.name || 'Manager',
-      };
-    }
-
-    // 2. Query employees table for active manager matching PIN
-    const { data: employees, error: empErr } = await supabase
+    // Direct fallback if managerId omitted (targeted to first matching active account)
+    const { data: employees } = await supabase
       .from('employees')
-      .select('id, name, pin, role, is_active, isActive')
-      .eq('pin', cleanPin)
+      .select('id, name, pin, role, is_active')
+      .in('role', ['manager', 'admin'])
+      .neq('is_active', false)
       .limit(10);
 
-    if (empErr) {
-      console.error('[verifyManagerPinAction] Database error querying employees:', empErr);
-      return { success: false, error: 'Authentication verification failed.' };
+    if (employees && employees.length > 0) {
+      for (const e of employees) {
+        if (!e.pin) continue;
+        const verifyRes = await verifyPinWithLegacyMigration(cleanPin, e.pin);
+        if (verifyRes.valid) {
+          resetPinRateLimit(rateLimitKey);
+          if (verifyRes.wasLegacyPlaintext) {
+            try {
+              const hashed = await hashPin(cleanPin);
+              await supabase.from('employees').update({ pin: hashed }).eq('id', e.id);
+            } catch (upgradeErr) {
+              console.error('[verifyManagerPinAction] Failed to upgrade employee PIN hash:', upgradeErr);
+            }
+          }
+          return { success: true, managerName: e.name || 'Manager' };
+        }
+      }
     }
 
-    const managerEmp = (employees || []).find((e) => {
-      const role = typeof e.role === 'string' ? e.role.toLowerCase() : '';
-      const active = e.is_active !== false && (e as { isActive?: boolean }).isActive !== false;
-      return active && (role === 'manager' || role === 'admin');
-    });
-
-    if (managerEmp) {
-      return {
-        success: true,
-        managerName: managerEmp.name || 'Manager',
-      };
-    }
-
+    recordFailedPinAttempt(rateLimitKey);
     return { success: false, error: 'Invalid Manager or Admin PIN.' };
   } catch (err) {
     console.error('[verifyManagerPinAction] Error:', err);
@@ -3193,9 +3646,9 @@ export async function verifyManagerPinAction(pin: string): Promise<{
   }
 }
 
-export async function voidSaleAction(id: string, managerPin: string) {
+export async function voidSaleAction(id: string, managerPin: string, managerId?: string) {
   try {
-    const verify = await verifyManagerPinAction(managerPin);
+    const verify = await verifyManagerPinAction(managerPin, managerId);
     if (!verify.success) {
       return { success: false, error: verify.error || 'Manager PIN required to void sales.' };
     }
@@ -4005,59 +4458,7 @@ export async function sendOrderInvoiceEmailAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
-    const order = await pbOrders.getById(id);
-    if (!order) return { success: false, error: 'Order not found.' };
-
-    const customerEmail = order.customer?.email || (order as any).customerEmail || (order as any).email;
-    if (!customerEmail) {
-      return { success: false, error: 'Order does not have a customer email address.' };
-    }
-
-    const customerName = order.customer?.name || (order as any).customerName || 'Customer';
-
-    let storeName = 'FTC Electronics';
-    let storePhone = '';
-    let storeEmail = '';
-    let storeAddress = '';
-
-    try {
-      const presetsRes = await getInvoicePrintPresetsAction();
-      if (presetsRes.success && presetsRes.data && presetsRes.data.length > 0) {
-        const defaultPreset = presetsRes.data.find((p) => p.isDefault) || presetsRes.data[0];
-        const config = JSON.parse(defaultPreset.config);
-        storeName = config.storeName || storeName;
-        storePhone = config.headerPhone || storePhone;
-        storeEmail = config.headerEmail || storeEmail;
-        storeAddress = config.headerAddress || storeAddress;
-      }
-    } catch (presetErr) {
-      console.warn('[sendOrderInvoiceEmailAction] Warning: Failed to load invoice config:', presetErr);
-    }
-
-    let items: Array<{ name: string; qty: number; unitPrice: number; discount?: number }> = [];
-    if (Array.isArray(order.items)) {
-      items = order.items.map((item: any) => ({
-        name: item.name || `Order Item`,
-        qty: item.quantity || 1,
-        unitPrice: item.price || 0,
-      }));
-    } else {
-      items = [{ name: `Order ${order.orderId || order.id}`, qty: 1, unitPrice: order.total }];
-    }
-
-    const emailResult = await sendOrderInvoiceEmail({
-      to: customerEmail,
-      orderNumber: order.orderId || order.id,
-      customerName,
-      shippingAddress: order.shippingAddress || '',
-      items,
-      totalAmount: order.total,
-      paymentMethod: order.paymentDetails?.method ? `${order.paymentDetails.method.toUpperCase()} (${order.paymentDetails.status || 'paid'})` : 'Paid',
-      storeName,
-      storePhone,
-      storeEmail,
-      storeAddress,
-    });
+    const emailResult = await sendInvoiceEmailForOrder(id);
 
     if (!emailResult.success) {
       return { success: false, error: emailResult.error || 'Failed to send email.' };
@@ -4174,7 +4575,9 @@ export async function sendInvoiceViaWorkflowAction(params: SendInvoiceWorkflowPa
       shippingAddress: '',
       items,
       totalAmount: sale.total,
-      paymentMethod: `Paid via ${sale.payment_method?.toUpperCase() || 'POS'}`,
+      paymentMethod: sale.payment_method || 'cash',
+      paymentStatus: 'Paid',
+      isPaid: true,
       storeName,
       storePhone,
       storeEmail,
@@ -4684,7 +5087,125 @@ export async function getProductSalesHistoryAction(productId: string): Promise<{
   }
 }
 
+// ─── Audit Log Action ───────────────────────────────────────────────────────
 
+/**
+ * Server action to securely retrieve audit log entries with permission verification.
+ * Only authenticated administrators with 'auditLog' read permissions can access this.
+ */
+export async function getAdminAuditLogsAction(limit: number = 50): Promise<{
+  success: boolean;
+  data?: any[];
+  error?: string;
+}> {
+  const perm = await checkPermission('auditLog', 'read');
+  if (!perm.allowed) {
+    return { success: false, data: [], error: 'Unauthorized: Access to audit log is restricted.' };
+  }
 
+  try {
+    const supabase = getAdminSupabase();
+    const safeLimit = Math.min(Math.max(1, limit), 200);
+    const { data, error } = await supabase
+      .from('audit_log')
+      .select('id, actor, action, collection, record_id, old_value, new_value, ip, user_agent, created_at, updated_at')
+      .order('created_at', { ascending: false })
+      .limit(safeLimit);
 
+    if (error) {
+      console.error('[getAdminAuditLogsAction] Query error:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
+      return { success: false, data: [], error: 'Failed to retrieve audit log records.' };
+    }
+
+    const items = (data || []).map((row) => ({
+      id: row.id,
+      actor: row.actor || 'System',
+      action: row.action || 'update',
+      collection: row.collection || 'system',
+      recordId: row.record_id || '',
+      oldValue: row.old_value || '',
+      newValue: row.new_value || '',
+      ip: row.ip || '',
+      userAgent: row.user_agent || '',
+      created: row.created_at,
+      updated: row.updated_at,
+      collectionId: 'audit_log',
+      collectionName: 'audit_log',
+    }));
+
+    return { success: true, data: items };
+  } catch (err) {
+    console.error('[getAdminAuditLogsAction] Unexpected error:', err);
+    return { success: false, data: [], error: 'Internal server error loading audit logs.' };
+  }
+}
+
+/**
+ * Admin action to download authoritative Invoice PDF for a paid order.
+ */
+export async function downloadOrderInvoicePdfAction(orderId: string): Promise<{
+  success: boolean;
+  filename?: string;
+  pdfBase64?: string;
+  error?: string;
+}> {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const invoiceResult = await ensureInvoiceForPaidOrder(orderId);
+    if (!invoiceResult.success || !invoiceResult.data) {
+      return { success: false, error: invoiceResult.error || 'Invoice not available for this order.' };
+    }
+
+    const pdfBuffer = await generateInvoicePdf(invoiceResult.data);
+    return {
+      success: true,
+      filename: `FTC-Invoice-${invoiceResult.data.invoiceNumber}.pdf`,
+      pdfBase64: pdfBuffer.toString('base64'),
+    };
+  } catch (err: any) {
+    console.error('[downloadOrderInvoicePdfAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to generate invoice PDF.' };
+  }
+}
+
+/**
+ * Admin action to preview/download sample Invoice PDF for Printer Presets testing.
+ * Uses completely mock data without creating orders or consuming invoice sequence numbers.
+ */
+export async function getSampleInvoicePdfAction(customPreset?: InvoicePrintConfig): Promise<{
+  success: boolean;
+  filename?: string;
+  pdfBase64?: string;
+  error?: string;
+}> {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const sampleData = generateSampleInvoiceData('Invoice');
+    if (customPreset) {
+      if (customPreset.storeName) sampleData.business.storeName = customPreset.storeName;
+      if (customPreset.headerAddress) sampleData.business.address = customPreset.headerAddress;
+      if (customPreset.headerPhone) sampleData.business.phone = customPreset.headerPhone;
+      if (customPreset.headerEmail) sampleData.business.email = customPreset.headerEmail;
+      if (customPreset.termsAndConditions) sampleData.termsAndConditions = customPreset.termsAndConditions;
+    }
+    const pdfBuffer = await generateInvoicePdf(sampleData);
+    return {
+      success: true,
+      filename: 'FTC-Sample-Invoice.pdf',
+      pdfBase64: pdfBuffer.toString('base64'),
+    };
+  } catch (err: any) {
+    console.error('[getSampleInvoicePdfAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to generate sample PDF.' };
+  }
+}
 

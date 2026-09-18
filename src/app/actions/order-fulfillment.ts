@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { getAdminSupabase, writeAuditLog } from '@/lib/supabase-admin';
 import { checkPermission } from '@/app/actions/admin';
-import { sendOrderShippingEmail } from '@/lib/email';
+import { sendOrderShippingEmail, formatPaymentMethod } from '@/lib/email';
+import { requiresPaymentBeforeShipment } from '@/lib/order-email';
 import type { ShippingAddress } from '@/types/order';
 
 interface StockUnitRecord {
@@ -170,6 +171,21 @@ export async function shipOrderWithSerialsAction(payload: SerialAssignmentPayloa
 
     if (error || !order) {
       return { success: false, error: 'Order record not found.' };
+    }
+
+    const paymentMethod = order.payment_details?.method;
+    if (requiresPaymentBeforeShipment(paymentMethod) && !order.is_paid) {
+      return {
+        success: false,
+        error: `Cannot fulfill and ship a ${formatPaymentMethod(paymentMethod)} order before payment is verified and marked as paid.`,
+      };
+    }
+
+    if (paymentMethod === 'cash_pickup') {
+      return {
+        success: false,
+        error: 'Cash on Pickup orders are fulfilled and handed over in-store upon payment, not shipped via courier.',
+      };
     }
 
     const itemsRaw: Array<{
@@ -421,6 +437,9 @@ export async function shipOrderWithSerialsAction(payload: SerialAssignmentPayloa
           shippingAddress: order.shipping_address,
           courierName: payload.courierName || 'Standard Courier',
           trackingNumber: payload.trackingNumber || '',
+          paymentMethod: order.payment_details?.method,
+          isPaid: order.is_paid,
+          totalAmount: order.total,
           items: updatedItems.map((i) => ({
             name: i.name || 'Product',
             qty: i.quantity || i.qty || 1,

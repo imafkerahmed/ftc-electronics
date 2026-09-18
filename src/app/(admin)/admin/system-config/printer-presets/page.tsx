@@ -38,6 +38,7 @@ import {
   saveInvoicePrintPresetAction,
   deleteInvoicePrintPresetAction,
   setDefaultInvoicePrintPresetAction,
+  getSampleInvoicePdfAction,
 } from '@/app/actions/admin';
 
 interface PBPreset {
@@ -711,7 +712,7 @@ function InvoicePresetEditor({
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1">
             <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Preset Name *</label>
-            <Input value={cfg.label} onChange={(e) => set('label', e.target.value)} placeholder='e.g. "Standard A4 Tax Invoice"' className="h-8 text-xs" required />
+            <Input value={cfg.label} onChange={(e) => set('label', e.target.value)} placeholder='e.g. "Standard A4 Invoice"' className="h-8 text-xs" required />
           </div>
           <div className="flex items-end pb-1">
             <label className="flex items-center gap-2 cursor-pointer text-xs text-foreground/80">
@@ -832,7 +833,7 @@ function InvoicePresetEditor({
             </div>
             <Button type="button" variant="outline" onClick={onCancel} className="text-xs h-8 px-4 cursor-pointer">Cancel</Button>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button
               type="button"
               variant="outline"
@@ -850,6 +851,41 @@ function InvoicePresetEditor({
               title="Print test sales invoice sample"
             >
               <TestTube className="h-3.5 w-3.5" /> Test Inv
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isPending}
+              onClick={async () => {
+                try {
+                  const res = await getSampleInvoicePdfAction(cfg);
+                  if (res.success && res.pdfBase64) {
+                    const byteCharacters = atob(res.pdfBase64);
+                    const byteNumbers = new Array(byteCharacters.length);
+                    for (let i = 0; i < byteCharacters.length; i++) {
+                      byteNumbers[i] = byteCharacters.charCodeAt(i);
+                    }
+                    const byteArray = new Uint8Array(byteNumbers);
+                    const blob = new Blob([byteArray], { type: 'application/pdf' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = res.filename || 'FTC-Sample-Invoice.pdf';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                  } else {
+                    setErr(res.error || 'Failed to generate test PDF.');
+                  }
+                } catch (pdfErr: any) {
+                  setErr(pdfErr.message || 'Error generating test PDF.');
+                }
+              }}
+              className="text-xs h-8 px-2.5 border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10 flex items-center gap-1 cursor-pointer font-medium"
+              title="Download sample vector PDF invoice"
+            >
+              <FileText className="h-3.5 w-3.5" /> Sample PDF
             </Button>
           </div>
         </div>

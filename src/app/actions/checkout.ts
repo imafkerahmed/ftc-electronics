@@ -4,10 +4,13 @@ import crypto from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { getAdminSupabase } from '@/lib/supabase-admin';
 import { sbProducts } from '@/lib/supabase-collections';
-import { sendInvoiceEmailForOrder, verifySlipUploadToken } from '@/lib/order-email';
+import { sendInvoiceEmailForOrder, verifySlipUploadToken, generateSlipUploadToken } from '@/lib/order-email';
 import { getCurrentUserSessionAction } from '@/app/actions/auth';
 import { headers } from 'next/headers';
 import { getTrustedClientIp } from '@/lib/get-client-ip';
+import { createClient as createServerSupabase } from '@/lib/supabase/server';
+import { ensureInvoiceForPaidOrder } from '@/lib/invoice-service';
+import { generateInvoicePdf } from '@/lib/invoice-pdf';
 import type { ShippingAddress } from '@/types/order';
 
 const globalForOrderVerifyRateLimit = globalThis as unknown as {
@@ -62,7 +65,7 @@ export interface CheckoutProductRow {
   discount_price: number | null;
   count_in_stock: number | null;
   images: string[] | null;
-  is_active: boolean | null;
+  status: string;
 }
 
 export type OnlinePaymentMethod = 'payhere' | 'bank_transfer' | 'cash_pickup' | 'cash_delivery';
@@ -116,6 +119,14 @@ export async function processCheckoutOrderAction(data: {
       }
 
       const cleanProductId = item.productId.trim();
+      const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!UUID_REGEX.test(cleanProductId)) {
+        return {
+          success: false,
+          error: `"${item.name || 'A product in your cart'}" is no longer available in the catalog. Please remove it and add the updated product to your cart.`,
+        };
+      }
+
       const existing = consolidatedItemsMap.get(cleanProductId);
       if (existing) {
         existing.quantity += item.quantity;
@@ -129,11 +140,16 @@ export async function processCheckoutOrderAction(data: {
     // Query trusted products directly by primary key IDs
     const { data: dbProducts, error: prodErr } = await supabase
       .from('products')
-      .select('id, name, slug, price, discount_price, count_in_stock, images, is_active')
+      .select('id, name, slug, price, discount_price, count_in_stock, images, status')
       .in('id', productIds);
 
     if (prodErr || !dbProducts) {
-      console.error('[processCheckoutOrderAction] Product fetch error:', prodErr);
+      console.error('[processCheckoutOrderAction] Product fetch error:', {
+        message: prodErr?.message,
+        code: prodErr?.code,
+        details: prodErr?.details,
+        hint: prodErr?.hint,
+      });
       return { success: false, error: 'Failed to verify cart items. Please try again.' };
     }
 
@@ -145,7 +161,7 @@ export async function processCheckoutOrderAction(data: {
     // Validate existence, active status, and requested stock quantities
     for (const item of itemsToProcess) {
       const product = productMap.get(item.productId);
-      if (!product || product.is_active === false) {
+      if (!product || product.status !== 'published') {
         return {
           success: false,
           error: `"${item.name || 'A selected product'}" is no longer available.`,
@@ -200,7 +216,8 @@ export async function processCheckoutOrderAction(data: {
 
     const isCash = paymentMethod === 'cash_pickup' || paymentMethod === 'cash_delivery';
     const isPayHere = paymentMethod === 'payhere';
-    const orderStatus = isPayHere ? 'checkout_draft' : isCash ? 'processing' : 'pending';
+    const isBankTransfer = paymentMethod === 'bank_transfer';
+    const orderStatus = isCash ? 'processing' : 'pending';
 
     const paymentMethodLabel = {
       payhere: 'PayHere (Card/Wallet)',
@@ -222,10 +239,19 @@ export async function processCheckoutOrderAction(data: {
     }
 
     let userId: string | undefined = undefined;
+    let customerId: string | undefined = undefined;
     try {
       const sessionRes = await getCurrentUserSessionAction();
       if (sessionRes.success && sessionRes.user) {
         userId = sessionRes.user.id;
+        const { data: custRow } = await supabase
+          .from('customers')
+          .select('id')
+          .eq('profile_id', userId)
+          .maybeSingle();
+        if (custRow) {
+          customerId = custRow.id;
+        }
       }
     } catch {
       // guest checkout
@@ -239,6 +265,7 @@ export async function processCheckoutOrderAction(data: {
         id: uuid,
         order_id: orderId,
         user_id: userId || null,
+        customer_id: customerId || null,
         customer: {
           userId,
           name: data.customerName,
@@ -286,20 +313,32 @@ export async function processCheckoutOrderAction(data: {
 
     if (isPayHere) {
       console.log(`[Checkout Action] PayHere order created as draft ${orderId}. Waiting for payment webhook completion.`);
-    } else if (paymentMethod === 'bank_transfer') {
+    } else {
       try {
         await sendInvoiceEmailForOrder(orderRecord.id);
       } catch (emailErr) {
-        console.error('[Checkout Action] Failed to send bank transfer instructions email:', emailErr);
+        console.error('[Checkout Action] Failed to send order confirmation email:', emailErr);
       }
     }
 
-    revalidatePath('/admin/inventory');
-    revalidatePath('/admin/orders');
-    revalidatePath('/admin/products');
-    revalidatePath('/products');
+    try {
+      revalidatePath('/admin/inventory');
+      revalidatePath('/admin/orders');
+      revalidatePath('/admin/products');
+      revalidatePath('/products');
+    } catch {
+      // Ignored outside request context (e.g. tests or isolated execution)
+    }
 
-    return { success: true, orderId: orderRecord.id, orderNumber: orderId, total: totalAmount };
+    const slipUploadToken = isBankTransfer ? generateSlipUploadToken(orderId) : undefined;
+
+    return {
+      success: true,
+      orderId: orderRecord.id,
+      orderNumber: orderId,
+      total: totalAmount,
+      slipUploadToken,
+    };
   } catch (err: any) {
     console.error('Failed to process checkout order:', err);
     return { success: false, error: err.message || 'Failed to process order.' };
@@ -340,17 +379,13 @@ export async function verifyOrderForSlipUploadAction(orderNumber: string, email?
     }
 
     // Ownership Verification:
-    // Check if caller is authenticated session owner, has valid signed upload token, or supplied matching email
+    // Check if caller is authenticated session owner or has valid signed upload token
     let isOwner = false;
     try {
       const sessionRes = await getCurrentUserSessionAction();
       if (sessionRes.success && sessionRes.user) {
         const orderUserId = orderRecord.customer?.userId || orderRecord.user_id;
-        const orderEmail = (orderRecord.customer?.email || orderRecord.email || '').toLowerCase().trim();
-        if (
-          (orderUserId && sessionRes.user.id === orderUserId) ||
-          (orderEmail && sessionRes.user.email?.toLowerCase().trim() === orderEmail)
-        ) {
+        if (orderUserId && sessionRes.user.id === orderUserId) {
           isOwner = true;
         }
       }
@@ -370,23 +405,18 @@ export async function verifyOrderForSlipUploadAction(orderNumber: string, email?
       }
     }
 
-    if (!isOwner && email) {
-      const orderEmail = (orderRecord.customer?.email || orderRecord.email || '').toLowerCase().trim();
-      if (orderEmail && email.toLowerCase().trim() === orderEmail) {
-        isOwner = true;
-      }
-    }
-
     if (!isOwner) {
       return {
         success: false,
         isAuthorized: false,
-        error: 'Verification required. Please log in with your account, use the link from your email, or verify with your order email.',
+        error: 'Verification required. Please log in with the account that placed this order or use the secure link sent to your email.',
       };
     }
 
     const isBankTransfer = orderRecord.payment_details?.method === 'bank_transfer';
     const isAuthorized = Boolean(isBankTransfer && !orderRecord.is_paid);
+
+    const verifiedToken = token || (isBankTransfer ? generateSlipUploadToken(orderRecord.order_id || orderRecord.id) : undefined);
 
     return {
       success: true,
@@ -397,6 +427,7 @@ export async function verifyOrderForSlipUploadAction(orderNumber: string, email?
         paymentMethod: orderRecord.payment_details?.method || 'bank_transfer',
         customerEmail: orderRecord.customer?.email || '',
         total: Number(orderRecord.total || 0),
+        slipUploadToken: verifiedToken,
       },
     };
   } catch {
@@ -416,7 +447,7 @@ export async function uploadPaymentSlipAction(formData: FormData) {
     const supabase = getAdminSupabase();
     const orderNumber = formData.get('orderNumber') as string | null;
     const slip = formData.get('slip') as File | null;
-    const customerEmailInput = formData.get('customerEmail') as string | null;
+    const tokenInput = (formData.get('token') || formData.get('guestAccessToken')) as string | null;
 
     if (!slip || !orderNumber) {
       return { success: false, error: 'Missing slip file or order number.' };
@@ -452,58 +483,77 @@ export async function uploadPaymentSlipAction(formData: FormData) {
       return { success: false, error: `Order ${orderNumber} not found in system.` };
     }
 
-    // Verify ownership before accepting upload
-    let isOwner = false;
+    // Validate payment method and payment state
+    const isBankTransfer = targetOrder.payment_details?.method === 'bank_transfer';
+    if (!isBankTransfer) {
+      return { success: false, error: 'Payment slip upload is only permitted for Bank Transfer orders.' };
+    }
+    if (targetOrder.is_paid) {
+      return { success: false, error: 'This order is already marked as paid. Slip upload is not allowed.' };
+    }
+
+    // Verify ownership before accepting upload:
+    // Authenticated users: canonical user_id ownership check.
+    // Guest orders: cryptographic HMAC token verification.
+    let isAuthorized = false;
     try {
       const sessionRes = await getCurrentUserSessionAction();
       if (sessionRes.success && sessionRes.user) {
-        const orderUserId = targetOrder.customer?.userId || targetOrder.user_id;
-        const orderEmail = (targetOrder.customer?.email || targetOrder.email || '').toLowerCase().trim();
-        if (
-          (orderUserId && sessionRes.user.id === orderUserId) ||
-          (orderEmail && sessionRes.user.email?.toLowerCase().trim() === orderEmail)
-        ) {
-          isOwner = true;
+        const orderUserId = targetOrder.user_id || targetOrder.customer?.userId;
+        if (orderUserId && sessionRes.user.id === orderUserId) {
+          isAuthorized = true;
         }
       }
     } catch {
       // not logged in
     }
 
-    if (!isOwner && customerEmailInput) {
-      const orderEmail = (targetOrder.customer?.email || targetOrder.email || '').toLowerCase().trim();
-      if (orderEmail && customerEmailInput.toLowerCase().trim() === orderEmail) {
-        isOwner = true;
+    if (!isAuthorized && tokenInput) {
+      const orderNum = targetOrder.order_id || '';
+      const orderDbId = targetOrder.id || '';
+      if (
+        (orderNum && verifySlipUploadToken(orderNum, tokenInput)) ||
+        (orderDbId && verifySlipUploadToken(orderDbId, tokenInput)) ||
+        verifySlipUploadToken(cleanOrderNumber, tokenInput)
+      ) {
+        isAuthorized = true;
       }
     }
 
-    if (!isOwner) {
-      return { success: false, error: 'Unauthorized. You do not have permission to upload a slip for this order.' };
+    if (!isAuthorized) {
+      return {
+        success: false,
+        error: 'Unauthorized: You must be logged into the account that placed this order or provide a valid verification link.',
+      };
     }
 
-    // Upload to Supabase Storage with server-generated unique file path
+    // Upload to private Supabase Storage bucket: ftc-payment-slips
     const buf = await slip.arrayBuffer();
     const uniqueFileId = crypto.randomUUID();
-    const fName = `slips/order-${targetOrder.id}-${Date.now()}-${uniqueFileId}.${ext}`;
+    const privateObjectPath = `orders/${targetOrder.id}/${uniqueFileId}.${ext}`;
 
     const { error: uploadErr } = await supabase.storage
-      .from('ftc-media')
-      .upload(fName, buf, { contentType: mime, upsert: false });
+      .from('ftc-payment-slips')
+      .upload(privateObjectPath, buf, { contentType: mime, upsert: false });
 
     if (uploadErr) {
-      console.error('Failed to upload slip to storage:', uploadErr);
-      return { success: false, error: 'Failed to upload slip file to storage.' };
+      console.error('Failed to upload slip to private storage:', uploadErr);
+      return { success: false, error: 'Failed to upload slip file to secure storage.' };
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const fullPublicUrl = `${supabaseUrl}/storage/v1/object/public/ftc-media/${fName}`;
+    const existingPaymentDetails = targetOrder.payment_details || targetOrder.paymentDetails || {};
+    const oldSlipPath = existingPaymentDetails.paymentSlipPath;
+    const oldSlipUrl = existingPaymentDetails.paymentSlipUrl;
 
     const existingNotes = targetOrder.notes || '';
     const slipNote = `Payment slip uploaded on ${new Date().toLocaleString()}`;
     const newNotes = existingNotes ? `${existingNotes} | ${slipNote}` : slipNote;
 
-    const existingPaymentDetails = targetOrder.payment_details || targetOrder.paymentDetails || {};
-    const newPaymentDetails = { ...existingPaymentDetails, paymentSlipUrl: fullPublicUrl };
+    const newPaymentDetails = {
+      ...existingPaymentDetails,
+      paymentSlipPath: privateObjectPath,
+    };
+    delete newPaymentDetails.paymentSlipUrl;
 
     const { error: updateErr } = await supabase
       .from('orders')
@@ -515,15 +565,114 @@ export async function uploadPaymentSlipAction(formData: FormData) {
       .eq('id', targetOrder.id);
 
     if (updateErr) {
-      console.error('Failed to update order with payment slip URL:', updateErr);
+      console.error('Failed to update order with payment slip path:', updateErr);
       return { success: false, error: 'Failed to attach the slip to the order.' };
     }
 
-    revalidatePath('/admin/orders');
+    // Safely remove previous replaced object if one existed
+    if (oldSlipPath && oldSlipPath !== privateObjectPath) {
+      try {
+        await supabase.storage.from('ftc-payment-slips').remove([oldSlipPath]);
+      } catch (cleanupErr) {
+        console.warn('Failed to delete old replaced payment slip from private storage:', cleanupErr);
+      }
+    } else if (oldSlipUrl && typeof oldSlipUrl === 'string' && oldSlipUrl.includes('ftc-media/slips/')) {
+      try {
+        const pathPart = oldSlipUrl.split('ftc-media/')[1];
+        if (pathPart) {
+          await supabase.storage.from('ftc-media').remove([decodeURIComponent(pathPart)]);
+        }
+      } catch (cleanupErr) {
+        console.warn('Failed to delete old historical payment slip from public storage:', cleanupErr);
+      }
+    }
+
+    try {
+      revalidatePath('/admin/orders');
+    } catch {
+      // safe fallback outside request store
+    }
     return { success: true };
   } catch (err: unknown) {
     console.error('Failed to upload payment slip:', err);
     return { success: false, error: err instanceof Error ? err.message : 'Upload failed. Please try again.' };
+  }
+}
+
+export async function getCustomerPaymentSlipSignedUrlAction(
+  orderIdRecord: string,
+  guestAccessToken?: string
+): Promise<{ success: boolean; signedUrl?: string; error?: string }> {
+  try {
+    const supabase = getAdminSupabase();
+    const cleanOrderId = (orderIdRecord || '').replace(/[^a-zA-Z0-9-]/g, '');
+    if (!cleanOrderId) return { success: false, error: 'Invalid order reference.' };
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanOrderId);
+    let query = supabase.from('orders').select('*');
+    if (isUuid) {
+      query = query.or(`id.eq.${cleanOrderId},order_id.eq.${cleanOrderId}`);
+    } else {
+      query = query.eq('order_id', cleanOrderId);
+    }
+    const { data: order, error } = await query.maybeSingle();
+
+    if (error || !order) {
+      return { success: false, error: 'Order not found.' };
+    }
+
+    // 1. Authenticated User Authorization
+    let isAuthorized = false;
+    try {
+      const sessionRes = await getCurrentUserSessionAction();
+      if (sessionRes.success && sessionRes.user) {
+        const orderUserId = order.user_id || order.customer?.userId;
+        if (orderUserId && sessionRes.user.id === orderUserId) {
+          isAuthorized = true;
+        }
+      }
+    } catch {
+      // not logged in
+    }
+
+    // 2. Guest Order Token Authorization
+    if (!isAuthorized && guestAccessToken) {
+      const orderNum = order.order_id || '';
+      const orderDbId = order.id || '';
+      if (
+        (orderNum && verifySlipUploadToken(orderNum, guestAccessToken)) ||
+        (orderDbId && verifySlipUploadToken(orderDbId, guestAccessToken)) ||
+        verifySlipUploadToken(cleanOrderId, guestAccessToken)
+      ) {
+        isAuthorized = true;
+      }
+    }
+
+    if (!isAuthorized) {
+      return { success: false, error: 'Unauthorized: You do not have permission to view this payment slip.' };
+    }
+
+    const slipPath = order.payment_details?.paymentSlipPath;
+    const slipUrl = order.payment_details?.paymentSlipUrl;
+
+    if (slipPath) {
+      const { data, error: signErr } = await supabase.storage
+        .from('ftc-payment-slips')
+        .createSignedUrl(slipPath, 120); // 120s TTL
+
+      if (signErr || !data?.signedUrl) {
+        return { success: false, error: 'Failed to generate secure viewing link.' };
+      }
+      return { success: true, signedUrl: data.signedUrl };
+    }
+
+    if (slipUrl) {
+      return { success: true, signedUrl: slipUrl };
+    }
+
+    return { success: false, error: 'No payment slip found for this order.' };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : 'Failed to view payment slip.' };
   }
 }
 
@@ -730,5 +879,105 @@ export async function confirmPayHereReturnAction(orderNumber: string) {
   } catch (err: any) {
     console.error('[confirmPayHereReturnAction] Error:', err);
     return { success: false, error: 'Failed to verify payment status.', status: 'error' };
+  }
+}
+
+/**
+ * Customer Invoice PDF Download Action.
+ * Securely authorizes the authenticated customer against the requested order using
+ * canonical immutable UUID relationships (user_id / profile_id), or a verified cryptographic
+ * HMAC token for guest orders. Plain email matching is explicitly disallowed.
+ */
+export async function downloadCustomerInvoicePdfAction(
+  orderId: string,
+  guestAccessToken?: string
+): Promise<{
+  success: boolean;
+  filename?: string;
+  pdfBase64?: string;
+  error?: string;
+}> {
+  try {
+    const supabase = await createServerSupabase();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    const cleanOrderId = orderId.replace(/[^a-zA-Z0-9-]/g, '');
+    if (!cleanOrderId) {
+      return { success: false, error: 'Invalid order identifier.' };
+    }
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanOrderId);
+    const adminSb = getAdminSupabase();
+    let query = adminSb.from('orders').select('*');
+    if (isUuid) {
+      query = query.or(`id.eq.${cleanOrderId},order_id.eq.${cleanOrderId}`);
+    } else {
+      query = query.eq('order_id', cleanOrderId);
+    }
+    const { data: order, error: orderErr } = await query.maybeSingle();
+
+    if (orderErr || !order) {
+      return { success: false, error: 'Order not found.' };
+    }
+
+    // 1. Authenticated User Authorization: Canonical immutable UUID verification
+    let isAuthorized = false;
+
+    if (user) {
+      const orderUserId = order.user_id || order.customer?.userId;
+      if (orderUserId && orderUserId === user.id) {
+        isAuthorized = true;
+      } else if (order.customer_id) {
+        // Verify customer record link to profile
+        const { data: custRecord } = await adminSb
+          .from('customers')
+          .select('id')
+          .eq('id', order.customer_id)
+          .eq('profile_id', user.id)
+          .maybeSingle();
+
+        if (custRecord) {
+          isAuthorized = true;
+        }
+      }
+    }
+    // 2. Guest Order Authorization: Cryptographic HMAC-SHA256 token verification
+    else if (guestAccessToken) {
+      const orderNum = order.order_id || '';
+      const orderDbId = order.id || '';
+      const tokenValid = (orderNum && verifySlipUploadToken(orderNum, guestAccessToken)) ||
+                         (orderDbId && verifySlipUploadToken(orderDbId, guestAccessToken));
+
+      if (tokenValid) {
+        isAuthorized = true;
+      }
+    }
+
+    if (!isAuthorized) {
+      if (!user && !guestAccessToken) {
+        return { success: false, error: 'Please sign in to access your invoice.' };
+      }
+      return { success: false, error: 'Access denied: You do not have permission to download this invoice.' };
+    }
+
+    const isPaid = order.is_paid === true || order.payment_status === 'paid' || order.status === 'delivered' || order.status === 'completed';
+    if (!isPaid) {
+      return { success: false, error: 'Official Invoice is only available after payment has been confirmed.' };
+    }
+
+    const invoiceResult = await ensureInvoiceForPaidOrder(order.id);
+    if (!invoiceResult.success || !invoiceResult.data) {
+      return { success: false, error: invoiceResult.error || 'Failed to issue or retrieve invoice.' };
+    }
+
+    const pdfBuffer = await generateInvoicePdf(invoiceResult.data);
+    return {
+      success: true,
+      filename: `FTC-Invoice-${invoiceResult.data.invoiceNumber}.pdf`,
+      pdfBase64: pdfBuffer.toString('base64'),
+    };
+  } catch (err: any) {
+    console.error('[downloadCustomerInvoicePdfAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to generate invoice PDF.' };
   }
 }

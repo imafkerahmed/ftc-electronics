@@ -111,7 +111,7 @@ export function getInvoiceHtml(
     .map((item, index) => {
       const lineTotal = item.qty * item.unitPrice - (item.discount || 0);
       const serialHtml = item.serialNumber
-        ? `<div class="item-sn">SN: ${esc(item.serialNumber)}</div>`
+        ? `<div class="item-sn">S/N: ${esc(item.serialNumber)}</div>`
         : '';
       return `
         <tr>
@@ -133,67 +133,92 @@ export function getInvoiceHtml(
     <!DOCTYPE html>
     <html>
       <head>
+        <meta charset="utf-8" />
         <title>${esc(docHeading)} — ${esc(data.docNumber)}</title>
         ${cfg.showQrCode ? '<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"><\/script>' : ''}
         <style>
           @page {
-            size: ${cfg.paperWidthMm}mm auto;
-            margin: 0;
+            size: ${isThermal ? `${cfg.paperWidthMm}mm auto` : 'A4 portrait'};
+            margin: ${isThermal ? '2mm' : '8mm 10mm'};
           }
           * { box-sizing: border-box; margin: 0; padding: 0; }
           body {
-            font-family: system-ui, -apple-system, sans-serif;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             font-size: ${cfg.fontSizeMm}mm;
-            line-height: 1.4;
+            line-height: 1.35;
             color: #0f172a;
             background: ${isPreview ? 'transparent' : '#fff'};
-            width: ${cfg.paperWidthMm}mm;
-            padding: ${isThermal ? '6mm 4mm' : '15mm 20mm'};
+            width: 100%;
+            max-width: ${cfg.paperWidthMm}mm;
+            padding: ${isThermal ? '3mm' : (isPreview ? '6mm 8mm' : '8mm 10mm')};
             margin: 0 auto;
           }
-          .top-row { display: flex; justify-content: space-between; margin-bottom: 20px; align-items: flex-start; }
-          .brand-title { font-size: 20px; font-weight: 800; text-transform: uppercase; color: #0f172a; letter-spacing: -0.5px; }
-          .brand-sub { font-size: 11px; color: #64748b; margin-top: 2px; }
+          .top-row { display: flex; justify-content: space-between; margin-bottom: 12px; align-items: flex-start; }
+          .brand-title { font-size: 17px; font-weight: 800; text-transform: uppercase; color: #0f172a; letter-spacing: -0.3px; }
+          .brand-sub { font-size: 9.5px; color: #64748b; margin-top: 1.5px; line-height: 1.3; }
           .doc-header-right { text-align: right; }
-          .doc-type-title { font-size: 22px; font-weight: 900; color: #1e3a8a; letter-spacing: -0.5px; }
-          .doc-meta-line { font-size: 11px; color: #475569; margin-top: 3px; }
+          .doc-type-title { font-size: 19px; font-weight: 900; color: #1e3a8a; letter-spacing: -0.3px; }
+          .doc-meta-line { font-size: 9.5px; color: #475569; margin-top: 2px; }
           
-          .customer-section { margin-bottom: 24px; border-left: 2px solid #cbd5e1; padding-left: 12px; }
-          .section-label { font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px; }
-          .customer-name { font-size: 13px; font-weight: 700; color: #0f172a; margin-top: 2px; }
-          .customer-detail { font-size: 11px; color: #475569; margin-top: 1px; }
+          .customer-section { margin-bottom: 12px; border-left: 2.5px solid #cbd5e1; padding: 2px 0 2px 10px; }
+          .section-label { font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px; }
+          .customer-name { font-size: 12px; font-weight: 700; color: #0f172a; margin-top: 1px; }
+          .customer-detail { font-size: 10px; color: #475569; margin-top: 1px; }
 
-          table { width: 100%; border-collapse: collapse; margin: 20px 0 24px 0; }
-          th { background: #f8fafc; font-size: 10px; font-weight: 700; text-transform: uppercase; color: #475569; text-align: left; padding: 8px 10px; border-bottom: 2px solid #e2e8f0; }
-          td { padding: 10px; vertical-align: top; border-bottom: 1px solid #f1f5f9; }
-          .col-idx { width: 35px; color: #94a3b8; font-size: 11px; text-align: center; }
-          .col-desc { font-size: 12px; }
+          table { width: 100%; border-collapse: collapse; margin: 10px 0 12px 0; }
+          th { background: #f8fafc; font-size: 9px; font-weight: 700; text-transform: uppercase; color: #475569; text-align: left; padding: 6px 8px; border-bottom: 1.5px solid #e2e8f0; }
+          td { padding: 5px 8px; vertical-align: top; border-bottom: 1px solid #f1f5f9; }
+          .col-idx { width: 28px; color: #94a3b8; font-size: 9.5px; text-align: center; }
+          .col-desc { font-size: 10.5px; }
           .item-title { font-weight: 600; color: #0f172a; }
-          .item-sn { font-size: 9px; color: #64748b; margin-top: 1px; font-family: monospace; }
-          .col-num { font-size: 11px; text-align: right; color: #334155; }
+          .item-sn { font-size: 8.5px; color: #2563eb; margin-top: 1px; font-family: monospace; }
+          .col-num { font-size: 10px; text-align: right; color: #334155; }
           .total-cell { font-weight: 600; color: #0f172a; }
 
-          .bottom-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; margin-top: 20px; }
-          .info-block { margin-bottom: 16px; }
-          .info-block-title { font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 4px; letter-spacing: 0.5px; }
-          .info-block-body { font-size: 10.5px; color: #475569; line-height: 1.5; white-space: pre-line; }
+          .bottom-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; margin-top: 10px; }
+          .info-block { margin-bottom: 8px; }
+          .info-block-title { font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 2px; letter-spacing: 0.5px; }
+          .info-block-body { font-size: 9.5px; color: #475569; line-height: 1.4; white-space: pre-line; }
 
           .totals-table { width: 100%; margin: 0; }
-          .totals-table td { padding: 6px 10px; border-bottom: none; font-size: 11.5px; color: #475569; }
-          .totals-table tr.grand-row td { font-size: 14px; font-weight: 800; color: #1e3a8a; border-top: 2px solid #e2e8f0; padding-top: 10px; }
+          .totals-table td { padding: 4px 6px; border-bottom: none; font-size: 10.5px; color: #475569; }
+          .totals-table tr.grand-row td { font-size: 12.5px; font-weight: 800; color: #1e3a8a; border-top: 1.5px solid #e2e8f0; padding-top: 6px; }
 
-          .signature-section { display: flex; justify-content: space-between; margin-top: 60px; padding-top: 10px; }
-          .sig-box { width: 180px; border-top: 1px dashed #94a3b8; text-align: center; font-size: 10px; color: #64748b; padding-top: 6px; }
+          .signature-section { display: flex; justify-content: space-between; margin-top: 24px; padding-top: 6px; }
+          .sig-box { width: 150px; border-top: 1px dashed #94a3b8; text-align: center; font-size: 9px; color: #64748b; padding-top: 4px; }
 
-          .qr-wrapper { text-align: right; margin-top: 12px; padding-right: 10px; }
-          canvas { max-width: 80px; height: auto; }
+          .qr-wrapper { text-align: right; margin-top: 8px; padding-right: 6px; }
+          canvas { max-width: 70px; height: auto; }
+
+          @media print {
+            @page {
+              size: ${isThermal ? `${cfg.paperWidthMm}mm auto` : 'A4 portrait'};
+              margin: ${isThermal ? '2mm' : '8mm 10mm'};
+            }
+            body {
+              padding: 0 !important;
+              margin: 0 !important;
+              width: 100% !important;
+              max-width: 100% !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            tr {
+              page-break-inside: avoid;
+              break-inside: avoid;
+            }
+            .top-row, .customer-section, .bottom-grid, .signature-section {
+              page-break-inside: avoid;
+              break-inside: avoid;
+            }
+          }
         </style>
       </head>
       <body>
 
         <div class="top-row">
           <div>
-            ${logoSrc ? `<img src="${esc(logoSrc)}" style="max-height: 50px; max-width: 200px; display: block;" />` : `<div class="brand-title">${esc(cfg.storeName || 'FTC Electronics')}</div>`}
+            ${logoSrc ? `<img src="${esc(logoSrc)}" style="max-height: 44px; max-width: 180px; display: block;" />` : `<div class="brand-title">${esc(cfg.storeName || 'FTC Electronics')}</div>`}
             ${cfg.headerAddress ? `<div class="brand-sub">${esc(cfg.headerAddress)}</div>` : ''}
             ${cfg.headerPhone ? `<div class="brand-sub">Tel: ${esc(cfg.headerPhone)}</div>` : ''}
             ${cfg.headerEmail ? `<div class="brand-sub">Email: ${esc(cfg.headerEmail)}</div>` : ''}
@@ -250,7 +275,7 @@ export function getInvoiceHtml(
 
         <script>
           function initDoc() {
-            ${cfg.showQrCode ? `try { QRCode.toCanvas(document.getElementById('invoice-qr'), ${JSON.stringify(data.docNumber)}, { width: 80, margin: 0 }); } catch(e) {}` : ''}
+            ${cfg.showQrCode ? `try { QRCode.toCanvas(document.getElementById('invoice-qr'), ${JSON.stringify(data.docNumber)}, { width: 70, margin: 0 }); } catch(e) {}` : ''}
             ${isPreview ? '' : 'setTimeout(function() { window.print(); }, 700);'}
           }
           if (document.readyState === 'complete') {
@@ -322,7 +347,7 @@ export async function generateInvoicePdfBlob(
   iframe.style.left = '-9999px';
   iframe.style.top = '-9999px';
   iframe.style.width = '210mm';
-  iframe.style.height = '297mm';
+  iframe.style.height = 'auto';
   iframe.style.border = 'none';
   document.body.appendChild(iframe);
 
@@ -360,7 +385,7 @@ export async function generateInvoicePdfBlob(
     const filename = `${data.docNumber || 'Invoice'}.pdf`;
     const targetElement = iframeDoc.body;
     const opt = {
-      margin: 5,
+      margin: 6,
       filename,
       image: { type: 'jpeg' as const, quality: 0.98 },
       html2canvas: {

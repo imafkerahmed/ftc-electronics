@@ -512,82 +512,15 @@ export async function logoutAction(): Promise<{ success: boolean }> {
 
 /**
  * Retrieves the currently authenticated customer profile from the Supabase SSR session.
+ * Uses request-scoped deduplication via getCurrentUserSession.
  */
 export async function getCurrentUserSessionAction(): Promise<{
   success: boolean;
   user?: CustomerProfileData;
   error?: string;
 }> {
-  try {
-    const supabase = await createServerSupabase();
-    const { data: { user }, error: authErr } = await supabase.auth.getUser();
-
-    if (authErr || !user) {
-      return { success: false, error: 'Not authenticated.' };
-    }
-
-    // Query application profile from public.profiles
-    const adminSb = getAdminSupabase();
-    const { data: profile } = await adminSb
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    const fullName = profile?.name || user.user_metadata?.name || user.email?.split('@')[0] || 'Customer';
-    const nameParts = fullName.trim().split(' ');
-    const firstName = nameParts[0] || '';
-    const lastName = nameParts.slice(1).join(' ') || '';
-
-    const phone = profile?.phone || user.user_metadata?.phone || '';
-    const address = profile?.address || user.user_metadata?.address || '';
-
-    let addressLine1 = address;
-    let addressLine2 = '';
-    let city = '';
-    let state = '';
-    let postalCode = '';
-    let country = 'Sri Lanka';
-
-    if (address && address.trim().startsWith('{')) {
-      try {
-        const parsed = JSON.parse(address);
-        addressLine1 = parsed.addressLine1 || '';
-        addressLine2 = parsed.addressLine2 || '';
-        city = parsed.city || '';
-        state = parsed.state || '';
-        postalCode = parsed.postalCode || '';
-        country = parsed.country || 'Sri Lanka';
-      } catch {
-        addressLine1 = address;
-      }
-    }
-
-    return {
-      success: true,
-      user: {
-        id: user.id,
-        email: user.email || '',
-        name: fullName,
-        firstName,
-        lastName,
-        phone,
-        address,
-        addressLine1,
-        addressLine2,
-        city,
-        state,
-        postalCode,
-        country,
-        role: profile?.role || 'customer',
-        created: profile?.created_at || user.created_at || new Date().toISOString(),
-        avatar: profile?.avatar || undefined,
-      },
-    };
-  } catch (err) {
-    console.error('[getCurrentUserSessionAction] error:', err);
-    return { success: false, error: 'Failed to load user profile.' };
-  }
+  const { getCurrentUserSession } = await import('@/lib/auth-server');
+  return getCurrentUserSession();
 }
 
 /**
@@ -711,80 +644,13 @@ export async function updateUserProfilePageAction(data: {
 /**
  * Fetches orders belonging to the authenticated customer.
  * Primary ownership is enforced by orders.user_id = auth.uid().
- * Transitional fallback retrieves legacy unlinked orders by verified email.
+ * Uses request-scoped deduplication via getCustomerOrders.
  */
 export async function getCustomerOrdersAction(): Promise<{
   success: boolean;
   orders: any[];
   error?: string;
 }> {
-  try {
-    const supabase = await createServerSupabase();
-    const { data: { user }, error: authErr } = await supabase.auth.getUser();
-
-    if (authErr || !user) {
-      return { success: false, orders: [], error: 'Not authenticated.' };
-    }
-
-    const adminSb = getAdminSupabase();
-
-    // 1. Primary Query: immutable ownership via user_id
-    const { data: primaryOrders, error: primaryErr } = await adminSb
-      .from('orders')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
-
-    if (primaryErr) throw primaryErr;
-
-    const orderMap = new Map<string, any>();
-    (primaryOrders || []).forEach((o) => orderMap.set(o.id, o));
-
-    // 2. Transitional Legacy Fallback: query by verified email only for unlinked historical orders
-    if (user.email && user.email_confirmed_at) {
-      const { data: legacyOrders } = await adminSb
-        .from('orders')
-        .select('*')
-        .is('user_id', null)
-        .eq('customer->>email', user.email.toLowerCase().trim());
-
-      (legacyOrders || []).forEach((o) => {
-        if (!orderMap.has(o.id)) {
-          orderMap.set(o.id, o);
-        }
-      });
-    }
-
-    const records = Array.from(orderMap.values()).sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
-
-    const mappedOrders = records.map((row: any) => ({
-      id: row.id,
-      orderId: row.order_id,
-      customer: row.customer || {},
-      items: row.items || [],
-      shippingAddress: row.shipping_address || {},
-      paymentDetails: row.payment_details || {},
-      subtotal: row.subtotal,
-      shipping: row.shipping,
-      tax: row.tax,
-      total: row.total,
-      status: row.status,
-      isPaid: row.is_paid,
-      paidAt: row.paid_at || undefined,
-      isDelivered: row.is_delivered,
-      deliveredAt: row.delivered_at || undefined,
-      notes: row.notes || undefined,
-      created: row.created_at,
-      updated: row.updated_at,
-      collectionId: 'orders',
-      collectionName: 'orders',
-    }));
-
-    return { success: true, orders: mappedOrders };
-  } catch (err) {
-    console.error('[getCustomerOrdersAction] Failed:', err);
-    return { success: false, orders: [], error: 'Failed to load orders.' };
-  }
+  const { getCustomerOrders } = await import('@/lib/auth-server');
+  return getCustomerOrders();
 }

@@ -40,6 +40,14 @@ function AuthForm() {
 
       if (result.success) {
         const safeRedirect = isValidSafeRedirect(redirectParam) ? redirectParam : null;
+
+        // If user attempted to access an admin route but account is only a customer
+        if (safeRedirect && safeRedirect.startsWith('/admin') && (!result.role || result.role === 'customer')) {
+          setError('Your account signed in, but it does not have administrator privileges.');
+          setLoading(false);
+          return;
+        }
+
         let destination = safeRedirect;
         if (!destination) {
           if (result.role && result.role !== 'customer') {

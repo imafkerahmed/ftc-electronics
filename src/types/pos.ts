@@ -8,7 +8,7 @@ export type EmployeeRole = 'cashier' | 'manager';
 
 export interface PBEmployee extends PBRecord {
   name: string;
-  pin: string; // 4–6 digit PIN stored as plain text (internal system)
+  pin: string; // 4–6 digit PIN (never exposed to client browser; verified server-side)
   role: EmployeeRole;
   isActive: boolean;
 }

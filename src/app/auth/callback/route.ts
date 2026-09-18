@@ -1,19 +1,22 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
+import type { EmailOtpType } from '@supabase/supabase-js';
 import { getAdminSupabase } from '@/lib/supabase-admin';
 import { isValidSafeRedirect } from '@/lib/utils';
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get('code');
+  const token_hash = requestUrl.searchParams.get('token_hash');
+  const type = requestUrl.searchParams.get('type') as EmailOtpType | null;
   const rawNext = requestUrl.searchParams.get('next') || '/';
   const next = isValidSafeRedirect(rawNext) ? rawNext : '/';
 
   const origin = requestUrl.origin;
   const redirectResponse = NextResponse.redirect(new URL(next, origin));
 
-  if (!code) {
+  if (!code && !token_hash) {
     return redirectResponse;
   }
 
@@ -35,15 +38,42 @@ export async function GET(request: NextRequest) {
   );
 
   try {
-    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+    let authUser = null;
 
-    if (error || !data?.user) {
-      console.error('[auth/callback] Code exchange failed:', error?.message);
-      const errorUrl = new URL('/auth?error=auth_callback_failed', origin);
+    if (code) {
+      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+
+      if (error || !data?.user) {
+        console.error('[auth/callback] Code exchange failed:', error?.message);
+        const errorUrl = new URL('/auth?error=auth_callback_failed', origin);
+        return NextResponse.redirect(errorUrl);
+      }
+      authUser = data.user;
+    } else if (token_hash && type) {
+      const validTypes: EmailOtpType[] = ['signup', 'invite', 'magiclink', 'recovery', 'email_change', 'email'];
+      if (!validTypes.includes(type)) {
+        console.error('[auth/callback] Invalid token type received:', type);
+        const errorUrl = new URL('/auth?error=invalid_token_type', origin);
+        return NextResponse.redirect(errorUrl);
+      }
+
+      const { data, error } = await supabase.auth.verifyOtp({
+        token_hash,
+        type,
+      });
+
+      if (error || !data?.user) {
+        console.error('[auth/callback] Token verification failed:', error?.message);
+        const errorUrl = new URL('/auth?error=verification_failed', origin);
+        return NextResponse.redirect(errorUrl);
+      }
+      authUser = data.user;
+    } else {
+      const errorUrl = new URL('/auth?error=missing_parameters', origin);
       return NextResponse.redirect(errorUrl);
     }
 
-    const user = data.user;
+    const user = authUser;
     const userEmail = (user.email || '').toLowerCase().trim();
 
     // Perform safe server-side profile provisioning & legacy linking via admin client

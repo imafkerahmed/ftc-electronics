@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import { pbSiteSettings } from '@/lib/supabase-collections';
+import { DEFAULT_WARRANTY_STATEMENT, type InvoiceDocumentData, type PaymentReceiptData } from '@/types/invoice-document';
 
 /**
  * Email Service Helper
@@ -8,10 +9,17 @@ import { pbSiteSettings } from '@/lib/supabase-collections';
  * Fallbacks to console logging in development mode if SMTP / API KEY is not configured.
  */
 
+export interface EmailAttachment {
+  filename: string;
+  content: Buffer | string;
+  contentType?: string;
+}
+
 interface SendEmailOptions {
   to: string;
   subject: string;
   html: string;
+  attachments?: EmailAttachment[];
   devLog: () => void;
   devFallbackMessage: string;
   prodErrorMessage: string;
@@ -63,6 +71,7 @@ async function sendEmail({
   to,
   subject,
   html,
+  attachments,
   devLog,
   devFallbackMessage,
   prodErrorMessage,
@@ -83,6 +92,11 @@ async function sendEmail({
         to,
         subject,
         html,
+        attachments: attachments?.map((a) => ({
+          filename: a.filename,
+          content: a.content,
+          contentType: a.contentType || 'application/pdf',
+        })),
       });
 
       return { success: true };
@@ -114,6 +128,10 @@ async function sendEmail({
           to: [{ email: to }],
           subject,
           htmlContent: html,
+          attachment: attachments?.map((a) => ({
+            name: a.filename,
+            content: Buffer.isBuffer(a.content) ? a.content.toString('base64') : Buffer.from(a.content).toString('base64'),
+          })),
         }),
       });
       if (res.ok) return { success: true };
@@ -147,6 +165,10 @@ async function sendEmail({
         to: [to],
         subject,
         html,
+        attachments: attachments?.map((a) => ({
+          filename: a.filename,
+          content: Buffer.isBuffer(a.content) ? a.content.toString('base64') : a.content,
+        })),
       }),
     });
 
@@ -546,126 +568,172 @@ export async function sendQuotationEmail(params: SendQuotationEmailParams): Prom
   });
 }
 
-interface SendOrderInvoiceEmailParams {
-  to: string;
-  orderNumber: string;
-  customerName: string;
-  shippingAddress: string | ShippingAddressObject | null | undefined;
-  items: Array<{ name: string; qty: number; unitPrice: number; discount?: number }>;
-  totalAmount: number;
-  paymentMethod?: string;
-  storeName?: string;
-  storePhone?: string;
-  storeEmail?: string;
-  storeAddress?: string;
+export function formatPaymentMethod(method?: string | null): string {
+  if (!method) return 'Bank Transfer';
+  const clean = method.toLowerCase().trim();
+  switch (clean) {
+    case 'bank_transfer':
+    case 'banktransfer':
+      return 'Bank Transfer';
+    case 'payhere':
+    case 'card':
+    case 'online':
+      return 'PayHere (Card/Wallet)';
+    case 'cash_pickup':
+    case 'pickup':
+      return 'Cash on Pickup';
+    case 'cash_delivery':
+    case 'cod':
+    case 'cash':
+      return 'Cash on Delivery';
+    default:
+      return method.charAt(0).toUpperCase() + method.slice(1).replace(/_/g, ' ');
+  }
 }
 
-export async function sendOrderInvoiceEmail(params: SendOrderInvoiceEmailParams): Promise<{ success: boolean; error?: string }> {
-  const safeTo = escapeHtml(params.to);
-  const safeOrderNumber = escapeHtml(params.orderNumber);
-  const safeCustomerName = escapeHtml(params.customerName);
-  const formattedAddress = formatShippingAddress(params.shippingAddress);
+export interface SendPaidInvoiceEmailParams {
+  to: string;
+  invoiceData: InvoiceDocumentData;
+  pdfBuffer?: Buffer;
+}
 
-  const rawStoreName = params.storeName || 'FTC Electronics';
+/**
+ * Sends a formal, finalized PAID Invoice email with attached Invoice PDF.
+ */
+export async function sendPaidInvoiceEmail({
+  to,
+  invoiceData,
+  pdfBuffer,
+}: SendPaidInvoiceEmailParams): Promise<{ success: boolean; error?: string }> {
+  const safeTo = escapeHtml(to);
+  const safeCustomerName = escapeHtml(invoiceData.customerName || 'Customer');
+  const safeInvoiceNumber = escapeHtml(invoiceData.invoiceNumber);
+  const safeOrderNumber = escapeHtml(invoiceData.orderNumber);
+  const safePaymentMethod = escapeHtml(invoiceData.paymentMethod);
+  const rawStoreName = invoiceData.business.storeName || 'FTC Electronics';
   const safeStoreName = escapeHtml(rawStoreName);
-  const safeStorePhone = params.storePhone ? escapeHtml(params.storePhone) : '';
-  const safeStoreEmail = params.storeEmail ? escapeHtml(params.storeEmail) : '';
-  const safeStoreAddress = params.storeAddress ? escapeHtml(params.storeAddress) : '';
-  const safePaymentMethod = escapeHtml(params.paymentMethod || 'Paid');
+  const currency = invoiceData.currency || 'Rs.';
+  const totalFormatted = `${currency} ${invoiceData.total.toLocaleString('en-LK')}`;
+  const pdfFilename = `FTC-Invoice-${invoiceData.invoiceNumber}.pdf`;
 
-  const currency = 'Rs.';
-  const itemsHtml = renderItemRows(params.items, currency);
+  const attachments: EmailAttachment[] = [];
+  if (pdfBuffer && pdfBuffer.length > 0) {
+    attachments.push({
+      filename: pdfFilename,
+      content: pdfBuffer,
+      contentType: 'application/pdf',
+    });
+  }
+
+  const itemsList = invoiceData.items
+    .map((item) => {
+      const serials = Array.isArray(item.serials) && item.serials.length > 0
+        ? `<div style="font-size: 11px; color: #2563eb; font-family: monospace; margin-top: 2px;">S/N: ${item.serials.map(escapeHtml).join(', ')}</div>`
+        : '';
+      return `
+        <tr style="border-bottom: 1px solid #f1f5f9;">
+          <td style="padding: 10px 0; font-size: 13px; color: #0f172a; font-weight: 600;">
+            ${escapeHtml(item.name)}
+            ${serials}
+          </td>
+          <td style="padding: 10px 0; font-size: 13px; color: #64748b; text-align: center;">${item.qty}</td>
+          <td style="padding: 10px 0; font-size: 13px; color: #0f172a; text-align: right; font-weight: 600;">${currency} ${item.lineTotal.toLocaleString('en-LK')}</td>
+        </tr>
+      `;
+    })
+    .join('');
 
   return sendEmail({
-    to: params.to,
-    subject: `Tax Invoice #${params.orderNumber} from ${rawStoreName}`,
+    to,
+    subject: `Invoice ${invoiceData.invoiceNumber} — ${rawStoreName} (Order #${invoiceData.orderNumber})`,
+    attachments,
     html: `
       <!DOCTYPE html>
       <html>
         <head>
           <meta charset="utf-8">
           <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 40px 20px; }
-            .card { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e4e4e7; padding: 40px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-            .header-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-            .brand { font-size: 22px; font-weight: 900; color: #09090b; letter-spacing: -0.5px; }
-            .brand-sub { font-size: 13px; color: #71717a; margin-top: 4px; line-height: 1.4; }
-            .doc-type { font-size: 20px; font-weight: 800; color: #16a34a; text-align: right; text-transform: uppercase; letter-spacing: 0.5px; }
-            .doc-meta { font-size: 13px; color: #71717a; text-align: right; margin-top: 4px; font-family: monospace; }
-            .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #a1a1aa; letter-spacing: 1px; margin-bottom: 8px; border-bottom: 1px solid #f4f4f5; padding-bottom: 6px; }
-            .client-info { font-size: 14px; color: #18181b; line-height: 1.5; margin-bottom: 30px; }
-            .client-name { font-weight: 700; }
-            .items-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-            .items-table th { padding: 10px 0; border-bottom: 2px solid #e4e4e7; color: #71717a; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-            .totals-table { width: 240px; float: right; border-collapse: collapse; margin-bottom: 30px; }
-            .totals-table td { padding: 6px 0; font-size: 14px; color: #52525b; }
-            .grand-row td { font-size: 16px; font-weight: 900; color: #09090b; padding-top: 12px; border-top: 2px solid #e4e4e7; }
-            .notes-section { clear: both; background-color: #fafafa; border-radius: 8px; border: 1px solid #f4f4f5; padding: 16px; margin-top: 30px; }
-            .notes-title { font-size: 12px; font-weight: 700; color: #71717a; margin-bottom: 6px; }
-            .notes-text { font-size: 13px; color: #52525b; line-height: 1.5; }
-            .footer { margin-top: 40px; font-size: 12px; color: #a1a1aa; text-align: center; border-top: 1px solid #f4f4f5; padding-top: 20px; line-height: 1.5; }
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 32px 16px; }
+            .card { max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
+            .header-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; border-bottom: 2px solid #f1f5f9; padding-bottom: 16px; }
+            .brand { font-size: 20px; font-weight: 800; color: #0f172a; }
+            .badge { display: inline-block; background-color: #f0fdf4; border: 1px solid #bbf7d0; color: #16a34a; font-size: 11px; font-weight: 800; text-transform: uppercase; padding: 4px 10px; border-radius: 9999px; letter-spacing: 0.5px; }
+            .info-box { background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 20px 0; }
+            .warranty-box { background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 14px; margin: 20px 0; }
+            .items-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+            .items-table th { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #64748b; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0; text-align: left; }
+            .footer { margin-top: 32px; font-size: 12px; color: #94a3b8; text-align: center; border-top: 1px solid #f1f5f9; padding-top: 16px; }
           </style>
         </head>
         <body>
           <div class="card">
-            <!-- Header Table -->
             <table class="header-table">
               <tr>
-                <td style="vertical-align: top;">
+                <td>
                   <div class="brand">${safeStoreName}</div>
-                  ${safeStoreAddress ? `<div class="brand-sub">${safeStoreAddress}</div>` : ''}
-                  ${safeStorePhone ? `<div class="brand-sub">Tel: ${safeStorePhone}</div>` : ''}
-                  ${safeStoreEmail ? `<div class="brand-sub">Email: ${safeStoreEmail}</div>` : ''}
+                  <div style="font-size: 12px; color: #64748b; margin-top: 2px;">Official Sales Invoice</div>
                 </td>
-                <td style="vertical-align: top; text-align: right;">
-                  <div class="doc-type">Tax Invoice</div>
-                  <div class="doc-meta">#${safeOrderNumber}</div>
-                  <div class="doc-meta" style="margin-top: 2px;">Date: ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                <td style="text-align: right;">
+                  <span class="badge">Payment Status: PAID</span>
                 </td>
               </tr>
             </table>
 
-            <!-- Customer Details -->
-            <div class="section-title">Billed To</div>
-            <div class="client-info">
-              <div class="client-name">${safeCustomerName}</div>
-              ${formattedAddress ? `<div style="margin-top: 4px;">${formattedAddress}</div>` : ''}
+            <p style="font-size: 15px; color: #0f172a; line-height: 1.5; margin: 0 0 16px 0;">
+              Hello <strong>${safeCustomerName}</strong>,<br/>
+              Thank you for your payment. Your purchase for Order <strong>#${safeOrderNumber}</strong> has been successfully confirmed.
+            </p>
+
+            <div class="info-box">
+              <table style="width: 100%; font-size: 13px; color: #334155; line-height: 1.8;">
+                <tr>
+                  <td style="color: #64748b; width: 130px;">Invoice Number:</td>
+                  <td><strong style="color: #0f172a; font-family: monospace;">${safeInvoiceNumber}</strong></td>
+                </tr>
+                <tr>
+                  <td style="color: #64748b;">Order Reference:</td>
+                  <td>#${safeOrderNumber}</td>
+                </tr>
+                <tr>
+                  <td style="color: #64748b;">Payment Method:</td>
+                  <td>${safePaymentMethod}</td>
+                </tr>
+                <tr>
+                  <td style="color: #64748b;">Total Amount Paid:</td>
+                  <td><strong style="color: #16a34a; font-size: 15px;">${totalFormatted}</strong></td>
+                </tr>
+              </table>
             </div>
 
-            <!-- Items Table -->
-            <div class="section-title">Invoice Details</div>
+            <!-- Items Breakdown -->
             <table class="items-table">
               <thead>
                 <tr>
-                  <th style="text-align: left;">Item Description</th>
-                  <th style="text-align: center; width: 60px;">Qty</th>
-                  <th style="text-align: right; width: 100px;">Price</th>
-                  <th style="text-align: right; width: 80px;">Disc</th>
-                  <th style="text-align: right; width: 110px;">Total</th>
+                  <th>Item</th>
+                  <th style="text-align: center; width: 50px;">Qty</th>
+                  <th style="text-align: right; width: 90px;">Total</th>
                 </tr>
               </thead>
               <tbody>
-                ${itemsHtml}
+                ${itemsList}
               </tbody>
             </table>
 
-            <!-- Totals -->
-            <table class="totals-table">
-              <tr class="grand-row">
-                <td>Total Paid</td>
-                <td style="text-align: right;">${currency} ${params.totalAmount.toLocaleString('en-LK')}</td>
-              </tr>
-              <tr>
-                <td style="font-size: 12px; color: #a1a1aa; padding-top: 6px;">Payment Method</td>
-                <td style="text-align: right; font-size: 12px; color: #16a34a; font-weight: bold; padding-top: 6px;">${safePaymentMethod}</td>
-              </tr>
-            </table>
+            ${pdfBuffer && pdfBuffer.length > 0 ? `
+              <div style="background-color: #f1f5f9; border-left: 4px solid #2563eb; padding: 12px 16px; border-radius: 4px; margin: 20px 0; font-size: 12.5px; color: #1e293b;">
+                📎 <strong>PDF Invoice Attached:</strong> Your formal invoice document (<code>${pdfFilename}</code>) has been attached to this email.
+              </div>
+            ` : ''}
 
-            <div style="clear: both;"></div>
+            <div class="warranty-box">
+              <div style="font-size: 12px; font-weight: 700; color: #1e40af; margin-bottom: 4px;">🛡️ Official Proof of Purchase & Warranty</div>
+              <div style="font-size: 11.5px; color: #1e3a8a; line-height: 1.5;">
+                ${escapeHtml(invoiceData.warrantyStatement)}
+              </div>
+            </div>
 
-            <!-- Footer -->
             <div class="footer">
-              <p>This is an official payment receipt for your online purchase. Thank you for shopping with ${safeStoreName}!</p>
+              <p>Thank you for shopping with ${safeStoreName}!</p>
               <p>© ${new Date().getFullYear()} ${safeStoreName}. All rights reserved.</p>
             </div>
           </div>
@@ -674,12 +742,216 @@ export async function sendOrderInvoiceEmail(params: SendOrderInvoiceEmailParams)
     `,
     devLog: () => {
       console.log('\n==================================================');
-      console.log(`[DEV MAIL SENDER] Order Invoice Email sent for: ${params.to}`);
-      console.log(`[DEV MAIL SENDER] Order: #${params.orderNumber} | Total: ${currency} ${params.totalAmount.toLocaleString('en-LK')}`);
+      console.log(`[DEV MAIL SENDER] Paid Invoice Email dispatched to: ${to}`);
+      console.log(`[DEV MAIL SENDER] Invoice #: ${invoiceData.invoiceNumber} | Order #: ${invoiceData.orderNumber} | Total: ${totalFormatted}`);
+      if (pdfBuffer) console.log(`[DEV MAIL SENDER] PDF Attachment: ${pdfFilename} (${pdfBuffer.length} bytes)`);
       console.log('==================================================\n');
     },
-    devFallbackMessage: `Order Invoice #${params.orderNumber} to ${params.to} for amount ${currency} ${params.totalAmount.toLocaleString('en-LK')}`,
-    prodErrorMessage: 'Failed to send order invoice email.',
+    devFallbackMessage: `Paid Invoice ${invoiceData.invoiceNumber} to ${to} for ${totalFormatted}`,
+    prodErrorMessage: 'Failed to send paid invoice email.',
+  });
+}
+
+/**
+ * Dedicated Payment Receipt Email sender (Separate from Invoice).
+ */
+export async function sendPaymentReceiptEmail({
+  to,
+  receiptData,
+}: {
+  to: string;
+  receiptData: PaymentReceiptData;
+}): Promise<{ success: boolean; error?: string }> {
+  const safeTo = escapeHtml(to);
+  const safeReceiptNumber = escapeHtml(receiptData.receiptNumber);
+  const safeOrderNumber = escapeHtml(receiptData.orderNumber);
+  const safeCustomerName = escapeHtml(receiptData.customerName || 'Customer');
+  const rawStoreName = receiptData.business.storeName || 'FTC Electronics';
+  const safeStoreName = escapeHtml(rawStoreName);
+  const currency = receiptData.currency || 'Rs.';
+  const amountFormatted = `${currency} ${receiptData.amountReceived.toLocaleString('en-LK')}`;
+
+  return sendEmail({
+    to,
+    subject: `Payment Receipt #${receiptData.receiptNumber} — ${rawStoreName}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 32px 16px; }
+            .card { max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
+            .badge { display: inline-block; background-color: #f0fdf4; border: 1px solid #bbf7d0; color: #16a34a; font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 9999px; }
+            .footer { margin-top: 28px; font-size: 12px; color: #94a3b8; text-align: center; border-top: 1px solid #f1f5f9; padding-top: 16px; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+              <div style="font-size: 18px; font-weight: 800; color: #0f172a;">${safeStoreName}</div>
+              <span class="badge">Payment Received</span>
+            </div>
+
+            <h2 style="font-size: 20px; font-weight: 700; color: #0f172a; margin: 0 0 12px 0;">Payment Receipt</h2>
+            <p style="font-size: 14px; color: #334155; line-height: 1.5;">
+              Dear <strong>${safeCustomerName}</strong>, this receipt confirms that your payment of <strong>${amountFormatted}</strong> has been successfully received.
+            </p>
+
+            <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 20px 0;">
+              <table style="width: 100%; font-size: 13px; color: #334155; line-height: 1.8;">
+                <tr><td style="color: #64748b;">Receipt #:</td><td><strong>${safeReceiptNumber}</strong></td></tr>
+                <tr><td style="color: #64748b;">Order Ref:</td><td>#${safeOrderNumber}</td></tr>
+                ${receiptData.invoiceNumber ? `<tr><td style="color: #64748b;">Invoice Ref:</td><td>${escapeHtml(receiptData.invoiceNumber)}</td></tr>` : ''}
+                <tr><td style="color: #64748b;">Payment Method:</td><td>${escapeHtml(receiptData.paymentMethod)}</td></tr>
+                <tr><td style="color: #64748b;">Payment Date:</td><td>${escapeHtml(receiptData.paymentDate)}</td></tr>
+                <tr><td style="color: #64748b;">Amount Received:</td><td><strong style="color: #16a34a; font-size: 15px;">${amountFormatted}</strong></td></tr>
+              </table>
+            </div>
+
+            <div class="footer">
+              <p>Thank you for shopping with ${safeStoreName}!</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `,
+    devLog: () => {
+      console.log(`[DEV MAIL SENDER] Payment Receipt #${receiptData.receiptNumber} sent to: ${to}`);
+    },
+    devFallbackMessage: `Receipt #${receiptData.receiptNumber} to ${to}`,
+    prodErrorMessage: 'Failed to send payment receipt email.',
+  });
+}
+
+/**
+ * Order Return / Cancellation Confirmation Email.
+ */
+export async function sendOrderReturnEmail({
+  to,
+  orderNumber,
+  customerName,
+  reason,
+  returnReason,
+  refundAmount,
+}: {
+  to: string;
+  orderNumber: string;
+  customerName: string;
+  reason?: string;
+  returnReason?: string;
+  refundAmount?: number;
+}): Promise<{ success: boolean; error?: string }> {
+  const safeTo = escapeHtml(to);
+  const safeOrderNumber = escapeHtml(orderNumber);
+  const safeCustomerName = escapeHtml(customerName || 'Customer');
+  const safeReason = escapeHtml(reason || returnReason || 'Package returned / Order cancelled');
+
+  return sendEmail({
+    to,
+    subject: `Order #${orderNumber} Cancellation & Return Confirmation — FTC Electronics`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 32px 16px; }
+            .card { max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
+            .footer { margin-top: 28px; font-size: 12px; color: #94a3b8; text-align: center; border-top: 1px solid #f1f5f9; padding-top: 16px; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h2 style="font-size: 20px; font-weight: 700; color: #0f172a; margin: 0 0 12px 0;">Order Return Confirmation</h2>
+            <p style="font-size: 14px; color: #334155; line-height: 1.5;">
+              Hello <strong>${safeCustomerName}</strong>,<br/>
+              This notification confirms that Order <strong>#${safeOrderNumber}</strong> has been processed as returned/cancelled in our system.
+            </p>
+            <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin: 16px 0; font-size: 13px; color: #475569;">
+              <strong>Return Reason / Note:</strong> ${safeReason}
+            </div>
+            <p style="font-size: 13px; color: #64748b; line-height: 1.5;">
+              If you have any questions regarding this cancellation or require assistance, please reach out to our customer support team.
+            </p>
+            <div class="footer">
+              <p>© ${new Date().getFullYear()} FTC Electronics. All rights reserved.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `,
+    devLog: () => {
+      console.log(`[DEV MAIL SENDER] Return notification sent for Order #${orderNumber} to ${to}`);
+    },
+    devFallbackMessage: `Return notification for #${orderNumber} to ${to}`,
+    prodErrorMessage: 'Failed to send return confirmation email.',
+  });
+}
+
+/**
+ * Normalized backward-compatible invoice email caller.
+ */
+interface SendOrderInvoiceEmailParams {
+  to: string;
+  orderNumber: string;
+  customerName: string;
+  shippingAddress: string | ShippingAddressObject | null | undefined;
+  items: Array<{ name: string; qty: number; unitPrice: number; discount?: number; serials?: string[] }>;
+  totalAmount: number;
+  paymentMethod?: string;
+  paymentStatus?: string;
+  isPaid?: boolean;
+  storeName?: string;
+  storePhone?: string;
+  storeEmail?: string;
+  storeAddress?: string;
+  pdfBuffer?: Buffer;
+}
+
+export async function sendOrderInvoiceEmail(params: SendOrderInvoiceEmailParams): Promise<{ success: boolean; error?: string }> {
+  const isPaid = Boolean(params.isPaid || params.paymentStatus === 'Paid' || params.paymentStatus === 'PAID');
+  const currency = 'Rs.';
+  const safeStoreName = escapeHtml(params.storeName || 'FTC Electronics');
+
+  const invoiceData: InvoiceDocumentData = {
+    invoiceNumber: params.orderNumber.startsWith('INV-') ? params.orderNumber : `INV-${params.orderNumber}`,
+    invoiceDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+    orderNumber: params.orderNumber,
+    orderDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+    customerName: params.customerName || 'Customer',
+    customerEmail: params.to,
+    shippingAddress: formatShippingAddress(params.shippingAddress),
+    items: params.items.map((i) => ({
+      name: i.name,
+      qty: i.qty || 1,
+      unitPrice: i.unitPrice || 0,
+      discount: i.discount || 0,
+      lineTotal: (i.unitPrice || 0) * (i.qty || 1) - (i.discount || 0),
+      serials: i.serials,
+    })),
+    subtotal: params.totalAmount,
+    discount: 0,
+    shipping: 0,
+    tax: 0,
+    total: params.totalAmount,
+    currency,
+    paymentStatus: isPaid ? 'PAID' : 'UNPAID',
+    paymentMethod: formatPaymentMethod(params.paymentMethod),
+    business: {
+      storeName: safeStoreName,
+      address: params.storeAddress || 'Main Street, Colombo, Sri Lanka',
+      phone: params.storePhone || '+94 77 123 4567',
+      email: params.storeEmail || 'info@ftc.lk',
+      website: 'https://ftc.lk',
+    },
+    warrantyStatement: DEFAULT_WARRANTY_STATEMENT,
+  };
+
+  return sendPaidInvoiceEmail({
+    to: params.to,
+    invoiceData,
+    pdfBuffer: params.pdfBuffer,
   });
 }
 
@@ -1138,6 +1410,9 @@ export interface SendOrderShippingEmailParams {
   items?: Array<{ name: string; qty: number; serials?: string[] }>;
   trackingNumber?: string;
   courierName?: string;
+  paymentMethod?: string;
+  isPaid?: boolean;
+  totalAmount?: number;
 }
 
 export async function sendOrderShippingEmail(params: SendOrderShippingEmailParams): Promise<{ success: boolean; error?: string }> {
@@ -1146,6 +1421,12 @@ export async function sendOrderShippingEmail(params: SendOrderShippingEmailParam
   const safeCustomerName = escapeHtml(params.customerName);
   const tracking = params.trackingNumber ? escapeHtml(params.trackingNumber) : null;
   const courier = params.courierName ? escapeHtml(params.courierName) : 'Standard Courier Service';
+
+  const isCod = params.paymentMethod === 'cash_delivery' || params.paymentMethod === 'cod';
+  const isUnpaidCod = isCod && !params.isPaid;
+  const formattedTotal = typeof params.totalAmount === 'number'
+    ? `Rs. ${params.totalAmount.toLocaleString('en-LK')}`
+    : '';
 
   let formattedAddress = '';
   if (typeof params.shippingAddress === 'string') {
@@ -1180,6 +1461,14 @@ export async function sendOrderShippingEmail(params: SendOrderShippingEmailParam
           <p style="font-size: 14px; color: #334155; line-height: 1.5;">
             Great news! Your order <strong>#${safeOrderNumber}</strong> has been handed over to our courier partner and is currently on its way to you.
           </p>
+
+          ${isUnpaidCod ? `
+            <div style="background-color: #fffbeb; border: 1px solid #fde68a; border-left: 4px solid #f59e0b; padding: 16px; border-radius: 6px; margin: 20px 0;">
+              <p style="margin: 0 0 6px 0; font-size: 13px; color: #92400e; text-transform: uppercase; font-weight: bold;">Payment Method: Cash on Delivery</p>
+              ${formattedTotal ? `<p style="margin: 0; font-size: 16px; font-weight: 800; color: #b45309;">Amount Due on Delivery: ${formattedTotal}</p>` : ''}
+              <p style="margin: 6px 0 0 0; font-size: 13px; color: #78350f; line-height: 1.4;">Please have the exact cash amount ready for our courier partner upon delivery.</p>
+            </div>
+          ` : ''}
 
           <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 16px; border-radius: 6px; margin: 20px 0;">
             <p style="margin: 0 0 8px 0; font-size: 13px; color: #64748b; text-transform: uppercase; font-weight: bold;">Courier Partner</p>
