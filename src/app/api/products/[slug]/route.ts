@@ -8,7 +8,8 @@ export async function GET(
   { params }: { params: Promise<{ slug: string }> }
 ) {
   try {
-    const { slug } = await params;
+    const rawSlug = (await params).slug;
+    const slug = rawSlug ? decodeURIComponent(rawSlug).trim() : '';
 
     if (!slug) {
       return NextResponse.json({ error: 'Slug is required' }, { status: 400 });

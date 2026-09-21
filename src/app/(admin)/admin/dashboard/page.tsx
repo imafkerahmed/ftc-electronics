@@ -10,52 +10,29 @@ import {
   ScrollText,
 } from "lucide-react";
 import {
-  getAdminOrdersAction,
+  getAdminDashboardMetricsAction,
   getLowStockProductsCountAction,
   getAdminAuditLogsAction,
 } from "@/app/actions/admin";
+import { adminKeys } from "@/lib/query-keys";
+import { useQuery } from "@tanstack/react-query";
 
 export default function AdminDashboardPage() {
-  const [loading, setLoading] = useState(true);
-  const [totalRevenue, setTotalRevenue] = useState(0);
-  const [ordersCount, setOrdersCount] = useState(0);
-  const [avgOrderValue, setAvgOrderValue] = useState(0);
-  const [lowStockCount, setLowStockCount] = useState(0);
-  const [recentLogs, setRecentLogs] = useState<any[]>([]);
-
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      const [ordersRes, lowStockRes, auditRes] = await Promise.all([
-        getAdminOrdersAction(),
+  const { data, isLoading: loading } = useQuery({
+    queryKey: adminKeys.dashboard(),
+    queryFn: async () => {
+      const [metricsRes, lowStockRes, auditRes] = await Promise.all([
+        getAdminDashboardMetricsAction(),
         getLowStockProductsCountAction(5),
         getAdminAuditLogsAction(5),
       ]);
 
-      const ordersList =
-        ordersRes.success && Array.isArray(ordersRes.data)
-          ? ordersRes.data
-          : [];
-      const paidOrders = ordersList.filter((o: any) => o.isPaid === true);
-      const totalRev = paidOrders.reduce(
-        (sum: number, o: any) => sum + (o.total || 0),
-        0,
-      );
-      setTotalRevenue(totalRev);
-      setOrdersCount(ordersList.length);
-      setAvgOrderValue(
-        paidOrders.length > 0 ? totalRev / paidOrders.length : 0,
-      );
+      const logItems = auditRes.success && Array.isArray(auditRes.data) ? auditRes.data : [];
 
-      // 2. Count low stock items (<= 5) from server-side query
-      setLowStockCount(lowStockRes.success ? lowStockRes.count : 0);
-
-      const logItems =
-        auditRes.success && Array.isArray(auditRes.data)
-          ? auditRes.data
-          : [];
-      setRecentLogs(
-        logItems.map((l: any) => ({
+      return {
+        metrics: metricsRes.success && metricsRes.data ? metricsRes.data : { totalRevenue: 0, ordersCount: 0, avgOrderValue: 0 },
+        lowStockCount: lowStockRes.success ? lowStockRes.count : 0,
+        recentLogs: logItems.map((l: any) => ({
           id: l.id,
           actor: l.actor || "System",
           action: l.action || "update",
@@ -67,18 +44,16 @@ export default function AdminDashboardPage() {
             hour: "2-digit",
             minute: "2-digit",
           }),
-        })),
-      );
-    } catch (err) {
-      console.error("Failed to load dashboard statistics:", err);
-    } finally {
-      setLoading(false);
+        }))
+      };
     }
-  };
+  });
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  const totalRevenue = data?.metrics.totalRevenue || 0;
+  const ordersCount = data?.metrics.ordersCount || 0;
+  const avgOrderValue = data?.metrics.avgOrderValue || 0;
+  const lowStockCount = data?.lowStockCount || 0;
+  const recentLogs = data?.recentLogs || [];
 
   const stats = [
     {

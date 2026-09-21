@@ -135,10 +135,10 @@ async function buildProductPayloadFromFormData(data: FormData | Record<string, a
   const getVal = (key: string) => (isFormData ? (data as FormData).get(key) : (data as Record<string, any>)[key]);
 
   const name = String(getVal('name') || existingRecord?.name || '').trim();
-  let slug = String(getVal('slug') || existingRecord?.slug || '').trim();
-  if (!slug && name) {
-    slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-  }
+  let rawSlug = String(getVal('slug') || existingRecord?.slug || '').trim();
+  let slug = rawSlug
+    ? rawSlug.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/(^-|-$)/g, '')
+    : (name ? name.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/(^-|-$)/g, '') : '');
 
   const description = String(getVal('description') || existingRecord?.description || '');
   const price = parseFloat(String(getVal('price') || existingRecord?.price || '0')) || 0;
@@ -1196,7 +1196,7 @@ export async function createAnnouncementAction(formData: FormData) {
     const link = formData.get('link') ? String(formData.get('link')) : null;
     const isActive = formData.get('isActive') !== 'false';
     const endsAtVal = formData.get('endsAt')?.toString();
-    
+
     let ends_at = null;
     if (endsAtVal) {
       const endOfDay = new Date(endsAtVal);
@@ -1531,7 +1531,7 @@ export async function updateHomepageBlocksAction(blocks: { id: string; isEnabled
 
   try {
     const supabase = getAdminSupabase();
-    
+
     for (const block of blocks) {
       const { error } = await supabase
         .from('homepage_blocks')
@@ -2043,19 +2043,61 @@ export async function deleteMediaAction(id: string) {
 
 // ─── Customers Actions ────────────────────────────────────────────────────────
 
-export async function getAdminCustomersAction() {
+export interface GetAdminCustomersInput {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  status?: string;
+  sort?: string;
+}
+
+export async function getAdminCustomersAction(input: GetAdminCustomersInput = {}) {
   const check = await checkPermission('users', 'read');
   if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
 
   try {
+    const {
+      page = 1,
+      pageSize = 50,
+      search = '',
+      status,
+      sort
+    } = input;
+
     const supabase = getAdminSupabase();
-    const { data, error } = await supabase
+    let query = supabase
       .from('customers')
-      .select('*')
-      .order('created_at', { ascending: false });
+      .select('*', { count: 'exact' });
+
+    if (search) {
+      query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%,phone.ilike.%${search}%`);
+    }
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    // sort
+    if (sort === 'oldest') {
+      query = query.order('created_at', { ascending: true });
+    } else {
+      query = query.order('created_at', { ascending: false });
+    }
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    const { data, count, error } = await query.range(from, to);
     if (error) throw error;
 
-    return { success: true, data: data || [] };
+    return {
+      success: true,
+      data: data || [],
+      total: count || 0,
+      page,
+      pageSize,
+      totalPages: Math.ceil((count || 0) / pageSize)
+    };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to fetch customers.', data: [] };
   }
@@ -2068,7 +2110,7 @@ export async function toggleCustomerStatusAction(id: string, currentStatus: 'act
   try {
     const supabase = getAdminSupabase();
     const newStatus = currentStatus === 'active' ? 'banned' : 'active';
-    
+
     const { data: oldRecord, error: getErr } = await supabase
       .from('customers')
       .select('*')
@@ -2106,21 +2148,158 @@ export async function toggleCustomerStatusAction(id: string, currentStatus: 'act
 
 // ─── Orders Actions ──────────────────────────────────────────────────────────
 
-export async function getAdminOrdersAction() {
+export async function getAdminDashboardMetricsAction() {
   const check = await checkPermission('orders', 'read');
-  if (!check.allowed) return { success: false, error: 'Unauthorized permission.', data: [] };
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
+
+  try {
+    const supabase = getAdminSupabase();
+
+    // 1. Get total order count
+    const { count: ordersCount, error: countErr } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true });
+
+    if (countErr) throw countErr;
+
+    // 2. Get totals for paid orders only via secure RPC
+    const { data: revenueData, error: revErr } = await supabase.rpc('get_admin_paid_revenue');
+    if (revErr) throw revErr;
+
+    const totalRevenue = Number(revenueData) || 0;
+
+    // 3. Get total paid order count for AOV
+    const { count: paidCount, error: paidCountErr } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_paid', true);
+
+    if (paidCountErr) throw paidCountErr;
+
+    const avgOrderValue = (paidCount && paidCount > 0) ? totalRevenue / paidCount : 0;
+
+    return {
+      success: true,
+      data: {
+        ordersCount: ordersCount || 0,
+        totalRevenue,
+        avgOrderValue,
+      }
+    };
+  } catch (err: any) {
+    console.error('[getAdminDashboardMetricsAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to fetch metrics.' };
+  }
+}
+export interface GetAdminOrdersInput {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  status?: string;
+  paymentStatus?: string;
+  paymentMethod?: string;
+  sort?: string;
+}
+
+export async function getAdminOrderByIdAction(id: string) {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
     const supabase = getAdminSupabase();
     const { data, error } = await supabase
       .from('orders')
       .select('*')
-      .order('created_at', { ascending: false });
+      .eq('id', id)
+      .single();
+
     if (error) throw error;
+    return { success: true, data };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function getAdminOrdersAction(input: GetAdminOrdersInput = {}) {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.', data: [] };
+
+  try {
+    const {
+      page = 1,
+      pageSize = 50,
+      search = '',
+      status,
+      paymentStatus,
+      paymentMethod,
+      sort
+    } = input;
+
+    const supabase = getAdminSupabase();
+
+    // Select only lightweight fields required for the list view
+    let query = supabase
+      .from('orders')
+      .select(`
+        id,
+        order_id,
+        created_at,
+        customer,
+        total,
+        status,
+        is_paid,
+        is_delivered,
+        payment_details->method
+      `, { count: 'exact' });
+
+    if (search) {
+      // Allow searching by human-readable order_id, or customer JSONB fields
+      // Wrap the ILIKE patterns in double quotes to prevent commas/parentheses from breaking PostgREST .or() parsing
+      const safeSearch = search.replace(/"/g, '');
+      query = query.or(`order_id.ilike."%${safeSearch}%",customer->>email.ilike."%${safeSearch}%",customer->>name.ilike."%${safeSearch}%"`);
+    }
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    if (paymentStatus === 'paid') {
+      query = query.eq('is_paid', true);
+    } else if (paymentStatus === 'unpaid') {
+      query = query.eq('is_paid', false);
+    }
+
+    // sorting
+    if (sort === 'total_asc') {
+      query = query.order('total', { ascending: true });
+    } else if (sort === 'total_desc') {
+      query = query.order('total', { ascending: false });
+    } else if (sort === 'oldest') {
+      query = query.order('created_at', { ascending: true });
+    } else {
+      query = query.order('created_at', { ascending: false });
+    }
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    const { data, count, error } = await query.range(from, to);
+    if (error) throw error;
+
+    // We do NOT normalize data differently unless required, we just return the flat list.
+    // However, payment_details->method comes out nested or as `method` depending on Supabase version.
+    const mapped = (data || []).map(row => ({
+      ...row,
+      payment_method: row.method || (row as any).payment_details?.method || 'N/A'
+    }));
 
     return {
       success: true,
-      data: data || [],
+      data: mapped,
+      total: count || 0,
+      page,
+      pageSize,
+      totalPages: Math.ceil((count || 0) / pageSize)
     };
   } catch (err: any) {
     console.error('[getAdminOrdersAction] Error:', err);
@@ -2140,7 +2319,7 @@ export async function updateOrderStatusAction(id: string, status: 'pending' | 'p
       .eq('id', id)
       .maybeSingle();
     if (getErr || !oldRecord) throw new Error('Order not found.');
-    
+
     const paymentMethod = oldRecord.payment_details?.method;
     const isCash = isCashPaymentMethod(paymentMethod);
     const updateData: Record<string, any> = { status, updated_at: new Date().toISOString() };
@@ -2792,7 +2971,7 @@ export async function getReceiptPrintPresetsAction(): Promise<{
       .order('isDefault', { ascending: false });
 
     const records = recordsData || [];
-    
+
     if (records.length === 0) {
       records.push({
         id: 'default',
@@ -2956,7 +3135,7 @@ export async function getInvoicePrintPresetsAction() {
       .order('isDefault', { ascending: false });
 
     const records = recordsData || [];
-    
+
     if (records.length === 0) {
       records.push({
         id: 'default',
@@ -3792,7 +3971,7 @@ export async function getUnifiedSalesTrackerAction() {
       } else if (o.items && typeof o.items === 'object') {
         itemsCount = Object.keys(o.items).length;
       }
-      
+
       let customerName = 'Online Customer';
       if (o.customer?.name) {
         customerName = o.customer.name;
@@ -3979,7 +4158,54 @@ export async function getDealerPurchaseHistoryAction(
   }
 }
 
-export async function getAdminProductsAction() {
+export interface GetAdminProductsInput {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  categoryId?: string;
+  brandId?: string;
+  status?: string;
+  stockStatus?: 'all' | 'in_stock' | 'low_stock' | 'out_of_stock';
+  sort?: string;
+}
+
+export async function getAdminProductAction(id: string) {
+  const check = await checkPermission('products', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized' };
+
+  try {
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase
+      .from('products')
+      .select('*, categories:category_id(id, name), brands:brand_id(id, name)')
+      .eq('id', id)
+      .single();
+
+    if (error) throw error;
+
+    // Normalize in standard UI format matching the frontend expectation
+    return {
+      success: true,
+      data: {
+        ...data,
+        discountPrice: data.discount_price,
+        wholesalePrice: data.wholesale_price,
+        countInStock: data.count_in_stock,
+        isFeatured: data.is_featured,
+        isPreOrder: data.is_pre_order,
+        numReviews: data.num_reviews,
+        category: data.categories?.name || data.category_id || '',
+        brand: data.brands?.name || data.brand_id || '',
+        categoryId: data.category_id,
+        brandId: data.brand_id,
+      }
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function getAdminProductsAction(input: GetAdminProductsInput = {}) {
   const check = await checkPermission('products', 'read');
   if (!check.allowed) {
     console.log('[getAdminProductsAction] Unauthorized: missing products:read permission');
@@ -3987,48 +4213,103 @@ export async function getAdminProductsAction() {
   }
 
   try {
+    const {
+      page = 1,
+      pageSize = 50,
+      search = '',
+      categoryId,
+      brandId,
+      status,
+      stockStatus,
+      sort
+    } = input;
+
     const supabase = getAdminSupabase();
-    const { data, error } = await supabase
+
+    // Omit heavy fields: description, specs, badges unless needed in list view
+    let query = supabase
       .from('products')
-      .select(`*, categories:category_id(id, name), brands:brand_id(id, name)`)
-      .order('created_at', { ascending: false })
-      .limit(500);
+      .select(`
+        id, name, slug, price, discount_price,
+        count_in_stock, status, is_featured, is_pre_order,
+        images, category_id, brand_id, created_at,
+        categories:category_id(id, name),
+        brands:brand_id(id, name)
+      `, { count: 'exact' });
+
+    if (search) {
+      query = query.ilike('name', `%${search}%`);
+    }
+    if (categoryId) {
+      query = query.eq('category_id', categoryId);
+    }
+    if (brandId) {
+      query = query.eq('brand_id', brandId);
+    }
+    if (status) {
+      query = query.eq('status', status);
+    }
+    if (stockStatus) {
+      if (stockStatus === 'in_stock') {
+        query = query.gt('count_in_stock', 10);
+      } else if (stockStatus === 'low_stock') {
+        query = query.gt('count_in_stock', 0).lte('count_in_stock', 10);
+      } else if (stockStatus === 'out_of_stock') {
+        query = query.eq('count_in_stock', 0);
+      }
+    }
+
+    if (sort === 'price_asc') {
+      query = query.order('price', { ascending: true });
+    } else if (sort === 'price_desc') {
+      query = query.order('price', { ascending: false });
+    } else if (sort === 'stock_asc') {
+      query = query.order('count_in_stock', { ascending: true });
+    } else if (sort === 'stock_desc') {
+      query = query.order('count_in_stock', { ascending: false });
+    } else {
+      query = query.order('created_at', { ascending: false });
+    }
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    const { data, count, error } = await query.range(from, to);
+
     if (error) {
       console.error('[getAdminProductsAction] DB Error:', error);
       throw error;
     }
 
-
-
     const normalized = (data || []).map((p: any) => ({
       id: p.id,
       name: p.name,
       slug: p.slug,
-      description: p.description || '',
       images: Array.isArray(p.images) ? p.images : [],
       price: p.price || 0,
       discountPrice: p.discount_price ?? null,
-      discount_price: p.discount_price ?? null,
-      specs: p.specs || {},
-      rating: p.rating || 0,
-      numReviews: p.num_reviews || 0,
       countInStock: p.count_in_stock ?? 0,
-      count_in_stock: p.count_in_stock ?? 0,
-      category: p.categories?.name || '',
-      brand: p.brands?.name || '',
-      category_id: p.category_id,
-      brand_id: p.brand_id,
-      currency: p.currency || 'LKR',
-      badges: p.badges || [],
-      is_featured: p.is_featured || false,
+      status: p.status,
+      category: p.categories?.name || p.category_id || '',
+      brand: p.brands?.name || p.brand_id || '',
+      categoryId: p.category_id,
+      brandId: p.brand_id,
+      isFeatured: p.is_featured || false,
+      isPreOrder: p.is_pre_order || false,
       createdAt: p.created_at,
-      created_at: p.created_at,
-      updated_at: p.updated_at,
     }));
 
-    return { success: true, data: normalized };
+    return {
+      success: true,
+      data: normalized,
+      total: count || 0,
+      page,
+      pageSize,
+      totalPages: Math.ceil((count || 0) / pageSize)
+    };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to fetch admin products.', data: [] };
+    console.error('[getAdminProductsAction] Catch:', err);
+    return { success: false, error: err.message || 'Failed to fetch products.', data: [] };
   }
 }
 
@@ -4142,13 +4423,65 @@ export async function getAdminBrandsAction() {
 
 // ─── Quotations Actions ─────────────────────────────────────────────────────────
 
-export async function getQuotationsAction() {
+export interface GetAdminQuotationsInput {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  status?: string;
+  quoteType?: string;
+  sort?: string;
+}
+
+export async function getQuotationsAction(input: GetAdminQuotationsInput = {}) {
   const check = await checkPermission('orders', 'read');
   if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
 
   try {
-    const list = await pbQuotations.getAll();
-    return { success: true, data: structuredClone(list || []) };
+    const {
+      page = 1,
+      pageSize = 50,
+      search = '',
+      status,
+      quoteType,
+      sort
+    } = input;
+
+    const supabase = getAdminSupabase();
+
+    let query = supabase.from('quotations').select('*', { count: 'exact' });
+
+    if (search) {
+      query = query.or(`customer_name.ilike.%${search}%,customer_email.ilike.%${search}%,quote_number.ilike.%${search}%`);
+    }
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    if (quoteType && quoteType !== 'all') {
+      query = query.eq('quote_type', quoteType);
+    }
+
+    if (sort === 'oldest') {
+      query = query.order('created_at', { ascending: true });
+    } else {
+      query = query.order('created_at', { ascending: false });
+    }
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    const { data, count, error } = await query.range(from, to);
+    if (error) throw error;
+
+    return {
+      success: true,
+      data: data || [],
+      total: count || 0,
+      page,
+      pageSize,
+      totalPages: Math.ceil((count || 0) / pageSize)
+    };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to fetch quotations.', data: [] };
   }
@@ -4494,7 +4827,7 @@ export async function sendInvoiceViaWorkflowAction(params: SendInvoiceWorkflowPa
 
   try {
     const supabase = getAdminSupabase();
-    
+
     const sale = await pbSales.getById(params.saleId);
     if (!sale) return { success: false, error: 'Sale record not found.' };
 
@@ -4529,7 +4862,7 @@ export async function sendInvoiceViaWorkflowAction(params: SendInvoiceWorkflowPa
           resolvedEmail = custEmail;
         }
       }
-      
+
       if (!resolvedEmail) {
         return {
           success: true,
@@ -4622,7 +4955,7 @@ export async function sendInvoiceViaWorkflowAction(params: SendInvoiceWorkflowPa
     };
     if (resolvedName !== sale.customer_name) saleUpdate.customer_name = resolvedName;
     if (resolvedPhone !== sale.customer_phone) saleUpdate.customer_phone = resolvedPhone;
-    
+
     await pbSales.update(sale.id, saleUpdate);
 
     await writeAuditLog(
@@ -4707,10 +5040,10 @@ export async function getAdminNotificationsAction(): Promise<{
 
       if (!ordersErr && ordersData) {
         ordersData
-          .filter((o: any) => 
-            (o.status === 'pending' || o.status === 'processing' || !o.is_paid) && 
-            o.status !== 'cancelled' && 
-            o.status !== 'refunded' && 
+          .filter((o: any) =>
+            (o.status === 'pending' || o.status === 'processing' || !o.is_paid) &&
+            o.status !== 'cancelled' &&
+            o.status !== 'refunded' &&
             o.status !== 'returned'
           )
           .slice(0, 10)

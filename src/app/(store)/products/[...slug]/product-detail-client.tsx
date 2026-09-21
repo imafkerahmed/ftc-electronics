@@ -17,7 +17,7 @@ interface ProductDetailClientProps {
 }
 
 async function fetchProductBySlug(slug: string): Promise<Product> {
-  const res = await fetch(`/api/products/${slug}`, { cache: 'no-store' });
+  const res = await fetch(`/api/products/${encodeURIComponent(slug)}`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Failed to fetch product');
   return res.json();
 }
@@ -31,11 +31,9 @@ export default function ProductDetailClient({
     queryKey: productKeys.detail(slug),
     queryFn: () => fetchProductBySlug(slug),
     initialData: initialProduct,
-    // staleTime inherits the global value (0), so refetchOnWindowFocus fires immediately
-    // when the user switches back from the admin tab.
-    // refetchInterval acts as a safety net — auto-refreshes every 8s in the background.
     refetchOnWindowFocus: true,
-    refetchInterval: 8000,
+    refetchInterval: false,
+    staleTime: 60_000,
   });
 
   const hasDiscount =

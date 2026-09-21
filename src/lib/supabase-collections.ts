@@ -195,7 +195,9 @@ export const sbProducts = {
     filter?: string;
     sort?: string;
     category?: string;
+    categoryId?: string;
     brand?: string;
+    brandId?: string;
     search?: string;
     status?: "draft" | "published";
     minPrice?: number;
@@ -247,7 +249,9 @@ export const sbProducts = {
         query = query.not("discount_price", "is", null).gt("discount_price", 0);
       }
 
-      if (options?.category) {
+      if (options?.categoryId) {
+        query = query.eq("category_id", options.categoryId);
+      } else if (options?.category) {
         if (
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
             options.category,
@@ -255,21 +259,30 @@ export const sbProducts = {
         ) {
           query = query.eq("category_id", options.category);
         } else {
-          // Resolve category slug
+          // Resolve category slug or name (handling spaces, cases, and hyphens)
+          const cleanCat = options.category.trim();
+          const slugCat = cleanCat
+            .toLowerCase()
+            .replace(/[^a-z0-9-]+/g, "-")
+            .replace(/(^-|-$)/g, "");
           const { data: catData } = await client
             .from("categories")
             .select("id")
-            .eq("slug", options.category)
-            .maybeSingle();
-          if (catData?.id) {
-            query = query.eq("category_id", catData.id);
+            .or(
+              `slug.eq."${slugCat}",slug.eq."${cleanCat}",name.ilike."${cleanCat}"`,
+            )
+            .limit(1);
+          if (catData?.[0]?.id) {
+            query = query.eq("category_id", catData[0].id);
           } else {
             return { items: [], totalItems: 0, totalPages: 0 };
           }
         }
       }
 
-      if (options?.brand) {
+      if (options?.brandId) {
+        query = query.eq("brand_id", options.brandId);
+      } else if (options?.brand) {
         if (
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
             options.brand,
@@ -277,14 +290,21 @@ export const sbProducts = {
         ) {
           query = query.eq("brand_id", options.brand);
         } else {
-          // Resolve brand slug
+          // Resolve brand slug or name (handling spaces, cases, and hyphens)
+          const cleanBrand = options.brand.trim();
+          const slugBrand = cleanBrand
+            .toLowerCase()
+            .replace(/[^a-z0-9-]+/g, "-")
+            .replace(/(^-|-$)/g, "");
           const { data: brandData } = await client
             .from("brands")
             .select("id")
-            .eq("slug", options.brand)
-            .maybeSingle();
-          if (brandData?.id) {
-            query = query.eq("brand_id", brandData.id);
+            .or(
+              `slug.eq."${slugBrand}",slug.eq."${cleanBrand}",name.ilike."${cleanBrand}"`,
+            )
+            .limit(1);
+          if (brandData?.[0]?.id) {
+            query = query.eq("brand_id", brandData[0].id);
           } else {
             return { items: [], totalItems: 0, totalPages: 0 };
           }
@@ -336,11 +356,20 @@ export const sbProducts = {
     options?: { status?: "draft" | "published"; isAdmin?: boolean },
   ): Promise<Product | null> {
     try {
+      if (!slug || !slug.trim()) return null;
+      const decodedSlug = decodeURIComponent(slug).trim();
+      const normalizedSlug = decodedSlug
+        .toLowerCase()
+        .replace(/[^a-z0-9-]+/g, "-")
+        .replace(/(^-|-$)/g, "");
+
       const client = getClient(Boolean(options?.isAdmin));
       let query = client
         .from("products")
         .select("*, category_obj:categories(*), brand_obj:brands(*)")
-        .eq("slug", slug);
+        .or(
+          `slug.eq."${decodedSlug}",slug.eq."${normalizedSlug}",name.ilike."${decodedSlug}"`,
+        );
 
       if (options?.status) {
         query = query.eq("status", options.status);
@@ -348,15 +377,15 @@ export const sbProducts = {
         query = query.eq("status", "published");
       }
 
-      const { data, error } = await query.maybeSingle();
+      const { data, error } = await query.limit(1);
 
       if (error) {
         logError(`[sbProducts.getBySlug] for ${slug} failed`, error);
         throw error;
       }
-      if (!data) return null;
+      if (!data || data.length === 0) return null;
       return pbProductToProduct(
-        mapProductRow(data as unknown as ProductDbRow),
+        mapProductRow(data[0] as unknown as ProductDbRow),
         "",
       );
     } catch (err) {
@@ -519,6 +548,44 @@ export const sbCategories = {
     }
   },
 
+  async getBySlug(slug: string): Promise<Category | null> {
+    try {
+      if (!slug) return null;
+      const decoded = decodeURIComponent(slug).trim();
+      const normalized = decoded.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/(^-|-$)/g, "");
+
+      const client = getClient(false);
+      const { data, error } = await client
+        .from("categories")
+        .select("*")
+        .or(`slug.eq."${decoded}",slug.eq."${normalized}",name.ilike."${decoded}"`)
+        .limit(1)
+        .maybeSingle();
+
+      if (error || !data) return null;
+
+      const pbRecord: PBCategory = {
+        id: data.id,
+        name: data.name,
+        slug: data.slug,
+        description: data.description || "",
+        image: data.image || undefined,
+        tagline: data.tagline || undefined,
+        sortOrder: data.sort_order || 0,
+        productCount: data.product_count || 0,
+        isActive: data.is_active ?? true,
+        created: data.created_at,
+        updated: data.updated_at,
+        collectionId: "categories",
+        collectionName: "categories",
+      };
+      return pbCategoryToCategory(pbRecord, "");
+    } catch (err) {
+      logError(`[sbCategories.getBySlug] for ${slug}`, err);
+      return null;
+    }
+  },
+
   async create(data: any) {
     const client = getClient(true);
     const { data: res, error } = await client
@@ -581,6 +648,42 @@ export const sbBrands = {
     } catch (err) {
       logError("[sbBrands.getAll]", err);
       return [];
+    }
+  },
+
+  async getBySlug(slug: string): Promise<PBBrand | null> {
+    try {
+      if (!slug) return null;
+      const decoded = decodeURIComponent(slug).trim();
+      const normalized = decoded.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/(^-|-$)/g, "");
+
+      const client = getClient(false);
+      const { data, error } = await client
+        .from("brands")
+        .select("*")
+        .or(`slug.eq."${decoded}",slug.eq."${normalized}",name.ilike."${decoded}"`)
+        .limit(1)
+        .maybeSingle();
+
+      if (error || !data) return null;
+
+      return {
+        id: data.id,
+        name: data.name,
+        slug: data.slug,
+        logo: sanitizeImageUrl(data.logo) || undefined,
+        bannerImage: sanitizeImageUrl(data.banner_image) || undefined,
+        description: data.description || "",
+        sortOrder: data.sort_order || 0,
+        show_in_strip: data.show_in_strip || false,
+        created: data.created_at,
+        updated: data.updated_at,
+        collectionId: "brands",
+        collectionName: "brands",
+      };
+    } catch (err) {
+      logError(`[sbBrands.getBySlug] for ${slug}`, err);
+      return null;
     }
   },
 

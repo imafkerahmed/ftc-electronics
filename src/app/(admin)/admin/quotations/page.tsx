@@ -37,9 +37,10 @@ import {
   convertQuotationToSaleAction,
   getWholesaleDealersAction,
   searchPosCustomersAction,
-  getInvoicePrintPresetsAction,
   sendQuotationEmailAction,
 } from '@/app/actions/admin';
+import { useQuery } from '@tanstack/react-query';
+import { adminKeys } from '@/lib/query-keys';
 import { DEFAULT_INVOICE_CONFIG, normalizeInvoiceConfig } from '@/types/invoice-config';
 import { printInvoice, resolveInvoiceConfig, type InvoiceData, type InvoiceItem } from '@/lib/invoice-print';
 import type { PBWholesaleDealer, PBQuotation } from '@/types/admin';
@@ -88,12 +89,73 @@ function fmt(amount: number) {
 }
 
 export default function AdminQuotationsPage() {
-  const [quotations, setQuotations] = useState<Quotation[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [typeFilter, setTypeFilter] = useState<'all' | 'wholesale' | 'direct'>('all');
   const [isPending, startTransition] = useTransition();
+
+  // Fetch quotations via React Query
+  const {
+    data: quotationsData,
+    isLoading: isQuotationsLoading,
+    isFetching: isQuotationsFetching,
+    refetch: refetchQuotations,
+  } = useQuery({
+    queryKey: adminKeys.quotations({
+      page,
+      pageSize,
+      search: searchQuery,
+      status: filterStatus === 'All' ? undefined : filterStatus.toLowerCase(),
+      quoteType: typeFilter === 'all' ? undefined : typeFilter,
+    }),
+    queryFn: async () => {
+      const res = await getQuotationsAction({
+        page,
+        pageSize,
+        search: searchQuery,
+        status: filterStatus === 'All' ? undefined : filterStatus.toLowerCase(),
+        quoteType: typeFilter === 'all' ? undefined : typeFilter,
+      });
+      if (!res.success) throw new Error(res.error || 'Failed to fetch quotations');
+
+      const formatted: Quotation[] = (res.data as any[]).map((q) => ({
+        id: q.id,
+        quoteNumber: q.quote_number,
+        quoteType: (q.quote_type as 'wholesale' | 'direct') || (q.customer_company ? 'wholesale' : 'direct'),
+        dealerId: q.dealer_id,
+        customerName: q.customer_name,
+        customerCompany: q.customer_company,
+        customerEmail: q.customer_email,
+        customerPhone: q.customer_phone,
+        customerAddress: q.customer_address,
+        date: new Date(q.created_at || Date.now()).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+        dueDate: q.valid_until ? new Date(q.valid_until).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
+        validUntil: q.valid_until || '',
+        items: Array.isArray(q.items) ? q.items : [],
+        subtotal: q.subtotal || 0,
+        taxAmount: q.tax_amount || 0,
+        discountAmount: q.discount_amount || 0,
+        discountType: (q.discount_type as 'flat' | 'percent') || 'flat',
+        discountValue: q.discount_value !== undefined ? q.discount_value : (q.discount_amount || 0),
+        totalAmount: q.total_amount || 0,
+        notes: q.notes || '',
+        status: q.status || 'draft',
+      }));
+
+      return {
+        items: formatted,
+        total: res.total || 0,
+        totalPages: res.totalPages || 1,
+      };
+    },
+  });
+
+  const quotations = quotationsData?.items || [];
+  const totalItems = quotationsData?.total || 0;
+  const totalPages = quotationsData?.totalPages || 1;
+  const [loading, setLoading] = useState(true);
 
   // Database lookup lists
   const [wholesaleDealers, setWholesaleDealers] = useState<PBWholesaleDealer[]>([]);
@@ -147,12 +209,11 @@ export default function AdminQuotationsPage() {
     };
   }, []);
 
-  // Load Quotations, Dealers, and Customers
+  // Load Dealers, and Customers
   const loadInitialData = async () => {
     setLoading(true);
     try {
-      const [qRes, dRes, cRes, pRes] = await Promise.all([
-        getQuotationsAction().catch(() => ({ success: false, data: [] })),
+      const [dRes, cRes, pRes] = await Promise.all([
         getWholesaleDealersAction().catch(() => ({ success: false, data: [] })),
         searchPosCustomersAction('').catch(() => ({ success: false, data: [] })),
         fetch('/api/pos/products')
@@ -185,33 +246,6 @@ export default function AdminQuotationsPage() {
           countInStock: p.countInStock || 0,
           createdAt: ''
         })) as Product[]);
-      }
-
-      if (qRes.success && qRes.data) {
-        const formatted: Quotation[] = (qRes.data as PBQuotation[]).map((q) => ({
-          id: q.id,
-          quoteNumber: q.quote_number,
-          quoteType: (q.quote_type as 'wholesale' | 'direct') || (q.customer_company ? 'wholesale' : 'direct'),
-          dealerId: q.dealer_id,
-          customerName: q.customer_name,
-          customerCompany: q.customer_company,
-          customerEmail: q.customer_email,
-          customerPhone: q.customer_phone,
-          customerAddress: q.customer_address,
-          date: new Date(q.created || Date.now()).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
-          dueDate: q.valid_until ? new Date(q.valid_until).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
-          validUntil: q.valid_until || '',
-          items: Array.isArray(q.items) ? q.items : [],
-          subtotal: q.subtotal || 0,
-          taxAmount: q.tax_amount || 0,
-          discountAmount: q.discount_amount || 0,
-          discountType: (q.discount_type as 'flat' | 'percent') || 'flat',
-          discountValue: q.discount_value !== undefined ? q.discount_value : (q.discount_amount || 0),
-          totalAmount: q.total_amount || 0,
-          notes: q.notes || '',
-          status: q.status || 'draft',
-        }));
-        setQuotations(formatted);
       }
 
       if (dRes.success && dRes.data) {
@@ -556,25 +590,6 @@ export default function AdminQuotationsPage() {
     });
   };
 
-  const filteredQuotations = quotations.filter((q) => {
-    const matchesSearch =
-      q.quoteNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      q.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (q.customerEmail && q.customerEmail.toLowerCase().includes(searchQuery.toLowerCase()));
-
-    const matchesStatus =
-      filterStatus === 'All' ||
-      (filterStatus === 'Active' && (q.status === 'sent' || q.status === 'draft')) ||
-      (filterStatus === 'Accepted' && q.status === 'accepted') ||
-      (filterStatus === 'Rejected' && q.status === 'rejected') ||
-      (filterStatus === 'Expired' && q.status === 'expired');
-
-    const matchesType =
-      typeFilter === 'all' || q.quoteType === typeFilter;
-
-    return matchesSearch && matchesStatus && matchesType;
-  });
-
   const totalValue = quotations.reduce((acc, q) => acc + q.totalAmount, 0);
   const wholesaleCount = quotations.filter((q) => q.quoteType === 'wholesale').length;
   const directCount = quotations.filter((q) => q.quoteType === 'direct').length;
@@ -698,9 +713,9 @@ export default function AdminQuotationsPage() {
 
       {/* Quotations List Table */}
       <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
-        {loading ? (
+        {isQuotationsLoading ? (
           <div className="py-16 text-center text-xs text-muted-foreground">Loading quotations...</div>
-        ) : filteredQuotations.length === 0 ? (
+        ) : quotations.length === 0 ? (
           <div className="py-16 text-center text-muted-foreground flex flex-col items-center gap-2">
             <FileText className="h-8 w-8 opacity-40 text-amber-500" />
             <p className="text-sm font-semibold">No quotations found.</p>
@@ -721,7 +736,7 @@ export default function AdminQuotationsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border font-medium">
-                {filteredQuotations.map((quote) => (
+                {quotations.map((quote) => (
                   <tr key={quote.id} className="hover:bg-muted/10 transition-colors">
                     <td className="p-4 space-y-1">
                       <span className="font-mono font-bold text-amber-500 block text-sm">{quote.quoteNumber}</span>
@@ -865,6 +880,38 @@ export default function AdminQuotationsPage() {
             </table>
           </div>
         )}
+
+        {/* Pagination Controls */}
+        {!isQuotationsLoading && totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-muted/20">
+            <div className="text-xs text-muted-foreground font-medium">
+              Showing <span className="text-foreground font-bold">{quotations.length}</span> of <span className="text-foreground font-bold">{totalItems}</span> quotations
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1 || isQuotationsFetching}
+                className="h-8 text-[11px] font-bold"
+              >
+                Previous
+              </Button>
+              <div className="text-xs font-bold px-2">
+                Page {page} of {totalPages}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages || isQuotationsFetching}
+                className="h-8 text-[11px] font-bold"
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Create / Edit Quotation Modal */}
@@ -898,7 +945,7 @@ export default function AdminQuotationsPage() {
 
             {/* Modal Form Body */}
             <form onSubmit={handleSaveQuotation} className="p-6 overflow-y-auto space-y-5 flex-1 text-xs">
-              
+
               {/* --- STEP 1: Customer Details --- */}
               {formStep === 1 && (
                 <>
@@ -1153,7 +1200,7 @@ export default function AdminQuotationsPage() {
 
                   {lineItems.map((item, idx) => (
                     <div key={idx} className="grid grid-cols-12 gap-4 items-center group relative p-2 rounded-xl hover:bg-accent/30 transition-colors border border-transparent hover:border-border/50">
-                      
+
                       <div className="col-span-6 relative">
                         {(() => {
                           const term = item.name.toLowerCase().trim();
@@ -1320,7 +1367,7 @@ export default function AdminQuotationsPage() {
                       <div className="col-span-2 text-right font-bold pr-12 text-sm flex items-center justify-end">
                         LKR {((item.qty || 1) * (item.unitPrice || 0)).toLocaleString()}
                       </div>
-                      
+
                       <div className="absolute right-0 top-0 bottom-0 flex items-center pr-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
                           type="button"

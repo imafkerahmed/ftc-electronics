@@ -24,7 +24,12 @@ export const brandKeys = {
 
 export const adminKeys = {
   all: ['admin'] as const,
-  products: () => [...adminKeys.all, 'products'] as const,
+  dashboard: () => [...adminKeys.all, 'dashboard'] as const,
+  products: (filters?: Record<string, any>) => [...adminKeys.all, 'products', filters || {}] as const,
   categories: () => [...adminKeys.all, 'categories'] as const,
   brands: () => [...adminKeys.all, 'brands'] as const,
+  orders: (filters?: Record<string, any>) => [...adminKeys.all, 'orders', filters || {}] as const,
+  customers: (filters?: Record<string, any>) => [...adminKeys.all, 'customers', filters || {}] as const,
+  inventory: (filters?: Record<string, any>) => [...adminKeys.all, 'inventory', filters || {}] as const,
+  quotations: (filters?: Record<string, any>) => [...adminKeys.all, 'quotations', filters || {}] as const,
 };

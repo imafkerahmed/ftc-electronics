@@ -21,7 +21,9 @@ export interface Product {
   wholesalePrice?: number;
   images: string[];
   category: string;
+  categoryId?: string;
   brand: string;
+  brandId?: string;
   specs: ProductSpec;
   rating: number;
   numReviews: number;

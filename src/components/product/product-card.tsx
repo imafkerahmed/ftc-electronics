@@ -43,6 +43,7 @@ export default function ProductCard({ product }: ProductCardProps) {
   const primaryImage = getProductThumbnail(images);
   const secondaryImageRaw = Array.isArray(images) && images.length > 1 ? getProductThumbnail(images[1]) : null;
   const secondaryImage = secondaryImageRaw && secondaryImageRaw !== primaryImage ? secondaryImageRaw : null;
+  const canonicalSlug = (slug || name || "").toLowerCase().trim().replace(/[^a-z0-9-]+/g, "-").replace(/(^-|-$)/g, "") || slug;
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -58,7 +59,7 @@ export default function ProductCard({ product }: ProductCardProps) {
     <>
       <div className="group flex flex-col w-full min-w-0 select-none relative rounded-2xl border border-neutral-200/90 dark:border-white/10 bg-white dark:bg-neutral-900/90 p-3 sm:p-3.5 shadow-2xs hover:shadow-xl hover:border-blue-500/50 dark:hover:border-blue-500/50 hover:-translate-y-1 transition-all duration-300">
         <Link
-          href={`/products/${slug}`}
+          href={`/products/${canonicalSlug}`}
           className="flex flex-col w-full min-w-0 cursor-pointer"
         >
           {/* ── Seamless Image Stage Container ── */}

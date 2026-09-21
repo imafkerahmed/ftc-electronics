@@ -197,45 +197,48 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
                         </h3>
                         {searchResults.length > 0 ? (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[300px] overflow-y-auto pr-2">
-                            {searchResults.map((product) => (
-                              <button
-                                key={product.id}
-                                onClick={() =>
-                                  handleSuggestionClick(
-                                    `/products/${product.slug}`,
-                                  )
-                                }
-                                className="flex items-center gap-4 p-3 rounded-xl border border-border/40 hover:border-blue-500/30 bg-muted/20 hover:bg-muted/40 transition-colors text-left group cursor-pointer"
-                              >
-                                <div className="relative w-12 h-12 bg-white rounded-lg flex items-center justify-center p-1 overflow-hidden shrink-0 border border-border/20">
-                                  <Image
-                                    src={product.images[0]}
-                                    alt={product.name}
-                                    fill
-                                    sizes="48px"
-                                    className="object-contain"
-                                  />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <h4 className="text-sm font-bold text-foreground truncate group-hover:text-blue-600 transition-colors">
-                                    {product.name}
-                                  </h4>
-                                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-mono">
-                                    {product.brand} {"//"} {product.category}
-                                  </p>
-                                </div>
-                                <div className="text-right shrink-0">
-                                  <span className="text-xs font-mono font-bold text-foreground block">
-                                    {formatPrice(product.discountPrice || product.price)}
-                                  </span>
-                                  {product.discountPrice && (
-                                    <span className="text-[10px] font-mono text-muted-foreground line-through block">
-                                      {formatPrice(product.price)}
+                            {searchResults.map((product) => {
+                              const canonicalSlug = (product.slug || product.name || '').toLowerCase().trim().replace(/[^a-z0-9-]+/g, '-').replace(/(^-|-$)/g, '') || product.slug;
+                              return (
+                                <button
+                                  key={product.id}
+                                  onClick={() =>
+                                    handleSuggestionClick(
+                                      `/products/${canonicalSlug}`,
+                                    )
+                                  }
+                                  className="flex items-center gap-4 p-3 rounded-xl border border-border/40 hover:border-blue-500/30 bg-muted/20 hover:bg-muted/40 transition-colors text-left group cursor-pointer"
+                                >
+                                  <div className="relative w-12 h-12 bg-white rounded-lg flex items-center justify-center p-1 overflow-hidden shrink-0 border border-border/20">
+                                    <Image
+                                      src={product.images[0]}
+                                      alt={product.name}
+                                      fill
+                                      sizes="48px"
+                                      className="object-contain"
+                                    />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <h4 className="text-sm font-bold text-foreground truncate group-hover:text-blue-600 transition-colors">
+                                      {product.name}
+                                    </h4>
+                                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-mono">
+                                      {product.brand} {"//"} {product.category}
+                                    </p>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <span className="text-xs font-mono font-bold text-foreground block">
+                                      {formatPrice(product.discountPrice || product.price)}
                                     </span>
-                                  )}
-                                </div>
-                              </button>
-                            ))}
+                                    {product.discountPrice && (
+                                      <span className="text-[10px] font-mono text-muted-foreground line-through block">
+                                        {formatPrice(product.price)}
+                                      </span>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
                           </div>
                         ) : (
                           <div className="py-8 text-center text-muted-foreground">

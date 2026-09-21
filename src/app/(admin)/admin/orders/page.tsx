@@ -15,6 +15,7 @@ import {
   updateOrderStatusAction,
   markOrderAsPaidAction,
   getAdminOrdersAction,
+  getAdminOrderByIdAction,
   getReceiptPrintPresetsAction,
   sendOrderInvoiceEmailAction,
   downloadOrderInvoicePdfAction,
@@ -23,6 +24,8 @@ import {
   cancelExpiredUnpaidOrdersAction,
   getPaymentSlipSignedUrlAction,
 } from '@/app/actions/admin';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { adminKeys } from '@/lib/query-keys';
 import { DEFAULT_RECEIPT_CONFIG, normalizeReceiptConfig, type ReceiptPrintConfig } from '@/types/receipt-config';
 import { printReceipt } from '@/lib/receipt-print';
 import { printInvoice, resolveInvoiceConfig, type InvoiceData } from '@/lib/invoice-print';
@@ -30,6 +33,7 @@ import {
   Loader2, CheckCircle, AlertCircle, ShoppingBag, Printer, FileText, Mail,
   Search, Truck, Check, CheckCircle2, RotateCcw, Ban, Clock, ChevronDown,
   ChevronRight, ExternalLink, Package, Eye,
+  ArrowLeft, ArrowRight,
 } from 'lucide-react';
 import ShipFulfillmentModal from '@/components/admin/ship-fulfillment-modal';
 import type { OrderStatus } from '@/types/order';
@@ -95,8 +99,10 @@ const buildSlipUrl = (_recordId: string, _collectionId: string, filename: string
 };
 
 export default function AdminOrdersPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
+
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
@@ -116,8 +122,82 @@ export default function AdminOrdersPage() {
 
   const [activeTab, setActiveTab] = useState<TabFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [isPending, startTransition] = useTransition();
   const [defaultReceiptConfig, setDefaultReceiptConfig] = useState<ReceiptPrintConfig>(DEFAULT_RECEIPT_CONFIG);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  let statusFilter: string | undefined;
+  let paymentStatusFilter: string | undefined;
+
+  if (activeTab === 'pending') {
+    paymentStatusFilter = 'unpaid';
+  } else if (activeTab === 'processing') {
+    statusFilter = 'processing';
+  } else if (activeTab === 'shipped') {
+    statusFilter = 'shipped';
+  } else if (activeTab === 'delivered') {
+    statusFilter = 'delivered';
+  } else if (activeTab === 'cancelled') {
+    statusFilter = 'cancelled';
+  }
+
+  const { data: ordersData, isLoading: loading, isFetching, isError, error: queryError, refetch: loadData } = useQuery({
+    queryKey: adminKeys.orders({ page, pageSize, search: debouncedSearch, status: statusFilter, paymentStatus: paymentStatusFilter }),
+    queryFn: async () => {
+      const res = await getAdminOrdersAction({
+        page,
+        pageSize,
+        search: debouncedSearch,
+        status: statusFilter,
+        paymentStatus: paymentStatusFilter
+      });
+      if (!res.success) throw new Error(res.error || 'Failed to load orders');
+
+      const mappedOrders = (res.data || []).map((o: any) => {
+        const rawDate = o.created_at || o.created || o.updated;
+        const parsedDate = rawDate ? new Date(rawDate) : new Date();
+        const dateStr = !isNaN(parsedDate.getTime())
+          ? parsedDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+          : 'N/A';
+
+        const method = o.payment_method || 'Unknown';
+        const isPaid = o.is_paid || o.isPaid || false;
+
+        return {
+          id: o.id,
+          orderId: o.order_id || o.id,
+          email: o.customer?.email || 'guest@example.com',
+          customerName: o.customer?.name || '',
+          total: o.total || 0,
+          paymentStatus: isPaid ? 'paid' : 'pending',
+          paymentMethod: method,
+          shippingStatus: (o.status || 'pending') as OrderStatus,
+          date: dateStr,
+          rawItems: [], // Loaded on demand
+          paymentSlip: '',
+          pbCollectionId: 'orders',
+        };
+      });
+
+      return {
+        ...res,
+        data: mappedOrders
+      };
+    },
+    placeholderData: (prev) => prev,
+  });
+
+  const orders = ordersData?.data || [];
+  const totalPages = ordersData?.totalPages || 1;
+  const totalCount = ordersData?.total || 0;
 
   useEffect(() => {
     async function loadReceiptPreset() {
@@ -130,54 +210,7 @@ export default function AdminOrdersPage() {
     void loadReceiptPreset();
   }, []);
 
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await getAdminOrdersAction();
-      if (res.success && res.data) {
-        setOrders(
-          res.data.map((o: any) => {
-            const rawDate = o.created_at || o.created || o.updated;
-            const parsedDate = rawDate ? new Date(rawDate) : new Date();
-            const dateStr = !isNaN(parsedDate.getTime())
-              ? parsedDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-              : 'N/A';
 
-            const method = o.payment_details?.method || o.paymentDetails?.method || o.paymentMethod || 'Unknown';
-            const isPaid = o.is_paid || o.isPaid || false;
-            const slip = o.payment_details?.paymentSlipPath || o.payment_details?.paymentSlipUrl || o.paymentDetails?.paymentSlipPath || o.paymentDetails?.paymentSlipUrl || o.paymentSlip || '';
-
-            return {
-              id: o.id,
-              orderId: o.order_id || o.orderId || o.id,
-              email: o.customer?.email || o.email || 'guest@example.com',
-              customerName: o.customer?.name || o.customerName || '',
-              total: o.total || o.totalAmount || 0,
-              paymentStatus: isPaid ? 'paid' : 'pending',
-              paymentMethod: method,
-              shippingStatus: (o.status || 'pending') as OrderStatus,
-              date: dateStr,
-              rawItems: Array.isArray(o.items) ? o.items : [],
-              paymentSlip: slip,
-              pbCollectionId: 'orders',
-            };
-          })
-        );
-      } else if (res.error) {
-        setError(res.error);
-      }
-    } catch (err: any) {
-      console.error('Failed to load orders:', err);
-      setError('Failed to load orders.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadData();
-  }, []);
 
   const handleViewSlip = async (orderId: string) => {
     try {
@@ -202,6 +235,7 @@ export default function AdminOrdersPage() {
       const res = await markOrderAsPaidAction(id);
       if (res.success) {
         setSuccess('Order approved & marked as paid. Confirmation email sent to customer.');
+        queryClient.invalidateQueries({ queryKey: adminKeys.dashboard() });
         loadData();
       } else {
         setError(res.error || 'Failed to mark order as paid.');
@@ -220,6 +254,7 @@ export default function AdminOrdersPage() {
       const res = await updateOrderStatusAction(id, 'delivered');
       if (res.success) {
         setSuccess(`Order #${orderId} marked as Delivered successfully!`);
+        queryClient.invalidateQueries({ queryKey: adminKeys.dashboard() });
         loadData();
       } else {
         setError(res.error || 'Failed to update delivery status.');
@@ -239,6 +274,7 @@ export default function AdminOrdersPage() {
       const res = await markOrderAsReturnedAction(id, reasonText);
       if (res.success) {
         setSuccess(`Order #${orderId} marked as Returned. Product stock & serial numbers restored to Available!`);
+        queryClient.invalidateQueries({ queryKey: adminKeys.dashboard() });
         loadData();
       } else {
         setError(res.error || 'Failed to process order return.');
@@ -315,9 +351,12 @@ export default function AdminOrdersPage() {
     const docNumber = isQuotation ? `QUO-${order.orderId}` : `INV-${order.orderId}`;
     const isPaid = order.paymentStatus === 'paid';
 
+    const fullRes = await getAdminOrderByIdAction(order.id);
+    const fullItems = fullRes.success ? (Array.isArray(fullRes.data?.items) ? fullRes.data.items : []) : [];
+
     const invoiceItems =
-      order.rawItems && order.rawItems.length > 0
-        ? order.rawItems.map((item) => {
+      fullItems && fullItems.length > 0
+        ? fullItems.map((item: any) => {
             const serialsList = collectSerials(item);
             return {
               name: item.name || `Product Item`,
@@ -427,46 +466,7 @@ export default function AdminOrdersPage() {
     }
   };
 
-  const isPendingPayment = (o: Order) => {
-    if (o.shippingStatus === 'cancelled' || o.shippingStatus === 'refunded') return false;
-    if (o.paymentStatus === 'paid') return false;
-    return o.paymentMethod === 'bank_transfer' || o.paymentMethod === 'payhere' || o.paymentMethod === 'stripe';
-  };
 
-  const isProcessingOrder = (o: Order) => {
-    if (o.shippingStatus === 'cancelled' || o.shippingStatus === 'refunded') return false;
-    if (o.shippingStatus === 'processing') return true;
-    if (o.shippingStatus === 'pending' && o.paymentStatus === 'paid') return true;
-    return false;
-  };
-
-  const counts = {
-    all: orders.length,
-    pending: orders.filter(isPendingPayment).length,
-    processing: orders.filter(isProcessingOrder).length,
-    shipped: orders.filter((o) => o.shippingStatus === 'shipped').length,
-    delivered: orders.filter((o) => o.shippingStatus === 'delivered').length,
-    cancelled: orders.filter((o) => o.shippingStatus === 'cancelled' || o.shippingStatus === 'refunded').length,
-  };
-
-  const filteredOrders = orders.filter((o) => {
-    if (activeTab === 'pending' && !isPendingPayment(o)) return false;
-    if (activeTab === 'processing' && !isProcessingOrder(o)) return false;
-    if (activeTab === 'shipped' && o.shippingStatus !== 'shipped') return false;
-    if (activeTab === 'delivered' && o.shippingStatus !== 'delivered') return false;
-    if (activeTab === 'cancelled' && o.shippingStatus !== 'cancelled' && o.shippingStatus !== 'refunded') return false;
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchId = o.orderId.toLowerCase().includes(q);
-      const matchEmail = o.email.toLowerCase().includes(q);
-      const matchName = o.customerName.toLowerCase().includes(q);
-      const matchItemName = o.rawItems.some((i) => i.name?.toLowerCase().includes(q));
-      if (!matchId && !matchEmail && !matchName && !matchItemName) return false;
-    }
-
-    return true;
-  });
 
   return (
     <div className="space-y-6 text-foreground">
@@ -494,51 +494,70 @@ export default function AdminOrdersPage() {
           <p className="text-xs text-muted-foreground mt-1">Review customer receipts, filter status tabs, coordinate shipments, and process order cancellations &amp; returns.</p>
         </div>
 
-        {counts.pending > 0 && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleCancelExpiredUnpaid}
-            disabled={isPending}
-            className="text-xs font-semibold text-amber-500 border-amber-500/30 hover:bg-amber-500/10 cursor-pointer self-start md:self-auto shrink-0"
-            title="Automatically cancel unpaid orders created more than 24 hours ago and release reserved inventory"
-          >
-            <Clock className="h-3.5 w-3.5 mr-1.5" />
-            Clean Expired Unpaid (&gt;24h)
-          </Button>
-        )}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={handleCancelExpiredUnpaid}
+          disabled={isPending}
+          className="text-xs font-semibold text-amber-500 border-amber-500/30 hover:bg-amber-500/10 cursor-pointer self-start md:self-auto shrink-0"
+          title="Automatically cancel unpaid orders created more than 24 hours ago and release reserved inventory"
+        >
+          <Clock className="h-3.5 w-3.5 mr-1.5" />
+          Clean Expired Unpaid (&gt;24h)
+        </Button>
       </div>
 
       {/* Filter Tabs & Search Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-          {[
-            { id: 'all', label: 'All Orders', count: counts.all },
-            { id: 'pending', label: 'Pending Payment', count: counts.pending, color: 'text-amber-500 bg-amber-500/10' },
-            { id: 'processing', label: 'Processing (To Ship)', count: counts.processing, color: 'text-blue-500 bg-blue-500/10' },
-            { id: 'shipped', label: 'Shipped', count: counts.shipped, color: 'text-indigo-500 bg-indigo-500/10' },
-            { id: 'delivered', label: 'Delivered', count: counts.delivered, color: 'text-emerald-500 bg-emerald-500/10' },
-            { id: 'cancelled', label: 'Cancelled / Returned', count: counts.cancelled, color: 'text-red-500 bg-red-500/10' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as TabFilter)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all shrink-0 cursor-pointer ${
-                activeTab === tab.id
-                  ? 'bg-blue-600 text-white shadow-sm font-bold'
-                  : 'bg-secondary/40 text-muted-foreground hover:bg-secondary hover:text-foreground'
-              }`}
-            >
-              <span>{tab.label}</span>
-              <span
-                className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                  activeTab === tab.id ? 'bg-white/20 text-white' : tab.color || 'bg-muted text-muted-foreground'
-                }`}
-              >
-                {tab.count}
-              </span>
-            </button>
-          ))}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none border-b border-border">
+          <button
+            onClick={() => { setActiveTab('all'); setPage(1); }}
+            className={`px-4 py-2 text-xs font-bold whitespace-nowrap border-b-2 transition-colors cursor-pointer ${
+              activeTab === 'all' ? 'border-blue-500 text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            All Orders
+          </button>
+          <button
+            onClick={() => { setActiveTab('pending'); setPage(1); }}
+            className={`px-4 py-2 text-xs font-bold whitespace-nowrap border-b-2 transition-colors cursor-pointer ${
+              activeTab === 'pending' ? 'border-blue-500 text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            Pending Payment
+          </button>
+          <button
+            onClick={() => { setActiveTab('processing'); setPage(1); }}
+            className={`px-4 py-2 text-xs font-bold whitespace-nowrap border-b-2 transition-colors cursor-pointer ${
+              activeTab === 'processing' ? 'border-blue-500 text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            Processing
+          </button>
+          <button
+            onClick={() => { setActiveTab('shipped'); setPage(1); }}
+            className={`px-4 py-2 text-xs font-bold whitespace-nowrap border-b-2 transition-colors cursor-pointer ${
+              activeTab === 'shipped' ? 'border-blue-500 text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            Shipped
+          </button>
+          <button
+            onClick={() => { setActiveTab('delivered'); setPage(1); }}
+            className={`px-4 py-2 text-xs font-bold whitespace-nowrap border-b-2 transition-colors cursor-pointer ${
+              activeTab === 'delivered' ? 'border-blue-500 text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            Delivered
+          </button>
+          <button
+            onClick={() => { setActiveTab('cancelled'); setPage(1); }}
+            className={`px-4 py-2 text-xs font-bold whitespace-nowrap border-b-2 transition-colors cursor-pointer ${
+              activeTab === 'cancelled' ? 'border-blue-500 text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            Cancelled / Returned
+          </button>
         </div>
 
         <div className="relative w-full md:w-64 shrink-0">
@@ -560,9 +579,23 @@ export default function AdminOrdersPage() {
               <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-blue-500" />
               Loading order records...
             </div>
+          ) : isError ? (
+            <div className="bg-red-500/5 border border-red-500/10 p-8 text-center text-xs text-red-500 rounded-xl">
+              <AlertCircle className="mx-auto mb-3 h-8 w-8 text-red-500/80" />
+              <p className="mb-1 font-semibold">Failed to load orders</p>
+              <p className="opacity-80">
+                {(queryError as Error)?.message || "An unexpected error occurred."}
+              </p>
+            </div>
           ) : (
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
+            <div className="relative">
+              {isFetching && (
+                <div className="bg-background/50 absolute inset-0 z-10 flex items-center justify-center backdrop-blur-[1px]">
+                  <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+                </div>
+              )}
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
                 <tr className="bg-secondary/40 border-b border-border text-muted-foreground uppercase tracking-wider font-semibold text-[10px]">
                   <th className="p-4 w-6"></th>
                   <th className="p-4">Order ID</th>
@@ -574,17 +607,19 @@ export default function AdminOrdersPage() {
                   <th className="p-4 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border text-foreground font-medium">
-                {filteredOrders.length === 0 ? (
+              <tbody className="divide-y divide-border">
+                {orders.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="p-8 text-center text-xs text-muted-foreground">
-                      {searchQuery.trim()
-                        ? `No orders matching "${searchQuery}" in ${activeTab} tab.`
-                        : `No ${activeTab === 'all' ? '' : activeTab} order transactions found.`}
+                    <td colSpan={8} className="p-8 text-center text-muted-foreground">
+                      <div className="flex flex-col items-center justify-center">
+                        <ShoppingBag className="h-10 w-10 text-muted-foreground/30 mb-3" />
+                        <p className="text-sm font-semibold">No orders found</p>
+                        <p className="text-xs mt-1">Try adjusting your filters or search query.</p>
+                      </div>
                     </td>
                   </tr>
                 ) : (
-                  filteredOrders.map((order) => {
+                  orders.map((order) => {
                     const isExpanded = expandedRows.has(order.id);
                     const hasSlip = !!(order.paymentSlip && order.paymentSlip.length > 0);
                     const isBankTransfer = order.paymentMethod === 'bank_transfer';
@@ -637,7 +672,7 @@ export default function AdminOrdersPage() {
                               )}
                             </div>
                           </td>
-                          <td className="p-4">{getShippingBadge(order)}</td>
+                          <td className="p-4">{getShippingBadge(order as unknown as Order)}</td>
                           <td className="p-4 text-right">
                             <div className="flex items-center justify-end gap-1.5 flex-wrap">
                               {/* Mark Paid button — for bank transfer approval or direct cash collection */}
@@ -771,7 +806,7 @@ export default function AdminOrdersPage() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => handlePrintOrderInvoice(order, order.paymentStatus === 'paid' ? 'Invoice' : 'Quotation')}
+                                onClick={() => handlePrintOrderInvoice(order as unknown as Order, order.paymentStatus === 'paid' ? 'Invoice' : 'Quotation')}
                                 className={`h-8 text-[11px] font-semibold flex items-center gap-1 cursor-pointer border-border hover:bg-muted ${
                                   order.paymentStatus === 'paid' ? 'text-indigo-400 border-indigo-500/30' : 'text-amber-400 border-amber-500/30'
                                 }`}
@@ -822,7 +857,7 @@ export default function AdminOrdersPage() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => handleEmailButtonClick(order)}
+                                onClick={() => handleEmailButtonClick(order as unknown as Order)}
                                 disabled={sendingEmailId === order.id || !order.email || order.email === 'guest@example.com'}
                                 className="h-8 text-[11px] font-semibold flex items-center gap-1 cursor-pointer border-border hover:bg-muted text-blue-400 border-blue-500/30 disabled:opacity-40"
                                 title={
@@ -840,10 +875,13 @@ export default function AdminOrdersPage() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => {
+                                  onClick={async () => {
+                                    const fullRes = await getAdminOrderByIdAction(order.id);
+                                    const fullItems = fullRes.success ? (Array.isArray(fullRes.data?.items) ? fullRes.data.items : []) : [];
+
                                     const receiptItems =
-                                      order.rawItems && order.rawItems.length > 0
-                                        ? order.rawItems.map((item) => {
+                                      fullItems && fullItems.length > 0
+                                        ? fullItems.map((item: any) => {
                                             const serialsList = collectSerials(item);
                                             return {
                                               name: serialsList.length > 0 ? `${item.name || 'Product Item'} (S/N: ${serialsList.join(', ')})` : item.name || 'Product Item',
@@ -876,62 +914,48 @@ export default function AdminOrdersPage() {
 
                         {/* Expanded Items Row */}
                         {isExpanded && (
-                          <tr className="bg-muted/5 border-b border-border">
-                            <td colSpan={8} className="px-8 py-3">
-                              <div className="flex items-center gap-1.5 mb-2">
-                                <Package className="h-3.5 w-3.5 text-muted-foreground" />
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                                  Order Items ({order.rawItems.length})
-                                </span>
-                              </div>
-                              {order.rawItems.length === 0 ? (
-                                <p className="text-[11px] text-muted-foreground italic">No item details available.</p>
-                              ) : (
-                                <div className="space-y-1">
-                                  {order.rawItems.map((item, idx) => {
-                                    const serials = collectSerials(item);
-                                    return (
-                                      <div
-                                        key={idx}
-                                        className="flex items-start justify-between gap-4 p-2.5 bg-background rounded-lg border border-border text-[11px]"
-                                      >
-                                        <div className="flex-1">
-                                          <span className="font-semibold text-foreground">{item.name || 'Product Item'}</span>
-                                          {serials.length > 0 && (
-                                            <span className="ml-2 text-muted-foreground font-mono">
-                                              S/N: {serials.join(', ')}
-                                            </span>
-                                          )}
-                                        </div>
-                                        <div className="flex items-center gap-4 shrink-0 text-muted-foreground">
-                                          <span>Qty: <span className="font-bold text-foreground">{item.quantity || 1}</span></span>
-                                          <span>
-                                            Unit: <span className="font-bold text-foreground">
-                                              {(item.price || 0).toLocaleString('en-LK', { style: 'currency', currency: 'LKR' })}
-                                            </span>
-                                          </span>
-                                          <span>
-                                            Total: <span className="font-bold text-emerald-400">
-                                              {((item.price || 0) * (item.quantity || 1)).toLocaleString('en-LK', { style: 'currency', currency: 'LKR' })}
-                                            </span>
-                                          </span>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </td>
-                          </tr>
+                          <OrderExpandedItems order={order as unknown as Order} />
                         )}
                       </React.Fragment>
                     );
                   })
                 )}
               </tbody>
-            </table>
+              </table>
+            </div>
           )}
         </div>
+
+          {/* Pagination Controls */}
+          {orders.length > 0 && (
+            <div className="p-4 border-t border-border flex items-center justify-between text-xs text-muted-foreground bg-secondary/10">
+              <div className="flex items-center gap-4">
+                <span>Showing {orders.length} of {totalCount} items</span>
+                {isFetching && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2"
+                  disabled={page <= 1}
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                </Button>
+                <span className="px-3 font-medium">Page {page} of {totalPages}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                >
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
       </div>
 
       {/* Serial Assignment & Shipping Fulfillment Modal */}
@@ -1148,5 +1172,89 @@ export default function AdminOrdersPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function OrderExpandedItems({ order }: { order: Order }) {
+  const { data: fullOrder, isLoading, isError } = useQuery({
+    queryKey: ['admin', 'order', order.id],
+    queryFn: async () => {
+      const res = await getAdminOrderByIdAction(order.id);
+      if (!res.success) throw new Error(res.error || 'Failed to fetch full order details');
+      return res.data;
+    }
+  });
+
+  if (isLoading) {
+    return (
+      <tr className="bg-muted/5 border-b border-border">
+        <td colSpan={8} className="px-8 py-6 text-center text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2 text-blue-500" />
+          <span className="text-xs">Loading order items...</span>
+        </td>
+      </tr>
+    );
+  }
+
+  if (isError || !fullOrder) {
+    return (
+      <tr className="bg-muted/5 border-b border-border">
+        <td colSpan={8} className="px-8 py-6 text-center text-red-500 text-xs">
+          Failed to load full order details.
+        </td>
+      </tr>
+    );
+  }
+
+  const rawItems = Array.isArray(fullOrder.items) ? fullOrder.items : [];
+
+  return (
+    <tr className="bg-muted/5 border-b border-border">
+      <td colSpan={8} className="px-8 py-3">
+        <div className="flex items-center gap-1.5 mb-2">
+          <Package className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+            Order Items ({rawItems.length})
+          </span>
+        </div>
+        {rawItems.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground italic">No item details available.</p>
+        ) : (
+          <div className="space-y-1">
+            {rawItems.map((item: any, idx: number) => {
+              const serials = collectSerials(item);
+              return (
+                <div
+                  key={idx}
+                  className="flex items-start justify-between gap-4 p-2.5 bg-background rounded-lg border border-border text-[11px]"
+                >
+                  <div className="flex-1">
+                    <span className="font-semibold text-foreground">{item.name || 'Product Item'}</span>
+                    {serials.length > 0 && (
+                      <span className="ml-2 text-muted-foreground font-mono">
+                        S/N: {serials.join(', ')}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-4 shrink-0 text-muted-foreground">
+                    <span>Qty: <span className="font-bold text-foreground">{item.quantity || 1}</span></span>
+                    <span>
+                      Unit: <span className="font-bold text-foreground">
+                        {(item.price || 0).toLocaleString('en-LK', { style: 'currency', currency: 'LKR' })}
+                      </span>
+                    </span>
+                    <span>
+                      Total: <span className="font-bold text-emerald-400">
+                        {((item.price || 0) * (item.quantity || 1)).toLocaleString('en-LK', { style: 'currency', currency: 'LKR' })}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </td>
+    </tr>
   );
 }

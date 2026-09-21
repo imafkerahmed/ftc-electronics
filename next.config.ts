@@ -11,7 +11,13 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
+        hostname: 'supa.ftc.lk',
+        pathname: '/storage/v1/object/**',
+      },
+      {
+        protocol: 'https',
         hostname: 'supa-ftc.codix.site',
+        pathname: '/storage/v1/object/**',
       },
       {
         protocol: 'https',

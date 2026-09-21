@@ -175,9 +175,9 @@ export default function QuickViewModal({ product, isOpen, onClose }: QuickViewMo
             <div className="border-t border-border/60 pt-4 space-y-3">
               <AddToCartButton product={product} />
               <WhatsAppOrderButton productName={product.name} productPrice={formatPrice(activePrice, currency)} />
-              
+
               <Link
-                href={`/products/${product.slug}`}
+                href={`/products/${(product.slug || product.name || '').toLowerCase().trim().replace(/[^a-z0-9-]+/g, '-').replace(/(^-|-$)/g, '') || product.slug}`}
                 onClick={onClose}
                 className="flex items-center justify-center gap-1.5 w-full text-xs font-bold text-blue-500 hover:text-blue-400 py-2 transition-colors uppercase tracking-wider"
               >

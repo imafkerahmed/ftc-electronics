@@ -2,18 +2,19 @@
 
 import React, { useState, useEffect, useTransition } from 'react';
 import Image from 'next/image';
-import { 
-  Package, Plus, Search, Filter, ArrowUpDown, Edit, Trash2, Eye, 
+import {
+  Package, Plus, Search, Filter, ArrowUpDown, Edit, Trash2, Eye,
   X, CheckCircle, AlertCircle, Save, Loader2, DollarSign, Image as ImageIcon, FileText, Sparkles,
   ChevronUp, ChevronDown, Star, ArrowLeft, ArrowRight
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { 
-  createProductAction, 
-  updateProductAction, 
+import {
+  createProductAction,
+  updateProductAction,
   deleteProductAction,
   getAdminProductsAction,
+  getAdminProductAction,
   getAdminCategoriesAction,
   getAdminBrandsAction,
 } from '@/app/actions/admin';
@@ -123,16 +124,31 @@ function convertDescBlocksToText(blocks: DescriptionBlock[]): string {
 export default function AdminProductsPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
-  
-  const { data: productsData, isLoading: loadingProducts } = useQuery({
-    queryKey: adminKeys.products(),
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const { data: productsData, isLoading: loadingProducts, isFetching, isError: isProductsError, error: productsError } = useQuery({
+    queryKey: adminKeys.products({ page, pageSize, search: debouncedSearch }),
     queryFn: async () => {
-      const res = await getAdminProductsAction();
+      const res = await getAdminProductsAction({ page, pageSize, search: debouncedSearch });
       if (!res.success) throw new Error(res.error || "Failed to load products");
-      return res.data || [];
-    }
+      return res;
+    },
+    placeholderData: (prev) => prev,
   });
-  const products = productsData || [];
+
+  const products = productsData?.data || [];
+  const totalPages = productsData?.totalPages || 1;
+  const totalCount = productsData?.total || 0;
 
   const { data: categoriesData } = useQuery({
     queryKey: adminKeys.categories(),
@@ -153,12 +169,12 @@ export default function AdminProductsPage() {
     }
   });
   const allBrands = brandsData || [];
-  
+
   // Drawer/Modal states
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [activeTab, setActiveTab] = useState<'general' | 'pricing' | 'media' | 'specs'>('general');
-  
+
   // Form states
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
@@ -183,7 +199,7 @@ export default function AdminProductsPage() {
   const [isFeatured, setIsFeatured] = useState(false);
   const [isPreOrder, setIsPreOrder] = useState(false);
   const [currency, setCurrency] = useState<'USD' | 'LKR'>('USD');
-  
+
   // Image management helpers
   const handleAddImageFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -231,10 +247,10 @@ export default function AdminProductsPage() {
   const handleRemoveImage = (index: number) => {
     setManagedImages((prev) => prev.filter((_, i) => i !== index));
   };
-  
+
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  
+
   // Feedback states
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -248,6 +264,7 @@ export default function AdminProductsPage() {
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: adminKeys.products() });
+      queryClient.invalidateQueries({ queryKey: adminKeys.dashboard() });
       queryClient.invalidateQueries({ queryKey: productKeys.lists() });
       // Invalidate ALL product detail queries so the storefront page refetches the new price
       queryClient.invalidateQueries({ queryKey: productKeys.details() });
@@ -267,6 +284,7 @@ export default function AdminProductsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: adminKeys.products() });
+      queryClient.invalidateQueries({ queryKey: adminKeys.dashboard() });
       queryClient.invalidateQueries({ queryKey: productKeys.lists() });
       setSuccess('Product created successfully.');
       setIsDrawerOpen(false);
@@ -284,6 +302,7 @@ export default function AdminProductsPage() {
     },
     onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: adminKeys.products() });
+      queryClient.invalidateQueries({ queryKey: adminKeys.dashboard() });
       queryClient.invalidateQueries({ queryKey: productKeys.lists() });
       // Invalidate ALL product detail queries so the storefront page refetches the new price
       queryClient.invalidateQueries({ queryKey: productKeys.details() });
@@ -311,16 +330,6 @@ export default function AdminProductsPage() {
       document.body.style.overflow = '';
     };
   }, [isDrawerOpen]);
-
-  // Filtered list
-  const filteredProducts = products.filter((p) => {
-    const term = search.toLowerCase().trim();
-    if (!term) return true;
-    const pName = (p.name || '').toLowerCase();
-    const pCat = (p.category || '').toLowerCase();
-    const pBrand = (p.brand || '').toLowerCase();
-    return pName.includes(term) || pCat.includes(term) || pBrand.includes(term);
-  });
 
   const handleOpenCreate = () => {
     setEditingProduct(null);
@@ -360,26 +369,25 @@ export default function AdminProductsPage() {
     setIsDrawerOpen(true);
   };
 
-  const handleOpenEdit = (product: Product) => {
+  const handleOpenEdit = async (product: Product) => {
     setEditingProduct(product);
     setName(product.name);
     setSlug(product.slug);
     setPrice(product.price.toString());
     setDiscountPrice(product.discountPrice?.toString() || '');
     setWholesalePrice(product.wholesalePrice?.toString() || '');
-    
+
     // Resolve relation IDs from names or IDs safely
     const catRecord = allCategories.find(c => c.id === product.category || c.name.toLowerCase().trim() === String(product.category || '').toLowerCase().trim());
     const brandRecord = allBrands.find(b => b.id === product.brand || b.name.toLowerCase().trim() === String(product.brand || '').toLowerCase().trim());
     setCategory(catRecord ? catRecord.id : (product.category || ''));
     setBrand(brandRecord ? brandRecord.id : (product.brand || ''));
-    
+
     setCountInStock(product.countInStock.toString());
-    setDescription(product.description || '');
-    
-    // Parse description into visual blocks
-    const parsedBlocks = parseTextToDescBlocks(product.description || '');
-    setDescBlocks(parsedBlocks);
+
+    // Temporarily clear heavy fields until they load
+    setDescription('');
+    setDescBlocks([]);
     setDescMode('visual');
 
     setManagedImages(
@@ -390,19 +398,13 @@ export default function AdminProductsPage() {
       }))
     );
     setImageUrlInput('');
-    setBadgesText(product.badges?.join(', ') || '');
-    setSpecsText(JSON.stringify(product.specs || {}, null, 2));
-    
-    const initialSpecs = Object.entries(product.specs || {}).map(([k, v], idx) => ({
-      id: String(idx + 1),
-      key: k,
-      value: String(v)
-    }));
-    setSpecsList(initialSpecs.length > 0 ? initialSpecs : [{ id: '1', key: '', value: '' }]);
+    setBadgesText('');
+    setSpecsText('{}');
+    setSpecsList([{ id: '1', key: '', value: '' }]);
     setSpecsMode('visual');
 
-    setBannerImage(product.bannerImage || '');
-    setBannerText(product.bannerText || '');
+    setBannerImage('');
+    setBannerText('');
     setStatus(product.status || 'published');
     setIsFeatured(product.isFeatured || false);
     setIsPreOrder(product.isPreOrder || false);
@@ -411,6 +413,29 @@ export default function AdminProductsPage() {
     setSuccess(null);
     setActiveTab('general');
     setIsDrawerOpen(true);
+
+    // Fetch full details since list view omits heavy fields
+    try {
+      const fullRes = await getAdminProductAction(product.id);
+      if (fullRes.success && fullRes.data) {
+        const full = fullRes.data;
+        setDescription(full.description || '');
+        const parsedBlocks = parseTextToDescBlocks(full.description || '');
+        setDescBlocks(parsedBlocks);
+        setBadgesText(full.badges?.join(', ') || '');
+        setSpecsText(JSON.stringify(full.specs || {}, null, 2));
+        const initialSpecs = Object.entries(full.specs || {}).map(([k, v], idx) => ({
+          id: String(idx + 1),
+          key: k,
+          value: String(v)
+        }));
+        setSpecsList(initialSpecs.length > 0 ? initialSpecs : [{ id: '1', key: '', value: '' }]);
+        setBannerImage(full.bannerImage || '');
+        setBannerText(full.bannerText || '');
+      }
+    } catch (err) {
+      console.error('Failed to load full product details', err);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -488,7 +513,7 @@ export default function AdminProductsPage() {
         }
       }
       if (bannerText) formData.append('bannerText', bannerText);
-      
+
       // Append all managed images in exact user-configured sequence (files & URLs converted reliably)
       for (const imgItem of managedImages) {
         if (imgItem.type === 'file' && imgItem.file) {
@@ -518,7 +543,7 @@ export default function AdminProductsPage() {
 
   const handleDelete = (id: string) => {
     if (!confirm('Are you sure you want to delete this product?')) return;
-    
+
     setError(null);
     setSuccess(null);
 
@@ -563,6 +588,7 @@ export default function AdminProductsPage() {
 
       setSelectedIds((prev) => prev.filter((id) => !successfullyDeletedIds.includes(id)));
       queryClient.invalidateQueries({ queryKey: adminKeys.products() });
+      queryClient.invalidateQueries({ queryKey: adminKeys.dashboard() });
       queryClient.invalidateQueries({ queryKey: productKeys.lists() });
       for (const id of successfullyDeletedIds) {
         queryClient.invalidateQueries({ queryKey: productKeys.detail(id) });
@@ -603,7 +629,7 @@ export default function AdminProductsPage() {
           <p className="text-xs text-muted-foreground mt-1">Manage storefront catalog, pricing, and quantities.</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button 
+          <Button
             onClick={handleOpenCreate}
             size="sm"
             className="bg-blue-600 hover:bg-blue-500 text-white transition-colors shadow-sm shadow-blue-500/20 font-semibold"
@@ -618,7 +644,7 @@ export default function AdminProductsPage() {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           type="text"
-          placeholder="Search products by name, category, or brand..."
+          placeholder="Search products by name..."
           className="pl-10 bg-card/40 border-border placeholder:text-muted-foreground"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -631,9 +657,9 @@ export default function AdminProductsPage() {
           <span className="text-xs font-semibold text-red-500">
             {selectedIds.length} catalog items selected
           </span>
-          <Button 
+          <Button
             onClick={handleBulkDelete}
-            size="sm" 
+            size="sm"
             className="bg-red-600 hover:bg-red-500 text-white font-bold h-8 text-[11px] px-3.5"
             disabled={isPending}
           >
@@ -650,18 +676,33 @@ export default function AdminProductsPage() {
               <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-blue-500" />
               Loading product listings...
             </div>
+          ) : isProductsError ? (
+            <div className="bg-red-500/5 border border-red-500/10 p-8 text-center text-xs text-red-500 rounded-xl">
+              <AlertCircle className="mx-auto mb-3 h-8 w-8 text-red-500/80" />
+              <p className="mb-1 font-semibold">Failed to load products</p>
+              <p className="opacity-80">
+                {(productsError as Error)?.message ||
+                  "An unexpected error occurred."}
+              </p>
+            </div>
           ) : (
-            <table className="w-full text-left text-xs border-collapse">
+            <div className="relative">
+              {isFetching && (
+                <div className="bg-background/50 absolute inset-0 z-10 flex items-center justify-center backdrop-blur-[1px]">
+                  <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+                </div>
+              )}
+              <table className="w-full border-collapse text-left text-xs">
               <thead>
                 <tr className="bg-secondary/40 border-b border-border text-muted-foreground uppercase tracking-wider font-semibold text-[10px]">
                   <th className="p-4 w-10">
-                    <input 
+                    <input
                       type="checkbox"
                       className="rounded border-border accent-blue-500"
-                      checked={selectedIds.length === filteredProducts.length && filteredProducts.length > 0}
+                      checked={selectedIds.length === products.length && products.length > 0}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          setSelectedIds(filteredProducts.map(p => p.id));
+                          setSelectedIds(products.map(p => p.id));
                         } else {
                           setSelectedIds([]);
                         }
@@ -676,16 +717,16 @@ export default function AdminProductsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filteredProducts.map((product) => {
+                {products.map((product) => {
                   const stock = getStockBadge(product.countInStock);
                   const price = product.discountPrice ?? product.price;
-                  const currency = product.currency === 'LKR' ? 'LKR ' : '$';
+                  const currency = (product as any).currency === 'LKR' ? 'LKR ' : '$';
                   const isChecked = selectedIds.includes(product.id);
 
                   return (
                     <tr key={product.id} className={`hover:bg-muted/10 transition-colors group ${isChecked ? 'bg-blue-500/5' : ''}`}>
                       <td className="p-4 w-10">
-                        <input 
+                        <input
                           type="checkbox"
                           className="rounded border-border accent-blue-500 cursor-pointer"
                           checked={isChecked}
@@ -713,9 +754,9 @@ export default function AdminProductsPage() {
                       <td className="p-4 text-muted-foreground capitalize">{product.category}</td>
                       <td className="p-4">
                         <div>
-                          <p className="font-bold text-foreground">{product.currency || 'USD'} {(product.discountPrice || product.price || 0).toLocaleString()}</p>
+                          <p className="font-bold text-foreground">{(product as any).currency || 'USD'} {(product.discountPrice || product.price || 0).toLocaleString()}</p>
                           {product.discountPrice && (
-                            <p className="text-muted-foreground line-through text-[10px]">{product.currency || 'USD'} {(product.price || 0).toLocaleString()}</p>
+                            <p className="text-muted-foreground line-through text-[10px]">{(product as any).currency || 'USD'} {(product.price || 0).toLocaleString()}</p>
                           )}
                         </div>
                       </td>
@@ -729,16 +770,16 @@ export default function AdminProductsPage() {
                       </td>
                       <td className="p-4 text-right">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button 
-                            onClick={() => handleOpenEdit(product)}
-                            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent hover:border-border transition-all" 
+                          <button
+                            onClick={() => handleOpenEdit(product as unknown as Product)}
+                            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent hover:border-border transition-all"
                             title="Edit"
                           >
                             <Edit className="h-3.5 w-3.5" />
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleDelete(product.id)}
-                            className="p-1.5 rounded-md text-muted-foreground hover:text-red-500 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all" 
+                            className="p-1.5 rounded-md text-muted-foreground hover:text-red-500 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all"
                             title="Delete"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -750,13 +791,45 @@ export default function AdminProductsPage() {
                 })}
               </tbody>
             </table>
+            </div>
+          )}
+
+          {/* Pagination Controls */}
+          {products.length > 0 && (
+            <div className="p-4 border-t border-border flex items-center justify-between text-xs text-muted-foreground bg-secondary/10">
+              <div className="flex items-center gap-4">
+                <span>Showing {products.length} of {totalCount} items</span>
+                {isFetching && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2"
+                  disabled={page <= 1}
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                </Button>
+                <span className="px-3 font-medium">Page {page} of {totalPages}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                >
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
           )}
         </div>
       </div>
 
       {/* Centered Modal Dialog */}
       {isDrawerOpen && (
-        <div 
+        <div
           className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm p-4 sm:p-6 flex items-center justify-center animate-in fade-in duration-200"
           onClick={(e) => {
             if (e.target === e.currentTarget) setIsDrawerOpen(false);
@@ -775,7 +848,7 @@ export default function AdminProductsPage() {
                   Update database fields for this specific product.
                 </p>
               </div>
-              <button 
+              <button
                 type="button"
                 onClick={() => setIsDrawerOpen(false)}
                 className="p-1.5 text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted transition-colors cursor-pointer"
@@ -840,7 +913,7 @@ export default function AdminProductsPage() {
             <form onSubmit={handleSubmit} className="flex flex-col">
               {/* Scrollable Form Body */}
               <div className="max-h-[calc(85vh-180px)] min-h-[300px] overflow-y-auto overscroll-contain p-6 space-y-4">
-                
+
                 {/* TAB 1: GENERAL INFO */}
                 {activeTab === 'general' && (
                   <div className="space-y-4 animate-in fade-in duration-150">
@@ -857,16 +930,16 @@ export default function AdminProductsPage() {
                           </button>
                         )}
                       </div>
-                      <Input 
-                        value={name} 
+                      <Input
+                        value={name}
                         onChange={(e) => {
                           setName(e.target.value);
                           if (!editingProduct) {
                             setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, ''));
                           }
-                        }} 
-                        placeholder="e.g. ApexBook Pro 16" 
-                        required 
+                        }}
+                        placeholder="e.g. ApexBook Pro 16"
+                        required
                       />
                     </div>
 
@@ -1019,11 +1092,11 @@ export default function AdminProductsPage() {
                       {/* Dropzone & Direct URL input */}
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div className="sm:col-span-2 relative border-2 border-dashed border-border hover:border-blue-500/60 transition-colors rounded-2xl p-5 bg-card/40 flex flex-col items-center justify-center text-center group cursor-pointer">
-                          <input 
-                            type="file" 
-                            multiple 
-                            accept="image/*" 
-                            onChange={(e) => handleAddImageFiles(e.target.files)} 
+                          <input
+                            type="file"
+                            multiple
+                            accept="image/*"
+                            onChange={(e) => handleAddImageFiles(e.target.files)}
                             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
                           />
                           <div className="h-9 w-9 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-1.5 group-hover:scale-110 transition-transform">
@@ -1078,17 +1151,17 @@ export default function AdminProductsPage() {
                               : sanitizeImageUrl(imgItem.url);
 
                             return (
-                              <div 
-                                key={imgItem.id} 
+                              <div
+                                key={imgItem.id}
                                 className={`group relative aspect-square rounded-2xl border transition-all overflow-hidden bg-card/60 ${
-                                  isCover 
-                                    ? 'border-amber-500 shadow-md ring-2 ring-amber-500/20 bg-amber-500/5' 
+                                  isCover
+                                    ? 'border-amber-500 shadow-md ring-2 ring-amber-500/20 bg-amber-500/5'
                                     : 'border-border hover:border-blue-500/50'
                                 }`}
                               >
-                                <img 
-                                  src={displayUrl} 
-                                  alt={`Product Photo ${idx + 1}`} 
+                                <img
+                                  src={displayUrl}
+                                  alt={`Product Photo ${idx + 1}`}
                                   className="w-full h-full object-contain p-2"
                                 />
 
@@ -1186,10 +1259,10 @@ export default function AdminProductsPage() {
                                 <img src={bannerImage} alt="Banner Preview" className="w-full h-full object-cover" />
                               </div>
                               <div className="flex-1 space-y-1">
-                                <Input 
-                                  value={bannerImage} 
-                                  onChange={(e) => setBannerImage(e.target.value)} 
-                                  placeholder="Image URL or Data URI" 
+                                <Input
+                                  value={bannerImage}
+                                  onChange={(e) => setBannerImage(e.target.value)}
+                                  placeholder="Image URL or Data URI"
                                   className="bg-background text-xs h-7"
                                 />
                                 <div className="flex items-center gap-2">
@@ -1249,10 +1322,10 @@ export default function AdminProductsPage() {
                         </div>
                         <div className="space-y-1.5">
                           <label className="text-[11px] font-semibold text-foreground/80 block">Banner Headline / Tagline</label>
-                          <Input 
-                            value={bannerText} 
-                            onChange={(e) => setBannerText(e.target.value)} 
-                            placeholder="e.g. Next-Gen M3 Processing Power & Liquid Retina XDR" 
+                          <Input
+                            value={bannerText}
+                            onChange={(e) => setBannerText(e.target.value)}
+                            placeholder="e.g. Next-Gen M3 Processing Power & Liquid Retina XDR"
                             className="bg-background text-xs"
                           />
                         </div>
@@ -1644,8 +1717,8 @@ export default function AdminProductsPage() {
                           <div className="space-y-2">
                             {specsList.map((row, idx) => (
                               <div key={row.id || idx} className="flex items-center gap-2">
-                                <Input 
-                                  value={row.key} 
+                                <Input
+                                  value={row.key}
                                   onChange={(e) => {
                                     const updated = [...specsList];
                                     updated[idx].key = e.target.value;
@@ -1654,8 +1727,8 @@ export default function AdminProductsPage() {
                                   placeholder="Spec Name (e.g. RAM)"
                                   className="w-1/3 text-xs bg-background"
                                 />
-                                <Input 
-                                  value={row.value} 
+                                <Input
+                                  value={row.value}
                                   onChange={(e) => {
                                     const updated = [...specsList];
                                     updated[idx].value = e.target.value;
@@ -1708,9 +1781,9 @@ export default function AdminProductsPage() {
               <div className="p-4 border-t border-border flex items-center justify-between bg-secondary/10 shrink-0">
                 <div className="flex items-center gap-2">
                   {activeTab !== 'general' && (
-                    <Button 
-                      type="button" 
-                      variant="outline" 
+                    <Button
+                      type="button"
+                      variant="outline"
                       size="sm"
                       onClick={() => {
                         const tabs: ('general' | 'pricing' | 'media' | 'specs')[] = ['general', 'pricing', 'media', 'specs'];
@@ -1723,9 +1796,9 @@ export default function AdminProductsPage() {
                     </Button>
                   )}
                   {activeTab !== 'specs' && (
-                    <Button 
-                      type="button" 
-                      variant="outline" 
+                    <Button
+                      type="button"
+                      variant="outline"
                       size="sm"
                       onClick={() => {
                         const tabs: ('general' | 'pricing' | 'media' | 'specs')[] = ['general', 'pricing', 'media', 'specs'];
@@ -1740,16 +1813,16 @@ export default function AdminProductsPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Button 
-                    type="button" 
-                    variant="ghost" 
+                  <Button
+                    type="button"
+                    variant="ghost"
                     onClick={() => setIsDrawerOpen(false)}
                     className="text-muted-foreground border border-border"
                     disabled={isSubmitting}
                   >
                     Cancel
                   </Button>
-                  <Button 
+                  <Button
                     type="submit"
                     className="bg-blue-600 hover:bg-blue-500 text-white font-semibold flex items-center gap-1"
                     disabled={isSubmitting}
