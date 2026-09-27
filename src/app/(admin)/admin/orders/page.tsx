@@ -124,7 +124,7 @@ export default function AdminOrdersPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [isPending, startTransition] = useTransition();
-  const [defaultReceiptConfig, setDefaultReceiptConfig] = useState<ReceiptPrintConfig>(DEFAULT_RECEIPT_CONFIG);
+  const [defaultReceiptConfig, setDefaultReceiptConfig] = useState<ReceiptPrintConfig | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -199,16 +199,7 @@ export default function AdminOrdersPage() {
   const totalPages = ordersData?.totalPages || 1;
   const totalCount = ordersData?.total || 0;
 
-  useEffect(() => {
-    async function loadReceiptPreset() {
-      const res = await getReceiptPrintPresetsAction();
-      if (res.success && res.data && res.data.length > 0) {
-        const def = res.data.find((p) => p.isDefault) || res.data[0];
-        setDefaultReceiptConfig(normalizeReceiptConfig(def.config));
-      }
-    }
-    void loadReceiptPreset();
-  }, []);
+
 
 
 
@@ -385,6 +376,46 @@ export default function AdminOrdersPage() {
     };
 
     printInvoice(cfg, invoiceData, isQuotation ? 'Sales Quotation' : isPaid ? 'Paid Invoice' : 'Proforma Invoice');
+  };
+
+  const handlePrintThermalReceipt = async (order: Order) => {
+    let cfg = defaultReceiptConfig;
+    if (!cfg) {
+      const res = await getReceiptPrintPresetsAction();
+      if (res.success && res.data && res.data.length > 0) {
+        const def = res.data.find((p: any) => p.isDefault) || res.data[0];
+        cfg = normalizeReceiptConfig(def.config);
+      } else {
+        cfg = DEFAULT_RECEIPT_CONFIG;
+      }
+      setDefaultReceiptConfig(cfg);
+    }
+
+    const fullRes = await getAdminOrderByIdAction(order.id);
+    const fullItems = fullRes.success ? (Array.isArray(fullRes.data?.items) ? fullRes.data.items : []) : [];
+
+    const receiptItems =
+      fullItems && fullItems.length > 0
+        ? fullItems.map((item: any) => {
+            const serialsList = collectSerials(item);
+            return {
+              name: serialsList.length > 0 ? `${item.name || 'Product Item'} (S/N: ${serialsList.join(', ')})` : item.name || 'Product Item',
+              unitPrice: item.price || 0,
+              qty: item.quantity || 1,
+              lineTotal: (item.price || 0) * (item.quantity || 1),
+            };
+          })
+        : [{ name: `Order ${order.orderId}`, unitPrice: order.total, qty: 1, lineTotal: order.total }];
+
+    printReceipt(cfg, {
+      orderNumber: order.orderId,
+      customerName: order.customerName || order.email,
+      date: getFallbackInvoiceDate(order.date),
+      items: receiptItems,
+      subtotal: order.total,
+      total: order.total,
+      paymentMethod: getPaymentMethodLabel(order.paymentMethod),
+    });
   };
 
   const toggleRow = (orderId: string) => {
@@ -875,33 +906,7 @@ export default function AdminOrdersPage() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={async () => {
-                                    const fullRes = await getAdminOrderByIdAction(order.id);
-                                    const fullItems = fullRes.success ? (Array.isArray(fullRes.data?.items) ? fullRes.data.items : []) : [];
-
-                                    const receiptItems =
-                                      fullItems && fullItems.length > 0
-                                        ? fullItems.map((item: any) => {
-                                            const serialsList = collectSerials(item);
-                                            return {
-                                              name: serialsList.length > 0 ? `${item.name || 'Product Item'} (S/N: ${serialsList.join(', ')})` : item.name || 'Product Item',
-                                              unitPrice: item.price || 0,
-                                              qty: item.quantity || 1,
-                                              lineTotal: (item.price || 0) * (item.quantity || 1),
-                                            };
-                                          })
-                                        : [{ name: `Order ${order.orderId}`, unitPrice: order.total, qty: 1, lineTotal: order.total }];
-
-                                    printReceipt(defaultReceiptConfig, {
-                                      orderNumber: order.orderId,
-                                      customerName: order.customerName || order.email,
-                                      date: getFallbackInvoiceDate(order.date),
-                                      items: receiptItems,
-                                      subtotal: order.total,
-                                      total: order.total,
-                                      paymentMethod: getPaymentMethodLabel(order.paymentMethod),
-                                    });
-                                  }}
+                                  onClick={() => handlePrintThermalReceipt(order as unknown as Order)}
                                   className="h-8 text-[11px] font-semibold flex items-center gap-1 cursor-pointer border-border hover:bg-muted text-emerald-400 border-emerald-500/30"
                                   title="Print Thermal 80mm/58mm POS Receipt"
                                 >

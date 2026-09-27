@@ -6,7 +6,7 @@ import { createClient as createServerSupabase } from '@/lib/supabase/server';
 import { getAdminSupabase, writeAuditLog } from '@/lib/supabase-admin';
 import { getTrustedClientIp } from '@/lib/get-client-ip';
 import { ROLE_PERMISSIONS, ADMIN_ROLES } from '@/types/admin';
-import type { AdminRole, AuditAction, DealerSaleRecord } from '@/types/admin';
+import type { AdminRole, AuditAction, DealerSaleRecord, QuotationVoidReason } from '@/types/admin';
 import type { BarcodePrintConfig } from '@/types/barcode-config';
 import { DEFAULT_RECEIPT_CONFIG, type ReceiptPrintConfig, type ReceiptPrintPreset } from '@/types/receipt-config';
 import { DEFAULT_INVOICE_CONFIG, type InvoicePrintConfig, type InvoicePrintPreset } from '@/types/invoice-config';
@@ -32,7 +32,7 @@ import {
   pbEmployees,
   pbSales,
 } from '@/lib/supabase-collections';
-import type { PaymentMethod, PBSale, PBSaleItem, SalePayload, EmployeeRole, PosEmployeeSession } from '@/types/pos';
+import type { PaymentMethod, PaymentTerms, PBSale, PBSaleItem, SalePayload, EmployeeRole, PosEmployeeSession, SalePayment, SalePaymentReversal, SalePaymentSummary, PaymentRecordStatus, ChequeRegisterItem, ChequeRegisterMetrics } from '@/types/pos';
 import {
   hashPin,
   verifyPinWithLegacyMigration,
@@ -62,7 +62,7 @@ function getStoragePublicUrl(path: string): string {
 export async function checkPermission(
   module: keyof typeof ROLE_PERMISSIONS[AdminRole],
   action: 'read' | 'write' | 'delete'
-): Promise<{ allowed: boolean; role?: AdminRole; actorEmail?: string; actorId?: string; ip?: string; userAgent?: string }> {
+): Promise<{ allowed: boolean; role?: AdminRole; actorEmail?: string; actorId?: string; actorName?: string; ip?: string; userAgent?: string }> {
   let ip = '127.0.0.1';
   let userAgent = 'unknown';
 
@@ -101,11 +101,14 @@ export async function checkPermission(
       role = roleStr as AdminRole;
     }
 
+    const actorName = profile?.name?.trim() || '';
+
     if (!role) {
       return {
         allowed: false,
         actorEmail: user.email || '',
         actorId: user.id,
+        actorName,
         ip,
         userAgent,
       };
@@ -119,6 +122,7 @@ export async function checkPermission(
       role,
       actorEmail: user.email || '',
       actorId: user.id,
+      actorName,
       ip,
       userAgent,
     };
@@ -3936,73 +3940,295 @@ export async function validatePosCouponAction(code: string, cartTotal: number) {
   }
 }
 
-export async function getUnifiedSalesTrackerAction() {
+export async function getUnifiedSalesTrackerAction(params?: {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  source?: string;
+  paymentStatus?: string;
+  status?: string;
+  paymentMethod?: string;
+  lifecycle?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  minAmount?: number;
+  maxAmount?: number;
+  sort?: string;
+}) {
   const perm = await checkPermission('orders', 'read');
   if (!perm.allowed) {
     return { success: false, error: 'Unauthorized: Read orders permission required.' };
   }
+
+  const {
+    page = 1,
+    pageSize = 50,
+    search = '',
+    source = 'All',
+    paymentStatus = 'All',
+    status = 'All',
+    paymentMethod = 'All',
+    lifecycle = 'all',
+    dateFrom,
+    dateTo,
+    minAmount,
+    maxAmount,
+    sort = 'newest'
+  } = params || {};
+
+  // Validate limits server-side
+  const limit = Math.max(1, Math.min(pageSize, 100));
+  const offset = Math.max(0, (page - 1) * limit);
+
   try {
-    const [sales, ordersRes] = await Promise.all([
-      pbSales.getAll(),
-      pbOrders.getAll(),
-    ]);
+    const supabase = await getAdminSupabase();
+    const { data, error } = await supabase.rpc('admin_get_unified_sales', {
+      p_search: search,
+      p_source: source,
+      p_payment_status: paymentStatus,
+      p_status: status,
+      p_payment_method: paymentMethod,
+      p_lifecycle: lifecycle.toLowerCase(),
+      p_date_from: dateFrom || null,
+      p_date_to: dateTo || null,
+      p_min_amount: minAmount ?? null,
+      p_max_amount: maxAmount ?? null,
+      p_sort: sort,
+      p_limit: limit,
+      p_offset: offset
+    });
 
-    const salesList = Array.isArray(sales) ? sales : (sales as any)?.items || [];
-    const ordersList = Array.isArray(ordersRes) ? ordersRes : (ordersRes as any)?.items || [];
+    if (error) throw error;
 
-    const posSalesFormatted = salesList.map((s: any) => ({
-      id: s.id,
-      receiptNumber: s.receipt_number || s.receiptNumber || `FTC-POS-${s.id.slice(-6).toUpperCase()}`,
-      date: s.date || s.created || s.created_at || s.updated,
-      customerName: s.customer_name || s.customerName || 'Walk-in Customer',
-      customerEmail: s.customer_email || s.customerEmail || '—',
-      itemsCount: s.items_count || s.itemsCount || 1,
-      total: s.total || 0,
-      discount: s.discount || 0,
-      paymentMethod: s.payment_method || s.paymentMethod || 'cash',
-      status: s.status || 'completed',
-      source: 'POS Terminal',
+    const items = data || [];
+    const mappedItems = items.map((sale: any) => ({
+      id: sale.id,
+      receiptNumber: sale.receipt_number,
+      invoiceNumber: sale.invoice_number,
+      date: sale.date,
+      customerName: sale.customer_name,
+      customerCompany: sale.customer_company || null,
+      customerEmail: sale.customer_email,
+      itemsCount: sale.items_count,
+      total: Number(sale.total) || 0,
+      discount: Number(sale.discount) || 0,
+      paymentMethod: sale.payment_method,
+      status: sale.status,
+      source: sale.source,
+      isPaid: sale.is_paid,
+      isRevenueEligible: sale.is_revenue_eligible,
+      clearedPaid: Number(sale.cleared_paid) || 0,
+      pendingClearance: Number(sale.pending_clearance) || 0,
+      balanceDue: Number(sale.balance_due) || 0,
+      availableToRecord: Number(sale.available_to_record) || 0,
+      paymentStatus: sale.payment_status || (sale.is_paid ? 'PAID' : 'UNPAID'),
+      paymentTerms: sale.payment_terms || 'due_on_receipt',
+      dueDate: sale.due_date,
+      collectionStatus: sale.collection_status || 'NOT DUE',
+      daysOverdue: Number(sale.days_overdue) || 0,
+      isRevoked: Boolean(sale.is_revoked),
+      invoiceRevokedAt: sale.invoice_revoked_at || null,
+      invoiceRevokedBy: sale.invoice_revoked_by || null,
+      invoiceRevokeReason: sale.invoice_revoke_reason || null,
+      invoiceRevokeNotes: sale.invoice_revoke_notes || null,
+    }));
+    const totalCount = items.length > 0 ? Number(items[0].total_count) : 0;
+    const totalPages = Math.max(1, Math.ceil(totalCount / limit));
+
+    return {
+      success: true,
+      data: mappedItems,
+      total: totalCount,
+      page,
+      pageSize: limit,
+      totalPages
+    };
+  } catch (err: any) {
+    console.error('Unified sales tracker error:', err);
+    return { success: false, error: err.message || 'Failed to fetch unified sales.' };
+  }
+}
+
+export async function getOutstandingReceivablesAction(params?: {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  filter?: string;
+  sort?: string;
+}) {
+  const perm = await checkPermission('orders', 'read');
+  if (!perm.allowed) {
+    return { success: false, error: 'Unauthorized: Read permission required.' };
+  }
+
+  const {
+    page = 1,
+    pageSize = 50,
+    search = '',
+    filter = 'all',
+    sort = 'due_asc',
+  } = params || {};
+
+  const limit = Math.max(1, Math.min(pageSize, 100));
+  const offset = Math.max(0, (page - 1) * limit);
+
+  try {
+    const supabase = await getAdminSupabase();
+    const { data, error } = await supabase.rpc('admin_get_outstanding_receivables', {
+      p_search: search,
+      p_filter: filter,
+      p_sort: sort,
+      p_limit: limit,
+      p_offset: offset,
+    });
+
+    if (error) throw error;
+
+    const items = (data || []).map((row: any) => ({
+      id: row.id,
+      invoice_number: row.invoice_number,
+      receipt_number: row.receipt_number,
+      invoice_date: row.invoice_date,
+      due_date: row.due_date,
+      customer_name: row.customer_name,
+      customer_company: row.customer_company || null,
+      customer_phone: row.customer_phone,
+      customer_email: row.customer_email,
+      items_count: Number(row.items_count) || 1,
+      invoice_total: Number(row.invoice_total) || 0,
+      cleared_paid: Number(row.cleared_paid) || 0,
+      pending_clearance: Number(row.pending_clearance) || 0,
+      balance_due: Number(row.balance_due) || 0,
+      available_to_record: Number(row.available_to_record) || 0,
+      payment_status: row.payment_status,
+      collection_status: row.collection_status,
+      days_overdue: Number(row.days_overdue) || 0,
+      aging_bucket: row.aging_bucket,
+      payment_terms: row.payment_terms,
+      total_count: Number(row.total_count) || 0,
     }));
 
-    const onlineOrdersFormatted = ordersList.map((o: any) => {
-      let itemsCount = 1;
-      if (Array.isArray(o.items)) {
-        itemsCount = o.items.reduce((acc: number, item: any) => acc + (item.quantity || 1), 0);
-      } else if (o.items && typeof o.items === 'object') {
-        itemsCount = Object.keys(o.items).length;
-      }
+    const totalCount = items.length > 0 ? items[0].total_count : 0;
+    const totalPages = Math.max(1, Math.ceil(totalCount / limit));
 
-      let customerName = 'Online Customer';
-      if (o.customer?.name) {
-        customerName = o.customer.name;
-      } else if (o.shippingAddress?.firstName) {
-        customerName = `${o.shippingAddress.firstName} ${o.shippingAddress.lastName || ''}`.trim();
-      }
-
-      return {
-        id: o.id,
-        receiptNumber: o.orderId || `FTC-ONL-${o.id.slice(-6).toUpperCase()}`,
-        date: o.created || o.created_at || o.updated,
-        customerName,
-        customerEmail: o.customer?.email || o.email || '—',
-        itemsCount,
-        total: o.total || 0,
-        discount: 0,
-        paymentMethod: o.paymentDetails?.method || 'card',
-        status: o.status === 'cancelled' ? 'voided' : 'completed',
-        source: 'Online Store',
-      };
-    });
-
-    const unified = [...posSalesFormatted, ...onlineOrdersFormatted].sort((a, b) => {
-      const dateA = new Date(a.date).getTime();
-      const dateB = new Date(b.date).getTime();
-      return dateB - dateA;
-    });
-
-    return { success: true, data: unified };
+    return {
+      success: true,
+      data: items,
+      total: totalCount,
+      page,
+      pageSize: limit,
+      totalPages,
+    };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to fetch unified sales.' };
+    console.error('getOutstandingReceivablesAction error:', err);
+    return { success: false, error: err.message || 'Failed to fetch outstanding receivables.' };
+  }
+}
+
+export async function getOutstandingReceivablesMetricsAction(search = '') {
+  const perm = await checkPermission('orders', 'read');
+  if (!perm.allowed) {
+    return { success: false, error: 'Unauthorized: Read permission required.' };
+  }
+
+  try {
+    const supabase = await getAdminSupabase();
+    const { data, error } = await supabase.rpc('admin_get_outstanding_receivables_metrics', {
+      p_search: search,
+    });
+
+    if (error) throw error;
+
+    const row = data && data[0] ? data[0] : null;
+    return {
+      success: true,
+      data: {
+        total_outstanding: Number(row?.total_outstanding) || 0,
+        total_invoices: Number(row?.total_invoices) || 0,
+        unpaid_amount: Number(row?.unpaid_amount) || 0,
+        unpaid_count: Number(row?.unpaid_count) || 0,
+        balance_pending_amount: Number(row?.balance_pending_amount) || 0,
+        balance_pending_count: Number(row?.balance_pending_count) || 0,
+        pending_cheques: Number(row?.pending_cheques) || 0,
+        pending_cheques_count: Number(row?.pending_cheques_count) || 0,
+        due_today_amount: Number(row?.due_today_amount) || 0,
+        due_today_count: Number(row?.due_today_count) || 0,
+        due_next_7_days_amount: Number(row?.due_next_7_days_amount) || 0,
+        due_next_7_days_count: Number(row?.due_next_7_days_count) || 0,
+        overdue_amount: Number(row?.overdue_amount) || 0,
+        overdue_count: Number(row?.overdue_count) || 0,
+        overdue_30_plus_amount: Number(row?.overdue_30_plus_amount) || 0,
+        overdue_30_plus_count: Number(row?.overdue_30_plus_count) || 0,
+      },
+    };
+  } catch (err: any) {
+    console.error('getOutstandingReceivablesMetricsAction error:', err);
+    return { success: false, error: err.message || 'Failed to fetch receivables metrics.' };
+  }
+}
+
+export async function getUnifiedSalesMetricsAction(params?: {
+  search?: string;
+  source?: string;
+  paymentStatus?: string;
+  status?: string;
+  paymentMethod?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  minAmount?: number;
+  maxAmount?: number;
+}) {
+  const perm = await checkPermission('orders', 'read');
+  if (!perm.allowed) {
+    return { success: false, error: 'Unauthorized: Read orders permission required.' };
+  }
+
+  const {
+    search = '',
+    source = 'All',
+    paymentStatus = 'All',
+    status = 'All',
+    paymentMethod = 'All',
+    dateFrom,
+    dateTo,
+    minAmount,
+    maxAmount
+  } = params || {};
+
+  try {
+    const supabase = await getAdminSupabase();
+    const { data, error } = await supabase.rpc('admin_get_unified_sales_metrics', {
+      p_search: search,
+      p_source: source,
+      p_payment_status: paymentStatus,
+      p_status: status,
+      p_payment_method: paymentMethod,
+      p_date_from: dateFrom || null,
+      p_date_to: dateTo || null,
+      p_min_amount: minAmount ?? null,
+      p_max_amount: maxAmount ?? null
+    });
+
+    if (error) throw error;
+
+    const metrics = data?.[0] || {
+      total_revenue: 0,
+      pos_revenue: 0,
+      online_revenue: 0,
+      paid_transactions: 0,
+      paid_pos_transactions: 0,
+      paid_online_transactions: 0,
+      outstanding_amount: 0,
+      outstanding_transactions: 0,
+      returned_refunded_count: 0,
+      average_paid_transaction: 0,
+      total_transactions: 0
+    };
+
+    return { success: true, data: metrics };
+  } catch (err: any) {
+    console.error('Unified sales metrics error:', err);
+    return { success: false, error: err.message || 'Failed to fetch sales metrics.' };
   }
 }
 
@@ -4447,43 +4673,66 @@ export async function getQuotationsAction(input: GetAdminQuotationsInput = {}) {
     } = input;
 
     const supabase = getAdminSupabase();
-
-    let query = supabase.from('quotations').select('*', { count: 'exact' });
-
-    if (search) {
-      query = query.or(`customer_name.ilike.%${search}%,customer_email.ilike.%${search}%,quote_number.ilike.%${search}%`);
-    }
-
-    if (status) {
-      query = query.eq('status', status);
-    }
-
-    if (quoteType && quoteType !== 'all') {
-      query = query.eq('quote_type', quoteType);
-    }
-
-    if (sort === 'oldest') {
-      query = query.order('created_at', { ascending: true });
-    } else {
-      query = query.order('created_at', { ascending: false });
-    }
-
     const from = (page - 1) * pageSize;
-    const to = from + pageSize - 1;
 
-    const { data, count, error } = await query.range(from, to);
+    const { data, error } = await supabase.rpc('admin_get_unified_quotations', {
+      p_search: search || '',
+      p_status: status ? (status === 'all' ? 'All' : status) : 'All',
+      p_quote_type: quoteType || 'all',
+      p_sort: sort || 'newest',
+      p_limit: pageSize,
+      p_offset: from,
+    });
+
     if (error) throw error;
+
+    const rows = (data || []) as any[];
+    const totalCount = rows.length > 0 ? Number(rows[0].total_count || 0) : 0;
 
     return {
       success: true,
-      data: data || [],
-      total: count || 0,
+      data: rows,
+      total: totalCount,
       page,
       pageSize,
-      totalPages: Math.ceil((count || 0) / pageSize)
+      totalPages: Math.ceil(totalCount / pageSize) || 1,
     };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to fetch quotations.', data: [] };
+  }
+}
+
+export async function getQuotationsMetricsAction() {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase.rpc('admin_get_unified_quotations_metrics');
+    if (error) throw error;
+
+    const m = (data && data[0]) || {
+      total_quotations: 0,
+      wholesale_count: 0,
+      direct_count: 0,
+      total_quoted_value: 0,
+      active_pipeline_value: 0,
+      converted_value: 0,
+    };
+
+    return {
+      success: true,
+      data: {
+        totalQuotations: Number(m.total_quotations || 0),
+        wholesaleCount: Number(m.wholesale_count || 0),
+        directCount: Number(m.direct_count || 0),
+        totalQuotedValue: Number(m.total_quoted_value || 0),
+        activePipelineValue: Number(m.active_pipeline_value || 0),
+        convertedValue: Number(m.converted_value || 0),
+      },
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch quotation metrics.' };
   }
 }
 
@@ -4505,7 +4754,7 @@ export async function saveQuotationAction(
     discount_value?: number;
     total_amount: number;
     valid_until: string;
-    status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
+    status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired' | 'voided';
     notes?: string;
     createDealerIfNew?: boolean;
     createCustomerIfNew?: boolean;
@@ -4617,7 +4866,7 @@ export async function saveQuotationAction(
     calculatedDiscount = Math.min(Math.max(calculatedDiscount, 0), subtotal);
     const totalAmount = Math.max(0, Math.round(subtotal - calculatedDiscount + safeTax));
 
-    const { createDealerIfNew, createCustomerIfNew, ...payloadData } = data;
+    const { createDealerIfNew, createCustomerIfNew, quote_type, dealer_id, ...payloadData } = data;
     const payload = {
       ...payloadData,
       items: validatedItems,
@@ -4627,17 +4876,98 @@ export async function saveQuotationAction(
       discount_type: discType,
       discount_value: clampedDiscountValue,
       total_amount: totalAmount,
-      quote_type: data.quote_type || (data.customer_company ? 'wholesale' : 'direct'),
-      dealer_id: data.dealer_id || null,
     };
 
+    const supabase = getAdminSupabase();
     let record;
     if (existingId) {
+      const { data: existingQuote, error: exErr } = await supabase
+        .from('quotations')
+        .select('*')
+        .eq('id', existingId)
+        .single();
+
+      if (exErr || !existingQuote) {
+        return { success: false, error: 'Quotation not found.' };
+      }
+
+      // Check if already converted
+      const { data: linkedSale } = await supabase
+        .from('sales')
+        .select('id, invoice_number')
+        .or(`quotation_id.eq.${existingId},notes.eq.Converted from Quotation #${existingQuote.quote_number}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (linkedSale) {
+        return {
+          success: false,
+          error: `Converted quotations are immutable and cannot be edited. Commercial invoice #${linkedSale.invoice_number || linkedSale.id} has already been issued.`,
+        };
+      }
+
+      // Check terminal states
+      if (existingQuote.status === 'voided' || existingQuote.voided_at) {
+        return { success: false, error: 'Voided quotations cannot be edited.' };
+      }
+      if (existingQuote.status === 'rejected') {
+        return { success: false, error: 'Rejected quotations cannot be edited.' };
+      }
+      if (existingQuote.status === 'expired' || (existingQuote.valid_until && new Date(existingQuote.valid_until).getTime() < Date.now())) {
+        return { success: false, error: 'Expired quotations cannot be edited. Please create a new quotation.' };
+      }
+      if (existingQuote.status === 'accepted') {
+        return {
+          success: false,
+          error: 'Accepted quotations cannot be edited. Commercial terms are locked awaiting invoice issuance.',
+        };
+      }
+
+      // Protect quote_number: never allow client to change historical quote number
+      payload.quote_number = existingQuote.quote_number;
+
       record = await pbQuotations.update(existingId, payload);
+
+      await writeAuditLog(
+        check.actorEmail || 'Admin User',
+        'update',
+        'quotations',
+        existingId,
+        {
+          subtotal: existingQuote.subtotal,
+          total_amount: existingQuote.total_amount,
+          customer_name: existingQuote.customer_name,
+          customer_company: existingQuote.customer_company,
+        },
+        {
+          subtotal: payload.subtotal,
+          total_amount: payload.total_amount,
+          customer_name: payload.customer_name,
+          customer_company: payload.customer_company,
+        },
+        { ip: check.ip, userAgent: check.userAgent }
+      );
     } else {
       record = await pbQuotations.create(payload);
+
+      await writeAuditLog(
+        check.actorEmail || 'Admin User',
+        'create',
+        'quotations',
+        record.id,
+        undefined,
+        {
+          quote_number: payload.quote_number,
+          customer_name: payload.customer_name,
+          customer_company: payload.customer_company,
+          total_amount: payload.total_amount,
+          status: payload.status,
+        },
+        { ip: check.ip, userAgent: check.userAgent }
+      );
     }
     revalidatePath('/admin/quotations');
+    revalidatePath('/admin/sales');
     return { success: true, data: structuredClone(record) };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to save quotation.' };
@@ -4649,15 +4979,74 @@ export async function deleteQuotationAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
+    const supabase = getAdminSupabase();
+    // 1. Fetch quotation to verify status
+    const { data: quote, error: fetchErr } = await supabase
+      .from('quotations')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchErr || !quote) {
+      return { success: false, error: 'Quotation not found.' };
+    }
+
+    // 2. Strict status check: Only unissued draft quotations can be deleted
+    if (quote.status !== 'draft') {
+      return {
+        success: false,
+        error: `Only unissued draft quotations can be deleted. This quotation is "${quote.status}". Issued quotations must be voided to preserve commercial audit history.`,
+      };
+    }
+
+    // 3. Double-check no linked sale exists
+    const { data: linkedSale } = await supabase
+      .from('sales')
+      .select('id, invoice_number')
+      .or(`quotation_id.eq.${id},notes.eq.Converted from Quotation #${quote.quote_number}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (linkedSale) {
+      return {
+        success: false,
+        error: `Cannot delete quotation: an invoice (${linkedSale.invoice_number || linkedSale.id}) has already been issued from it.`,
+      };
+    }
+
     await pbQuotations.delete(id);
+
+    await writeAuditLog(
+      check.actorEmail || 'Admin User',
+      'delete',
+      'quotations',
+      id,
+      { quote_number: quote.quote_number, customer_name: quote.customer_name, total_amount: quote.total_amount },
+      undefined,
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
     revalidatePath('/admin/quotations');
+    revalidatePath('/admin/sales');
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to delete quotation.' };
   }
 }
 
-export async function convertQuotationToSaleAction(quoteId: string, paymentMethod: PaymentMethod = 'cash') {
+export async function convertQuotationToSaleAction(
+  quoteId: string,
+  paymentMethod?: PaymentMethod | null,
+  amountPaid?: number,
+  chequeDetails?: {
+    chequeNumber?: string;
+    chequeDate?: string;
+    bankName?: string;
+    notes?: string;
+  },
+  terms: PaymentTerms = 'due_on_receipt',
+  dueDate?: string
+) {
   const check = await checkPermission('orders', 'write');
   if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
@@ -4665,42 +5054,1176 @@ export async function convertQuotationToSaleAction(quoteId: string, paymentMetho
     const quote = await pbQuotations.getById(quoteId);
     if (!quote) return { success: false, error: 'Quotation not found.' };
 
-    const items = quote.items.map((item: any) => ({
-      product_id: '',
-      product_name: item.name,
-      sku: 'QUOTE-ITEM',
-      unit_price: item.unitPrice,
-      item_discount: item.discount || 0,
-      quantity: item.qty,
-      line_total: item.total || (item.unitPrice * item.qty - (item.discount || 0)),
-    }));
+    const supabase = getAdminSupabase();
 
-    const salePayload: SalePayload = {
-      cashier_name: check.actorEmail || 'Admin User',
-      cashier_id: check.actorId || 'admin',
-      customer_name: quote.customer_name,
-      customer_phone: quote.customer_phone || '',
-      customer_email: quote.customer_email,
-      subtotal: quote.subtotal,
-      discount: quote.discount_amount || 0,
-      tax_amount: quote.tax_amount || 0,
-      total: quote.total_amount,
-      payment_method: paymentMethod,
-      cash_tendered: quote.total_amount,
-      change_due: 0,
-      items_count: items.reduce((acc: number, i: any) => acc + i.quantity, 0),
-      notes: `Converted from Quotation #${quote.quote_number}`,
-      items,
-    };
+    // Check if already converted via durable FK or legacy fallback
+    const { data: existingSale } = await supabase
+      .from('sales')
+      .select('id, invoice_number')
+      .or(`quotation_id.eq.${quoteId},notes.eq.Converted from Quotation #${quote.quote_number}`)
+      .limit(1)
+      .maybeSingle();
 
-    const saleResult = await pbSales.createSale(salePayload);
-    await pbQuotations.update(quoteId, { status: 'accepted' });
+    if (existingSale) {
+      return {
+        success: false,
+        error: `This quotation has already been converted to invoice #${existingSale.invoice_number || existingSale.id}.`,
+      };
+    }
+
+    if (quote.status === 'draft') {
+      return {
+        success: false,
+        error: 'Draft quotations cannot be converted directly to an invoice. The quotation must first be formally issued to become Active.',
+      };
+    }
+    if (quote.status === 'voided' || (quote as any).voided_at) {
+      return { success: false, error: 'Cannot convert a voided quotation.' };
+    }
+    if (quote.status === 'rejected') {
+      return { success: false, error: 'Cannot convert a rejected quotation.' };
+    }
+    if (quote.status === 'expired' || (quote.valid_until && new Date(quote.valid_until).getTime() < Date.now())) {
+      return { success: false, error: 'Cannot convert an expired quotation. Please create a new quotation.' };
+    }
+
+    const authTotal = Number(quote.total_amount) || 0;
+    const effectiveAmountPaid = amountPaid !== undefined ? Number(amountPaid) : 0;
+
+    if (isNaN(effectiveAmountPaid) || !Number.isFinite(effectiveAmountPaid) || effectiveAmountPaid < 0) {
+      return { success: false, error: 'Valid non-negative amount paid is required.' };
+    }
+
+    if (effectiveAmountPaid > authTotal) {
+      return {
+        success: false,
+        error: `Amount paid cannot exceed quotation total of LKR ${authTotal.toLocaleString()}.`,
+      };
+    }
+
+    if (effectiveAmountPaid > 0) {
+      if (!paymentMethod) {
+        return { success: false, error: 'Payment method is required when recording an initial payment.' };
+      }
+      if (paymentMethod === 'cheque') {
+        if (!chequeDetails?.chequeNumber?.trim()) {
+          return { success: false, error: 'Cheque number is required for cheque payments.' };
+        }
+        if (!chequeDetails?.chequeDate) {
+          return { success: false, error: 'Cheque date is required for cheque payments.' };
+        }
+        if (!chequeDetails?.bankName?.trim()) {
+          return { success: false, error: 'Bank name is required for cheque payments.' };
+        }
+      }
+    }
+
+    // Resolve authenticated staff profile display name according to authoritative 5-tier fallback:
+    // 1. non-empty profiles.name
+    // 2. authenticated user_metadata.full_name
+    // 3. authenticated user_metadata.name
+    // 4. authenticated email
+    // 5. safe generic fallback such as "Admin Staff"
+    let staffDisplayName = 'Admin Staff';
+    if (check.actorId) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('name')
+        .eq('id', check.actorId)
+        .maybeSingle();
+
+      const profileName = profile?.name?.trim();
+      let metaFullName: string | undefined;
+      let metaName: string | undefined;
+
+      try {
+        const { data: authUser } = await supabase.auth.admin.getUserById(check.actorId);
+        metaFullName = authUser?.user?.user_metadata?.full_name?.trim();
+        metaName = authUser?.user?.user_metadata?.name?.trim();
+      } catch {
+        // Fallback gracefully if admin auth call is restricted
+      }
+
+      staffDisplayName =
+        (profileName && profileName.length > 0 ? profileName : undefined) ||
+        (metaFullName && metaFullName.length > 0 ? metaFullName : undefined) ||
+        (metaName && metaName.length > 0 ? metaName : undefined) ||
+        (check.actorEmail && check.actorEmail.trim().length > 0 ? check.actorEmail.trim() : undefined) ||
+        'Admin Staff';
+    }
+
+    const { data, error } = await supabase.rpc('convert_quotation_to_sale_atomic', {
+      p_quote_id: quoteId,
+      p_actor_id: check.actorId || null,
+      p_actor_name: staffDisplayName,
+      p_payment_method: effectiveAmountPaid > 0 ? (paymentMethod || null) : null,
+      p_amount: effectiveAmountPaid,
+      p_cheque_number: (effectiveAmountPaid > 0 && paymentMethod === 'cheque') ? (chequeDetails?.chequeNumber?.trim() || null) : null,
+      p_cheque_date: (effectiveAmountPaid > 0 && paymentMethod === 'cheque') ? (chequeDetails?.chequeDate || null) : null,
+      p_bank_name: (effectiveAmountPaid > 0 && paymentMethod === 'cheque') ? (chequeDetails?.bankName?.trim() || null) : null,
+      p_cheque_notes: (effectiveAmountPaid > 0 && paymentMethod === 'cheque') ? (chequeDetails?.notes || null) : null,
+      p_payment_terms: terms || 'due_on_receipt',
+      p_due_date: dueDate || null,
+    });
+
+    if (error || !data?.success) {
+      return {
+        success: false,
+        error: error?.message || data?.error || 'Failed to issue invoice from quotation.',
+      };
+    }
+
+    await writeAuditLog(
+      staffDisplayName || check.actorEmail || 'Admin User',
+      'convert',
+      'quotations',
+      quoteId,
+      { status: quote.status },
+      { status: 'converted', saleId: data.sale_id, invoiceNumber: data.invoice_number },
+      { ip: check.ip, userAgent: check.userAgent }
+    );
 
     revalidatePath('/admin/quotations');
     revalidatePath('/admin/sales');
-    return { success: true, saleId: saleResult.sale.id, receiptNumber: saleResult.sale.receipt_number };
+    revalidatePath('/admin/finance/outstanding');
+    return {
+      success: true,
+      saleId: data.sale_id,
+      receiptNumber: data.receipt_number,
+      invoiceNumber: data.invoice_number,
+      paymentId: data.payment_id,
+      summary: data.summary,
+    };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to convert quotation to sale.' };
+    return { success: false, error: err.message || 'Failed to issue invoice from quotation.' };
+  }
+}
+
+export async function voidQuotationAction(payload: {
+  quoteId?: string;
+  quotationId?: string;
+  reason: QuotationVoidReason | string;
+  notes?: string;
+}) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const targetId = payload.quoteId || payload.quotationId;
+    if (!targetId) {
+      return { success: false, error: 'Quotation ID is required.' };
+    }
+    const cleanReason = (payload.reason || '').trim().toUpperCase();
+    if (!cleanReason) {
+      return { success: false, error: 'A valid reason is required to void a quotation.' };
+    }
+    if (cleanReason === 'OTHER' && (!payload.notes || !payload.notes.trim())) {
+      return { success: false, error: 'Notes are required when selecting reason "Other".' };
+    }
+
+    const supabase = getAdminSupabase();
+    const actor = check.actorEmail || 'Admin User';
+
+    const { data, error } = await supabase.rpc('void_quotation_atomic', {
+      p_quote_id: targetId,
+      p_reason: cleanReason,
+      p_notes: payload.notes?.trim() || null,
+      p_voided_by: actor,
+    });
+
+    if (error || !data?.success) {
+      return {
+        success: false,
+        error: error?.message || data?.error || 'Failed to void quotation.',
+      };
+    }
+
+    revalidatePath('/admin/quotations');
+    revalidatePath('/admin/sales');
+
+    await writeAuditLog(
+      actor,
+      'void',
+      'quotations',
+      targetId,
+      { status: 'active' },
+      { status: 'voided', reason: cleanReason, notes: payload.notes },
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    return { success: true, data };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to void quotation.' };
+  }
+}
+
+export async function issueQuotationAction(quotationId: string) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const supabase = getAdminSupabase();
+
+    // 1. Fetch quotation to verify current persisted status
+    const { data: quote, error: fetchErr } = await supabase
+      .from('quotations')
+      .select('*')
+      .eq('id', quotationId)
+      .single();
+
+    if (fetchErr || !quote) {
+      return { success: false, error: 'Quotation not found.' };
+    }
+
+    // 2. Strict status check: Only draft quotations can be issued
+    if (quote.status !== 'draft') {
+      return {
+        success: false,
+        error: 'Only draft quotations can be issued.',
+      };
+    }
+
+    // 3. Verify quotation is NOT converted
+    const { data: linkedSale } = await supabase
+      .from('sales')
+      .select('id, invoice_number')
+      .or(`quotation_id.eq.${quotationId},notes.eq.Converted from Quotation #${quote.quote_number}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (linkedSale) {
+      return {
+        success: false,
+        error: `This quotation has already been converted to invoice #${linkedSale.invoice_number || linkedSale.id}.`,
+      };
+    }
+
+    // 4. Verify quotation is NOT voided
+    if (quote.status === 'voided' || quote.voided_at) {
+      return { success: false, error: 'Cannot issue a voided quotation.' };
+    }
+
+    // 5. Update status to 'sent' (Active)
+    const { data: updated, error: updateErr } = await supabase
+      .from('quotations')
+      .update({
+        status: 'sent',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', quotationId)
+      .select()
+      .single();
+
+    if (updateErr) {
+      throw updateErr;
+    }
+
+    // 6. Record authoritative audit event
+    await writeAuditLog(
+      check.actorEmail || 'Admin User',
+      'issue',
+      'quotations',
+      quotationId,
+      { status: 'draft' },
+      {
+        status: 'sent',
+        quote_number: quote.quote_number,
+        total_amount: quote.total_amount,
+        customer_name: quote.customer_name,
+        customer_company: quote.customer_company,
+      },
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/admin/quotations');
+    revalidatePath('/admin/sales');
+    return { success: true, data: updated };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to issue quotation.' };
+  }
+}
+
+export async function acceptQuotationAction(quotationId: string) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const supabase = getAdminSupabase();
+
+    // 1. Fetch quotation
+    const { data: quote, error: fetchErr } = await supabase
+      .from('quotations')
+      .select('*')
+      .eq('id', quotationId)
+      .single();
+
+    if (fetchErr || !quote) {
+      return { success: false, error: 'Quotation not found.' };
+    }
+
+    // 2. Reject if draft (must be issued first)
+    if (quote.status === 'draft') {
+      return {
+        success: false,
+        error: 'Draft quotations must be issued before they can be marked as accepted.',
+      };
+    }
+
+    // 3. Reject if already accepted
+    if (quote.status === 'accepted') {
+      return {
+        success: false,
+        error: 'Quotation is already marked as accepted.',
+      };
+    }
+
+    // 4. Reject if terminal or invalid
+    if (quote.status === 'voided' || quote.voided_at) {
+      return { success: false, error: 'Cannot accept a voided quotation.' };
+    }
+    if (quote.status === 'rejected') {
+      return { success: false, error: 'Cannot accept a rejected quotation.' };
+    }
+    if (quote.status === 'expired' || (quote.valid_until && new Date(quote.valid_until).getTime() < Date.now())) {
+      return { success: false, error: 'Cannot accept an expired quotation. Please create a new quotation.' };
+    }
+
+    // 5. Verify no linked sale exists
+    const { data: linkedSale } = await supabase
+      .from('sales')
+      .select('id, invoice_number')
+      .or(`quotation_id.eq.${quotationId},notes.eq.Converted from Quotation #${quote.quote_number}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (linkedSale) {
+      return {
+        success: false,
+        error: `This quotation has already been converted to invoice #${linkedSale.invoice_number || linkedSale.id}.`,
+      };
+    }
+
+    // 6. Update status to 'accepted'
+    const { data: updated, error: updateErr } = await supabase
+      .from('quotations')
+      .update({
+        status: 'accepted',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', quotationId)
+      .select()
+      .single();
+
+    if (updateErr) {
+      throw updateErr;
+    }
+
+    // 7. Record authoritative audit event
+    await writeAuditLog(
+      check.actorEmail || 'Admin User',
+      'accept',
+      'quotations',
+      quotationId,
+      { status: quote.status },
+      {
+        status: 'accepted',
+        quote_number: quote.quote_number,
+        total_amount: quote.total_amount,
+        customer_name: quote.customer_name,
+      },
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/admin/quotations');
+    revalidatePath('/admin/sales');
+    return { success: true, data: updated };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to mark quotation as accepted.' };
+  }
+}
+
+export async function rejectQuotationAction(quotationId: string, reason?: string) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const supabase = getAdminSupabase();
+
+    // 1. Fetch quotation
+    const { data: quote, error: fetchErr } = await supabase
+      .from('quotations')
+      .select('*')
+      .eq('id', quotationId)
+      .single();
+
+    if (fetchErr || !quote) {
+      return { success: false, error: 'Quotation not found.' };
+    }
+
+    // 2. Reject if terminal or already rejected/voided
+    if (quote.status === 'rejected') {
+      return { success: false, error: 'Quotation is already marked as rejected.' };
+    }
+    if (quote.status === 'voided' || quote.voided_at) {
+      return { success: false, error: 'Cannot reject a voided quotation.' };
+    }
+    if (quote.status === 'expired' || (quote.valid_until && new Date(quote.valid_until).getTime() < Date.now())) {
+      return { success: false, error: 'Cannot reject an already expired quotation.' };
+    }
+
+    // 3. Verify no linked sale exists
+    const { data: linkedSale } = await supabase
+      .from('sales')
+      .select('id, invoice_number')
+      .or(`quotation_id.eq.${quotationId},notes.eq.Converted from Quotation #${quote.quote_number}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (linkedSale) {
+      return {
+        success: false,
+        error: `Cannot reject quotation: an invoice (#${linkedSale.invoice_number || linkedSale.id}) has already been issued from it.`,
+      };
+    }
+
+    // 4. Only active ('sent') or accepted quotations can be rejected
+    if (quote.status !== 'sent' && quote.status !== 'accepted') {
+      return {
+        success: false,
+        error: `Only active or accepted quotations can be marked as rejected. Current status is "${quote.status}".`,
+      };
+    }
+
+    // 5. Update status to 'rejected'
+    const { data: updated, error: updateErr } = await supabase
+      .from('quotations')
+      .update({
+        status: 'rejected',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', quotationId)
+      .select()
+      .single();
+
+    if (updateErr) {
+      throw updateErr;
+    }
+
+    // 6. Record authoritative audit event
+    await writeAuditLog(
+      check.actorEmail || 'Admin User',
+      'reject',
+      'quotations',
+      quotationId,
+      { status: quote.status },
+      {
+        status: 'rejected',
+        quote_number: quote.quote_number,
+        total_amount: quote.total_amount,
+        reason: reason?.trim() || null,
+      },
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/admin/quotations');
+    revalidatePath('/admin/sales');
+    return { success: true, data: updated };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to mark quotation as rejected.' };
+  }
+}
+
+export async function getQuotationHistoryAction(quotationId: string) {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const supabase = getAdminSupabase();
+
+    // 1. Fetch Quotation
+    const { data: quotation, error: qErr } = await supabase
+      .from('quotations')
+      .select('*')
+      .eq('id', quotationId)
+      .single();
+
+    if (qErr || !quotation) {
+      return { success: false, error: 'Quotation not found.' };
+    }
+
+    // 2. Fetch Audit Logs for this quotation
+    const { data: auditLogs } = await supabase
+      .from('audit_log')
+      .select('*')
+      .eq('collection', 'quotations')
+      .eq('record_id', quotationId)
+      .order('created_at', { ascending: true });
+
+    // 3. Fetch Linked Invoice in sales (durable FK or legacy snapshot/notes fallback)
+    const { data: linkedSale } = await supabase
+      .from('sales')
+      .select('*')
+      .or(`quotation_id.eq.${quotationId},notes.eq.Converted from Quotation #${quotation.quote_number}`)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    // 4. If linked sale exists, fetch its payments and reversals
+    let payments: any[] = [];
+    let reversals: any[] = [];
+    if (linkedSale) {
+      const { data: pData } = await supabase
+        .from('sale_payments')
+        .select('*')
+        .eq('sale_id', linkedSale.id)
+        .order('payment_date', { ascending: true });
+      payments = pData || [];
+
+      const { data: rData } = await supabase
+        .from('sale_payment_reversals')
+        .select('*')
+        .eq('sale_id', linkedSale.id)
+        .order('created_at', { ascending: true });
+      reversals = rData || [];
+    }
+
+    // 5. Build authoritative timeline events
+    type HistoryTimelineEvent = {
+      id: string;
+      eventType: string;
+      title: string;
+      timestamp: string;
+      actor?: string;
+      details?: Record<string, any>;
+      badgeVariant?: 'default' | 'success' | 'warning' | 'destructive' | 'info';
+    };
+
+    const timeline: HistoryTimelineEvent[] = [];
+
+    // Quotation Created Event
+    timeline.push({
+      id: `created-${quotation.id}`,
+      eventType: 'QUOTATION_CREATED',
+      title: `Quotation #${quotation.quote_number} Created`,
+      timestamp: quotation.created_at,
+      actor: auditLogs?.find((a: any) => a.action === 'create')?.actor || 'Staff',
+      details: {
+        total: quotation.total_amount,
+        itemsCount: Array.isArray(quotation.items) ? quotation.items.length : 0,
+        customer: quotation.customer_name,
+        company: quotation.customer_company,
+      },
+      badgeVariant: 'default',
+    });
+
+    // Quotation Issued Event (action === 'issue')
+    const issueAudit = auditLogs?.find((a: any) => a.action === 'issue');
+    if (issueAudit) {
+      timeline.push({
+        id: `issued-${issueAudit.id}`,
+        eventType: 'QUOTATION_ISSUED',
+        title: 'Quotation Formally Issued',
+        timestamp: issueAudit.created_at,
+        actor: issueAudit.actor,
+        details: { status: 'sent' },
+        badgeVariant: 'info',
+      });
+    }
+
+    // Quotation Accepted Event (action === 'accept')
+    const acceptAudit = auditLogs?.find((a: any) => a.action === 'accept');
+    if (acceptAudit) {
+      timeline.push({
+        id: `accepted-${acceptAudit.id}`,
+        eventType: 'QUOTATION_ACCEPTED',
+        title: 'Quotation Accepted by Customer',
+        timestamp: acceptAudit.created_at,
+        actor: acceptAudit.actor,
+        details: { status: 'accepted' },
+        badgeVariant: 'success',
+      });
+    }
+
+    // Quotation Rejected Event (action === 'reject')
+    const rejectAudit = auditLogs?.find((a: any) => a.action === 'reject');
+    if (rejectAudit) {
+      timeline.push({
+        id: `rejected-${rejectAudit.id}`,
+        eventType: 'QUOTATION_REJECTED',
+        title: `Quotation Rejected${rejectAudit.new_value?.reason ? ` (${rejectAudit.new_value.reason})` : ''}`,
+        timestamp: rejectAudit.created_at,
+        actor: rejectAudit.actor,
+        details: rejectAudit.new_value,
+        badgeVariant: 'destructive',
+      });
+    }
+
+    // Quotation Updates from audit_log (generic)
+    auditLogs
+      ?.filter(
+        (a: any) =>
+          a.action === 'update' &&
+          !a.new_value?.recipient &&
+          a.new_value?.status !== 'sent' &&
+          a.new_value?.status !== 'accepted' &&
+          a.new_value?.status !== 'rejected'
+      )
+      .forEach((a: any) => {
+        timeline.push({
+          id: `update-${a.id}`,
+          eventType: 'QUOTATION_UPDATED',
+          title: 'Quotation Updated',
+          timestamp: a.created_at,
+          actor: a.actor,
+          details: a.new_value,
+          badgeVariant: 'info',
+        });
+      });
+
+    // Quotation Emailed Event
+    const emailAudit = auditLogs?.find(
+      (a: any) => a.action === 'email' || (a.action === 'update' && a.new_value?.recipient)
+    );
+    if (emailAudit) {
+      timeline.push({
+        id: `email-${emailAudit.id}`,
+        eventType: 'QUOTATION_EMAILED',
+        title: 'Quotation Sent via Email',
+        timestamp: emailAudit.created_at,
+        actor: emailAudit.actor,
+        details: { recipient: emailAudit.new_value?.recipient || quotation.customer_email },
+        badgeVariant: 'info',
+      });
+    }
+
+    // Quotation Voided Event
+    if (quotation.status === 'voided' || quotation.voided_at) {
+      timeline.push({
+        id: `voided-${quotation.id}`,
+        eventType: 'QUOTATION_VOIDED',
+        title: `Quotation Voided (${quotation.void_reason?.replace(/_/g, ' ') || 'Cancelled'})`,
+        timestamp: quotation.voided_at || quotation.updated_at,
+        actor: quotation.voided_by || 'Staff',
+        details: {
+          reason: quotation.void_reason,
+          notes: quotation.void_notes,
+        },
+        badgeVariant: 'destructive',
+      });
+    }
+
+    // Quotation Converted Event
+    if (linkedSale) {
+      timeline.push({
+        id: `converted-${linkedSale.id}`,
+        eventType: 'QUOTATION_CONVERTED',
+        title: `Converted to Commercial Invoice #${linkedSale.invoice_number}`,
+        timestamp: linkedSale.invoiced_at || linkedSale.created_at,
+        actor: linkedSale.issued_by_name || linkedSale.cashier_name || 'Admin Staff',
+        details: {
+          invoiceNumber: linkedSale.invoice_number,
+          receiptNumber: linkedSale.receipt_number,
+          total: linkedSale.total,
+          paymentTerms: linkedSale.payment_terms,
+          dueDate: linkedSale.due_date,
+        },
+        badgeVariant: 'success',
+      });
+
+      // Payments Events
+      payments.forEach((p: any) => {
+        const isCheque = p.payment_method === 'cheque';
+        let eventType = 'PAYMENT_RECEIVED';
+        let title = `Payment Received — LKR ${Number(p.amount).toLocaleString()} (${p.payment_method.toUpperCase()})`;
+        let variant: 'success' | 'warning' | 'destructive' = 'success';
+
+        if (isCheque) {
+          if (p.status === 'pending') {
+            eventType = 'CHEQUE_RECEIVED';
+            title = `Cheque Received — LKR ${Number(p.amount).toLocaleString()} (Cheque #${p.cheque_number})`;
+            variant = 'warning';
+          } else if (p.status === 'cleared') {
+            eventType = 'CHEQUE_CLEARED';
+            title = `Cheque Cleared — LKR ${Number(p.amount).toLocaleString()} (Cheque #${p.cheque_number})`;
+            variant = 'success';
+          } else if (p.status === 'bounced') {
+            eventType = 'CHEQUE_BOUNCED';
+            title = `Cheque Bounced — LKR ${Number(p.amount).toLocaleString()} (Cheque #${p.cheque_number})`;
+            variant = 'destructive';
+          } else if (p.status === 'cancelled') {
+            eventType = 'CHEQUE_CANCELLED';
+            title = `Cheque Cancelled — LKR ${Number(p.amount).toLocaleString()} (Cheque #${p.cheque_number})`;
+            variant = 'destructive';
+          }
+        }
+
+        timeline.push({
+          id: `payment-${p.id}`,
+          eventType,
+          title,
+          timestamp: p.cleared_at || p.payment_date || p.created_at,
+          actor: p.cleared_by || p.created_by,
+          details: {
+            amount: p.amount,
+            method: p.payment_method,
+            status: p.status,
+            chequeNumber: p.cheque_number,
+            bank: p.bank_name,
+            chequeDate: p.cheque_date,
+            reference: p.reference,
+          },
+          badgeVariant: variant,
+        });
+      });
+
+      // Reversals Events
+      reversals.forEach((r: any) => {
+        timeline.push({
+          id: `reversal-${r.id}`,
+          eventType: 'PAYMENT_RETURNED',
+          title: `Payment Return / Reversal #${r.reversal_number} — LKR ${Number(r.amount).toLocaleString()}`,
+          timestamp: r.created_at,
+          actor: r.reversed_by,
+          details: {
+            amount: r.amount,
+            reason: r.reason,
+            notes: r.notes,
+            reference: r.reference,
+          },
+          badgeVariant: 'warning',
+        });
+      });
+
+      // Invoice Revocation Event
+      if (linkedSale.invoice_revoked_at) {
+        timeline.push({
+          id: `revocation-${linkedSale.id}`,
+          eventType: 'INVOICE_REVOKED',
+          title: `Invoice #${linkedSale.invoice_number} Revoked (${linkedSale.invoice_revoke_reason || 'Document Voided'})`,
+          timestamp: linkedSale.invoice_revoked_at,
+          actor: linkedSale.invoice_revoked_by,
+          details: {
+            reason: linkedSale.invoice_revoke_reason,
+            notes: linkedSale.invoice_revoke_notes,
+          },
+          badgeVariant: 'destructive',
+        });
+      }
+    }
+
+    // Sort timeline chronologically (newest first for drawer display)
+    timeline.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    // Compute linked invoice financial metrics
+    let linkedInvoiceSummary: any = null;
+    if (linkedSale) {
+      const grossCleared = payments
+        .filter((p: any) => p.status === 'cleared')
+        .reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+      const returnedAmount = reversals
+        .reduce((sum: number, r: any) => sum + Number(r.amount || 0), 0);
+      const effectiveCleared = Math.max(0, grossCleared - returnedAmount);
+      const pendingClearance = payments
+        .filter((p: any) => p.payment_method === 'cheque' && p.status === 'pending')
+        .reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+      const invoiceTotal = Number(linkedSale.total || 0);
+      const balanceDue = Math.max(0, invoiceTotal - effectiveCleared);
+
+      let pStatus = 'UNPAID';
+      if (linkedSale.invoice_revoked_at) pStatus = 'REVOKED';
+      else if (linkedSale.status === 'voided') pStatus = 'VOIDED';
+      else if (effectiveCleared >= invoiceTotal) pStatus = 'PAID';
+      else if (effectiveCleared > 0) pStatus = 'BALANCE PENDING';
+
+      linkedInvoiceSummary = {
+        id: linkedSale.id,
+        invoiceNumber: linkedSale.invoice_number,
+        receiptNumber: linkedSale.receipt_number,
+        invoicedAt: linkedSale.invoiced_at || linkedSale.created_at,
+        total: invoiceTotal,
+        paymentTerms: linkedSale.payment_terms || 'due_on_receipt',
+        dueDate: linkedSale.due_date,
+        paymentStatus: pStatus,
+        isRevoked: Boolean(linkedSale.invoice_revoked_at),
+        invoiceRevokedAt: linkedSale.invoice_revoked_at,
+        invoiceRevokedBy: linkedSale.invoice_revoked_by,
+        invoiceRevokeReason: linkedSale.invoice_revoke_reason,
+        effectiveClearedPaid: effectiveCleared,
+        pendingClearance,
+        balanceDue,
+        issuedByName: linkedSale.issued_by_name || linkedSale.cashier_name || 'Admin Staff',
+        issuedByProfileId: linkedSale.issued_by_profile_id || null,
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        quotation,
+        linkedInvoice: linkedInvoiceSummary,
+        payments,
+        reversals,
+        timeline,
+      },
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch quotation history.' };
+  }
+}
+
+export async function recordSalePaymentAction(payload: {
+  saleId: string;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  reference?: string;
+  chequeNumber?: string;
+  chequeDate?: string;
+  bankName?: string;
+  notes?: string;
+}) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    if (!payload.saleId) {
+      return { success: false, error: 'Sale ID is required.' };
+    }
+    const numAmount = Number(payload.amount);
+    if (isNaN(numAmount) || !Number.isFinite(numAmount) || numAmount <= 0) {
+      return { success: false, error: 'Valid positive payment amount is required.' };
+    }
+
+    if (payload.paymentMethod === 'cheque') {
+      if (!payload.chequeNumber?.trim()) {
+        return { success: false, error: 'Cheque number is required for cheque payments.' };
+      }
+      if (!payload.chequeDate) {
+        return { success: false, error: 'Cheque date is required for cheque payments.' };
+      }
+      if (!payload.bankName?.trim()) {
+        return { success: false, error: 'Bank name is required for cheque payments.' };
+      }
+    }
+
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase.rpc('record_sale_payment_atomic', {
+      p_sale_id: payload.saleId,
+      p_amount: numAmount,
+      p_payment_method: payload.paymentMethod,
+      p_created_by: check.actorEmail || 'Admin User',
+      p_reference: payload.reference || null,
+      p_cheque_number: payload.chequeNumber?.trim() || null,
+      p_cheque_date: payload.chequeDate || null,
+      p_bank_name: payload.bankName?.trim() || null,
+      p_notes: payload.notes || null,
+    });
+
+    if (error || !data?.success) {
+      return {
+        success: false,
+        error: error?.message || data?.error || 'Failed to record payment.',
+      };
+    }
+
+    revalidatePath('/admin/sales');
+    return { success: true, paymentId: data.payment_id, summary: data.summary };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to record payment.' };
+  }
+}
+
+export async function updateChequeStatusAction(payload: {
+  paymentId: string;
+  newStatus: 'cleared' | 'bounced' | 'cancelled';
+  notes?: string;
+}) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    if (!payload.paymentId) {
+      return { success: false, error: 'Payment ID is required.' };
+    }
+    if (!['cleared', 'bounced', 'cancelled'].includes(payload.newStatus)) {
+      return { success: false, error: 'Invalid target status for cheque.' };
+    }
+
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase.rpc('update_cheque_status_atomic', {
+      p_payment_id: payload.paymentId,
+      p_new_status: payload.newStatus,
+      p_actor_name: check.actorEmail || 'Admin User',
+      p_notes: payload.notes || null,
+    });
+
+    if (error || !data?.success) {
+      return {
+        success: false,
+        error: error?.message || data?.error || 'Failed to update cheque status.',
+      };
+    }
+
+    revalidatePath('/admin/sales');
+    revalidatePath('/admin/finance/outstanding');
+    revalidatePath('/admin/finance/cheques');
+    return { success: true, summary: data.summary };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to update cheque status.' };
+  }
+}
+
+export async function getSalePaymentsAction(saleId: string): Promise<{
+  success: boolean;
+  data?: {
+    payments: SalePayment[];
+    reversals: SalePaymentReversal[];
+    summary: SalePaymentSummary;
+  };
+  error?: string;
+}> {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const supabase = getAdminSupabase();
+
+    // Fetch parent sale
+    const { data: sale, error: saleErr } = await supabase
+      .from('sales')
+      .select('id, total, status, invoice_revoked_at, invoice_revoked_by, invoice_revoke_reason, invoice_revoke_notes')
+      .eq('id', saleId)
+      .single();
+
+    if (saleErr || !sale) {
+      return { success: false, error: 'Sale record not found.' };
+    }
+
+    // Fetch payments
+    const { data: payments, error: payErr } = await supabase
+      .from('sale_payments')
+      .select('*')
+      .eq('sale_id', saleId)
+      .order('payment_date', { ascending: true });
+
+    if (payErr) {
+      return { success: false, error: payErr.message };
+    }
+
+    // Fetch reversals
+    const { data: reversals, error: revErr } = await supabase
+      .from('sale_payment_reversals')
+      .select('*')
+      .eq('sale_id', saleId)
+      .order('created_at', { ascending: true });
+
+    if (revErr) {
+      return { success: false, error: revErr.message };
+    }
+
+    const revList: SalePaymentReversal[] = (reversals || []).map((r: any) => ({
+      id: r.id,
+      reversal_number: r.reversal_number,
+      payment_id: r.payment_id,
+      sale_id: r.sale_id,
+      amount: Number(r.amount) || 0,
+      reason: r.reason,
+      reference: r.reference,
+      notes: r.notes,
+      reversed_by: r.reversed_by,
+      created_at: r.created_at,
+    }));
+
+    const payList: SalePayment[] = (payments || []).map((p: any) => {
+      const pAmount = Number(p.amount) || 0;
+      const pReversals = revList.filter((r) => r.payment_id === p.id);
+      const returnedAmount = pReversals.reduce((sum, r) => sum + r.amount, 0);
+      const netAmount = Math.max(0, pAmount - returnedAmount);
+      const remainingReversible = p.status === 'cleared' ? Math.max(0, pAmount - returnedAmount) : 0;
+
+      return {
+        id: p.id,
+        sale_id: p.sale_id,
+        quotation_id: p.quotation_id,
+        amount: pAmount,
+        payment_method: p.payment_method,
+        status: p.status,
+        payment_date: p.payment_date,
+        reference: p.reference,
+        cheque_number: p.cheque_number,
+        cheque_date: p.cheque_date,
+        bank_name: p.bank_name,
+        notes: p.notes,
+        created_by: p.created_by,
+        cleared_by: p.cleared_by,
+        created_at: p.created_at,
+        updated_at: p.updated_at,
+        returned_amount: returnedAmount,
+        net_amount: netAmount,
+        remaining_reversible: remainingReversible,
+      };
+    });
+
+    const invoiceTotal = Number(sale.total) || 0;
+    const grossClearedPaid = payList
+      .filter((p) => p.status === 'cleared')
+      .reduce((sum, p) => sum + p.amount, 0);
+
+    const totalReturned = revList.reduce((sum, r) => sum + r.amount, 0);
+    const effectiveClearedPaid = Math.max(0, grossClearedPaid - totalReturned);
+
+    const pendingClearance = payList
+      .filter((p) => p.payment_method === 'cheque' && p.status === 'pending')
+      .reduce((sum, p) => sum + p.amount, 0);
+
+    const balanceDue = Math.max(0, invoiceTotal - effectiveClearedPaid);
+    const availableToRecord = Math.max(0, invoiceTotal - effectiveClearedPaid - pendingClearance);
+
+    const isRevoked = Boolean(sale.invoice_revoked_at);
+    let paymentStatus: 'UNPAID' | 'BALANCE PENDING' | 'PAID' | 'REVOKED';
+    if (isRevoked) {
+      paymentStatus = 'REVOKED';
+    } else if (effectiveClearedPaid <= 0) {
+      paymentStatus = 'UNPAID';
+    } else if (effectiveClearedPaid < invoiceTotal) {
+      paymentStatus = 'BALANCE PENDING';
+    } else {
+      paymentStatus = 'PAID';
+    }
+
+    return {
+      success: true,
+      data: {
+        payments: payList,
+        reversals: revList,
+        summary: {
+          invoice_total: invoiceTotal,
+          cleared_paid: effectiveClearedPaid,
+          gross_cleared_paid: grossClearedPaid,
+          returned_amount: totalReturned,
+          effective_cleared_paid: effectiveClearedPaid,
+          pending_clearance: pendingClearance,
+          balance_due: balanceDue,
+          available_to_record: availableToRecord,
+          payment_status: paymentStatus,
+          is_revoked: isRevoked,
+          invoice_revoked_at: sale.invoice_revoked_at || null,
+          invoice_revoked_by: sale.invoice_revoked_by || null,
+          invoice_revoke_reason: sale.invoice_revoke_reason || null,
+          invoice_revoke_notes: sale.invoice_revoke_notes || null,
+        },
+      },
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch payment history.' };
+  }
+}
+
+export async function revokeInvoiceAction(payload: {
+  saleId: string;
+  reason: string;
+  notes?: string;
+}) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized: Permission required to revoke invoices.' };
+
+  try {
+    if (!payload.saleId) {
+      return { success: false, error: 'Sale ID is required.' };
+    }
+    const cleanReason = (payload.reason || '').trim();
+    if (!cleanReason) {
+      return { success: false, error: 'A valid reason is required to revoke an invoice.' };
+    }
+    if (cleanReason.toLowerCase() === 'other' && (!payload.notes || !payload.notes.trim())) {
+      return { success: false, error: 'Notes/details are required when selecting reason "Other".' };
+    }
+
+    const supabase = getAdminSupabase();
+    const actor = check.actorEmail || 'Admin User';
+
+    const { data, error } = await supabase.rpc('revoke_invoice_atomic', {
+      p_sale_id: payload.saleId,
+      p_reason: cleanReason,
+      p_notes: payload.notes?.trim() || null,
+      p_revoked_by: actor,
+    });
+
+    if (error || !data?.success) {
+      return {
+        success: false,
+        error: error?.message || data?.error || 'Failed to revoke invoice.',
+      };
+    }
+
+    revalidatePath('/admin/sales');
+    revalidatePath('/admin/finance/outstanding');
+    revalidatePath('/admin/finance/cheques');
+
+    await writeAuditLog(
+      actor,
+      'update',
+      'sales',
+      payload.saleId,
+      { invoice_revoked: false },
+      { invoice_revoked: true, reason: cleanReason, notes: payload.notes },
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    return { success: true, data };
+  } catch (err: any) {
+    console.error('[revokeInvoiceAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to revoke invoice.' };
+  }
+}
+
+export async function recordPaymentReversalAction(payload: {
+  paymentId: string;
+  amount: number;
+  reason: string;
+  reference?: string;
+  notes?: string;
+}) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    if (!payload.paymentId) {
+      return { success: false, error: 'Payment ID is required.' };
+    }
+    const numAmount = Number(payload.amount);
+    if (isNaN(numAmount) || !Number.isFinite(numAmount) || numAmount <= 0) {
+      return { success: false, error: 'Valid positive return amount is required.' };
+    }
+    if (!payload.reason || !payload.reason.trim()) {
+      return { success: false, error: 'Reason is required for payment return.' };
+    }
+    if (payload.reason === 'Other' && (!payload.notes || !payload.notes.trim())) {
+      return { success: false, error: 'Notes are required when selecting reason "Other".' };
+    }
+
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase.rpc('record_payment_reversal_atomic', {
+      p_payment_id: payload.paymentId,
+      p_amount: numAmount,
+      p_reason: payload.reason.trim(),
+      p_reference: payload.reference?.trim() || null,
+      p_notes: payload.notes?.trim() || null,
+      p_reversed_by: check.actorEmail || 'Admin User',
+    });
+
+    if (error || !data?.success) {
+      return {
+        success: false,
+        error: error?.message || data?.error || 'Failed to record payment return.',
+      };
+    }
+
+    revalidatePath('/admin/sales');
+    revalidatePath('/admin/finance/outstanding');
+    revalidatePath('/admin/finance/cheques');
+    return { success: true, data };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to record payment return.' };
   }
 }
 
@@ -4765,17 +6288,21 @@ export async function sendQuotationEmailAction(id: string) {
       return { success: false, error: emailResult.error || 'Failed to send email.' };
     }
 
-    await pbQuotations.update(id, { status: 'sent' });
+    // If quotation was in draft state, emailing it also formally marks it sent
+    if (quote.status === 'draft') {
+      await pbQuotations.update(id, { status: 'sent', updated_at: new Date().toISOString() });
+    }
 
     revalidatePath('/admin/quotations');
+    revalidatePath('/admin/sales');
 
     await writeAuditLog(
       check.actorEmail || 'admin',
-      'update',
+      'email',
       'quotations',
       id,
       { status: quote.status },
-      { status: 'sent' },
+      { status: quote.status === 'draft' ? 'sent' : quote.status, recipient: quote.customer_email },
       { ip: check.ip, userAgent: check.userAgent }
     );
 
@@ -4980,7 +6507,7 @@ export async function sendInvoiceViaWorkflowAction(params: SendInvoiceWorkflowPa
 
 export interface AdminNotification {
   id: string;
-  type: 'inquiry' | 'order' | 'quotation' | 'stock';
+  type: 'inquiry' | 'order' | 'quotation' | 'stock' | 'receivable' | 'cheque';
   title: string;
   description: string;
   timestamp: string;
@@ -4998,114 +6525,237 @@ export async function getAdminNotificationsAction(): Promise<{
   if (!perm.allowed) {
     return { success: false, notifications: [], unreadCount: 0, error: 'Unauthorized.' };
   }
+
   try {
+    const supabase = getAdminSupabase();
+
+    // Parallelize the queries
+    const [inquiriesRes, ordersRes, quotationsRes, productsRes, receivablesRes, chequesRes] = await Promise.allSettled([
+      // 1. Inquiries
+      supabase
+        .from('contact_inquiries')
+        .select('id, name, message, status, created_at')
+        .eq('status', 'new')
+        .order('created_at', { ascending: false })
+        .limit(10),
+
+      // 2. Orders
+      supabase
+        .from('orders')
+        .select('id, order_id, customer, total, status, is_paid, payment_details, created_at')
+        .not('status', 'in', '("cancelled","refunded","returned")')
+        .or('status.eq.pending,status.eq.processing,is_paid.is.false')
+        .order('created_at', { ascending: false })
+        .limit(10),
+
+      // 3. Quotations
+      supabase
+        .from('quotations')
+        .select('id, customer_name, items, status, created_at')
+        .in('status', ['pending', 'sent'])
+        .order('created_at', { ascending: false })
+        .limit(10),
+
+      // 4. Low stock products
+      supabase
+        .from('products')
+        .select('id, name, count_in_stock, updated_at, created_at')
+        .gte('count_in_stock', 0)
+        .lte('count_in_stock', 3)
+        .order('count_in_stock', { ascending: true })
+        .limit(5),
+
+      // 5. Outstanding Receivables (due soon, due today, or overdue)
+      supabase.rpc('admin_get_outstanding_receivables', {
+        p_search: '',
+        p_filter: 'all',
+        p_sort: 'due_asc',
+        p_limit: 10,
+        p_offset: 0,
+      }),
+
+      // 6. Actionable Cheques (due today, due tomorrow, overdue for review, recently bounced)
+      supabase
+        .from('sale_payments')
+        .select('id, cheque_number, bank_name, amount, cheque_date, status, updated_at, created_at, sales!inner(invoice_number, receipt_number, customer_name, customer_email, wholesale_dealers(company_name, contact_name))')
+        .eq('payment_method', 'cheque')
+        .in('status', ['pending', 'bounced'])
+        .order('cheque_date', { ascending: true })
+        .limit(10),
+    ]);
+
     const notifications: AdminNotification[] = [];
 
-    // Helper for safe array extraction
-    const toArray = (res: any): any[] => {
-      if (!res) return [];
-      if (Array.isArray(res)) return res;
-      if (Array.isArray(res.items)) return res.items;
-      return [];
-    };
-
-    // 1. Inquiries Notifications (New / Unread)
-    try {
-      const inquiriesRaw = await pbContactInquiries.getAll().catch(() => []);
-      const inquiries = toArray(inquiriesRaw);
-      inquiries
-        .filter((i: any) => i.status === 'new' || !i.read)
-        .slice(0, 10)
-        .forEach((i: any) => {
-          notifications.push({
-            id: `inquiry-${i.id}`,
-            type: 'inquiry',
-            title: `New Inquiry from ${i.name || 'Customer'}`,
-            description: i.message ? `${i.message.slice(0, 70)}${i.message.length > 70 ? '...' : ''}` : 'Customer submitted contact message',
-            timestamp: i.created || new Date().toISOString(),
-            link: '/admin/inquiries',
-            read: Boolean(i.read),
-          });
+    if (inquiriesRes.status === 'fulfilled' && !inquiriesRes.value.error && inquiriesRes.value.data) {
+      inquiriesRes.value.data.forEach((i: any) => {
+        notifications.push({
+          id: `inquiry-${i.id}`,
+          type: 'inquiry',
+          title: `New Inquiry from ${i.name || 'Customer'}`,
+          description: i.message ? `${i.message.slice(0, 70)}${i.message.length > 70 ? '...' : ''}` : 'Customer submitted contact message',
+          timestamp: i.created_at || new Date().toISOString(),
+          link: '/admin/inquiries',
+          read: false,
         });
-    } catch {}
-
-    // 2. Orders Notifications (New / Pending / Processing)
-    try {
-      const supabase = getAdminSupabase();
-      const { data: ordersData, error: ordersErr } = await supabase
-        .from('orders')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(20);
-
-      if (!ordersErr && ordersData) {
-        ordersData
-          .filter((o: any) =>
-            (o.status === 'pending' || o.status === 'processing' || !o.is_paid) &&
-            o.status !== 'cancelled' &&
-            o.status !== 'refunded' &&
-            o.status !== 'returned'
-          )
-          .slice(0, 10)
-          .forEach((o: any) => {
-            const orderNum = o.order_id || o.id;
-            const custName = o.customer?.name || o.customerEmail || o.email || 'Customer';
-            const amt = (o.total || o.totalAmount || 0).toLocaleString();
-            const pMethod = o.payment_details?.method ? ` (${o.payment_details.method})` : '';
-            notifications.push({
-              id: `order-${o.id}`,
-              type: 'order',
-              title: `New Order #${orderNum}`,
-              description: `Total LKR ${amt} — ${custName}${pMethod}`,
-              timestamp: o.created_at || new Date().toISOString(),
-              link: '/admin/orders',
-              read: false,
-            });
-          });
-      }
-    } catch (orderErr) {
-      console.warn('[getAdminNotificationsAction] Order notifications error:', orderErr);
+      });
     }
 
-    // 3. Due Quotations Notifications
-    try {
-      const quotationsRaw = await pbQuotations.getAll().catch(() => []);
-      const quotations = toArray(quotationsRaw);
-      quotations
-        .filter((q: any) => q.status === 'pending' || q.status === 'sent')
-        .slice(0, 10)
-        .forEach((q: any) => {
-          notifications.push({
-            id: `quotation-${q.id}`,
-            type: 'quotation',
-            title: `Pending Quotation Follow-up`,
-            description: `Quotation for ${q.customerName || 'Customer'} (${q.items?.length || 1} items)`,
-            timestamp: q.created || new Date().toISOString(),
-            link: '/admin/quotations',
-            read: false,
-          });
+    if (ordersRes.status === 'fulfilled' && !ordersRes.value.error && ordersRes.value.data) {
+      ordersRes.value.data.forEach((o: any) => {
+        const orderNum = o.order_id || o.id;
+        const custName = o.customer?.name || o.customerEmail || o.email || 'Customer';
+        const amt = (o.total || o.totalAmount || 0).toLocaleString();
+        const pMethod = o.payment_details?.method ? ` (${o.payment_details.method})` : '';
+        notifications.push({
+          id: `order-${o.id}`,
+          type: 'order',
+          title: `New Order #${orderNum}`,
+          description: `Total LKR ${amt} — ${custName}${pMethod}`,
+          timestamp: o.created_at || new Date().toISOString(),
+          link: '/admin/orders',
+          read: false,
         });
-    } catch {}
+      });
+    }
 
-    // 4. Low Stock Alerts
-    try {
-      const productsRaw = await pbProducts.getAll().catch(() => []);
-      const products = toArray(productsRaw);
-      products
-        .filter((p: any) => p.stock !== undefined && p.stock >= 0 && p.stock <= 3)
-        .slice(0, 5)
-        .forEach((p: any) => {
+    if (quotationsRes.status === 'fulfilled' && !quotationsRes.value.error && quotationsRes.value.data) {
+      quotationsRes.value.data.forEach((q: any) => {
+        notifications.push({
+          id: `quotation-${q.id}`,
+          type: 'quotation',
+          title: `Pending Quotation Follow-up`,
+          description: `Quotation for ${q.customer_name || 'Customer'} (${q.items?.length || 1} items)`,
+          timestamp: q.created_at || new Date().toISOString(),
+          link: '/admin/sales?view=quotations',
+          read: false,
+        });
+      });
+    }
+
+    if (productsRes.status === 'fulfilled' && !productsRes.value.error && productsRes.value.data) {
+      productsRes.value.data.forEach((p: any) => {
+        notifications.push({
+          id: `stock-${p.id}`,
+          type: 'stock',
+          title: `Low Stock Warning`,
+          description: `${p.name} has only ${p.count_in_stock} unit${p.count_in_stock === 1 ? '' : 's'} remaining!`,
+          timestamp: p.updated_at || p.created_at || new Date().toISOString(),
+          link: '/admin/inventory',
+          read: false,
+        });
+      });
+    }
+
+    if (receivablesRes.status === 'fulfilled' && !receivablesRes.value.error && receivablesRes.value.data) {
+      receivablesRes.value.data.forEach((r: any) => {
+        const balanceFmt = (Number(r.balance_due) || 0).toLocaleString('en-LK', { maximumFractionDigits: 0 });
+        const invNum = r.invoice_number || r.receipt_number || 'INV';
+        const cust = r.customer_name || 'Customer';
+        const dueStr = r.due_date ? new Date(r.due_date).toLocaleDateString('en-LK', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+
+        if (r.collection_status === 'OVERDUE') {
           notifications.push({
-            id: `stock-${p.id}`,
-            type: 'stock',
-            title: `Low Stock Warning`,
-            description: `${p.name} has only ${p.stock} unit${p.stock === 1 ? '' : 's'} remaining!`,
-            timestamp: p.updated || p.created || new Date().toISOString(),
-            link: '/admin/inventory',
+            id: `invoice-overdue-${r.id}-${r.due_date}`,
+            type: 'receivable',
+            title: `Overdue Invoice #${invNum}`,
+            description: `LKR ${balanceFmt} outstanding (${r.days_overdue} day${r.days_overdue === 1 ? '' : 's'} overdue) — ${cust}`,
+            timestamp: r.invoice_date || new Date().toISOString(),
+            link: '/admin/sales?view=receivables',
             read: false,
           });
-        });
-    } catch {}
+        } else if (r.collection_status === 'DUE TODAY') {
+          notifications.push({
+            id: `invoice-due-today-${r.id}-${r.due_date}`,
+            type: 'receivable',
+            title: `Invoice Due Today #${invNum}`,
+            description: `LKR ${balanceFmt} outstanding due today — ${cust}`,
+            timestamp: r.invoice_date || new Date().toISOString(),
+            link: '/admin/sales?view=receivables',
+            read: false,
+          });
+        } else if (r.collection_status === 'DUE SOON') {
+          notifications.push({
+            id: `invoice-due-soon-${r.id}-${r.due_date}`,
+            type: 'receivable',
+            title: `Invoice Due Soon #${invNum}`,
+            description: `LKR ${balanceFmt} outstanding due on ${dueStr} — ${cust}`,
+            timestamp: r.invoice_date || new Date().toISOString(),
+            link: '/admin/sales?view=receivables',
+            read: false,
+          });
+        }
+      });
+    }
+
+    if (chequesRes.status === 'fulfilled' && !chequesRes.value.error && chequesRes.value.data) {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      chequesRes.value.data.forEach((c: any) => {
+        const amtFmt = (Number(c.amount) || 0).toLocaleString('en-LK', { maximumFractionDigits: 0 });
+        const chqNum = c.cheque_number || 'N/A';
+        const bank = c.bank_name || 'Bank';
+        const s = c.sales || {};
+        const dealer = s.wholesale_dealers?.company_name || s.wholesale_dealers?.contact_name;
+        const cust = dealer || s.customer_name || s.customer_email || 'Customer';
+        const chqDate = c.cheque_date ? c.cheque_date.slice(0, 10) : '';
+
+        if (c.status === 'pending' && chqDate) {
+          if (chqDate === todayStr) {
+            notifications.push({
+              id: `cheque-due-today-${c.id}-${chqDate}`,
+              type: 'cheque',
+              title: `Cheque #${chqNum} DUE TODAY`,
+              description: `LKR ${amtFmt} (${bank}) — ${cust}`,
+              timestamp: c.created_at || new Date().toISOString(),
+              link: '/admin/sales?view=cheques',
+              read: false,
+            });
+          } else if (chqDate < todayStr) {
+            const diffMs = new Date(todayStr).getTime() - new Date(chqDate).getTime();
+            const daysOverdue = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)));
+            notifications.push({
+              id: `cheque-overdue-${c.id}-${chqDate}`,
+              type: 'cheque',
+              title: `Cheque #${chqNum} OVERDUE FOR REVIEW`,
+              description: `LKR ${amtFmt} (${daysOverdue} day${daysOverdue === 1 ? '' : 's'} overdue) — ${cust}`,
+              timestamp: c.created_at || new Date().toISOString(),
+              link: '/admin/sales?view=cheques',
+              read: false,
+            });
+          } else {
+            // Check if due tomorrow
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+            if (chqDate === tomorrowStr) {
+              notifications.push({
+                id: `cheque-due-tomorrow-${c.id}-${chqDate}`,
+                type: 'cheque',
+                title: `Cheque #${chqNum} Due Tomorrow`,
+                description: `LKR ${amtFmt} (${bank}) — ${cust}`,
+                timestamp: c.created_at || new Date().toISOString(),
+                link: '/admin/sales?view=cheques',
+                read: false,
+              });
+            }
+          }
+        } else if (c.status === 'bounced') {
+          // Check if within last 2 days
+          const updatedDate = new Date(c.updated_at || c.created_at);
+          const now = new Date();
+          if ((now.getTime() - updatedDate.getTime()) <= 2 * 24 * 60 * 60 * 1000) {
+            notifications.push({
+              id: `cheque-bounced-${c.id}-${chqDate || c.id}`,
+              type: 'cheque',
+              title: `Cheque #${chqNum} Bounced`,
+              description: `LKR ${amtFmt} marked bounced — ${cust}`,
+              timestamp: c.updated_at || c.created_at || new Date().toISOString(),
+              link: '/admin/sales?view=cheques',
+              read: false,
+            });
+          }
+        }
+      });
+    }
 
     // Sort by most recent timestamp
     notifications.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -5542,3 +7192,600 @@ export async function getSampleInvoicePdfAction(customPreset?: InvoicePrintConfi
   }
 }
 
+export async function getQuotationByIdAction(id: string) {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+  try {
+    const data = await pbQuotations.getById(id);
+    return { success: true, data };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function searchQuotationProductsAction(query: string) {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+  try {
+    const supabase = getAdminSupabase();
+    const q = query.trim();
+    if (q.length < 2) return { success: true, data: [] };
+    const cleanQ = q.replace(/[%_\\]/g, '\\$&');
+    const { data, error } = await supabase
+      .from('products')
+      .select('id, name, slug, price, discount_price, images')
+      .eq('status', 'published')
+      .or(`name.ilike."%${cleanQ}%",slug.ilike."%${cleanQ}%"`)
+      .order('name')
+      .limit(20);
+    if (error) throw error;
+    const formatted = (data || []).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      price: p.price,
+      discount_price: p.discount_price,
+      discountPrice: p.discount_price,
+      images: Array.isArray(p.images) ? p.images : [],
+    }));
+    return { success: true, data: formatted };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function searchQuotationCustomersAction(query: string) {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+  try {
+    const supabase = getAdminSupabase();
+    const q = query.trim();
+    if (q.length < 2) return { success: true, data: [] };
+    const cleanQ = q.replace(/[%_\\]/g, '\\$&');
+    const { data, error } = await supabase
+      .from('customers')
+      .select('id, name, email, phone, profile_id, profiles(address)')
+      .or(`name.ilike."%${cleanQ}%",email.ilike."%${cleanQ}%",phone.ilike."%${cleanQ}%"`)
+      .order('name')
+      .limit(20);
+    if (error) throw error;
+
+    const formatAddress = (raw: any): string => {
+      if (!raw) return '';
+      if (typeof raw === 'object') {
+        const parts = [raw.addressLine1, raw.addressLine2, raw.city, raw.state, raw.postalCode, raw.country].filter(Boolean);
+        return parts.join(', ');
+      }
+      if (typeof raw === 'string') {
+        try {
+          const parsed = JSON.parse(raw);
+          if (typeof parsed === 'object' && parsed !== null) {
+            const parts = [parsed.addressLine1, parsed.addressLine2, parsed.city, parsed.state, parsed.postalCode, parsed.country].filter(Boolean);
+            if (parts.length > 0) return parts.join(', ');
+          }
+        } catch {
+          // ignore json parse error, return raw string
+        }
+        return raw;
+      }
+      return '';
+    };
+
+    const formatted = (data || []).map((c: any) => ({
+      id: c.id,
+      name: c.name || '',
+      email: c.email || '',
+      phone: c.phone || '',
+      address: formatAddress(c.profiles?.address),
+    }));
+
+    return { success: true, data: formatted };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function searchQuotationDealersAction(query: string) {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+  try {
+    const supabase = getAdminSupabase();
+    const q = query.trim();
+    if (q.length < 2) return { success: true, data: [] };
+    const cleanQ = q.replace(/[%_\\]/g, '\\$&');
+    const { data, error } = await supabase
+      .from('wholesale_dealers')
+      .select('id, company_name, contact_name, email, phone, address')
+      .or(`company_name.ilike."%${cleanQ}%",contact_name.ilike."%${cleanQ}%",email.ilike."%${cleanQ}%"`)
+      .order('company_name')
+      .limit(20);
+    if (error) throw error;
+    return { success: true, data: data || [] };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function getWholesaleDealerByIdAction(id: string) {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+  try {
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase
+      .from('wholesale_dealers')
+      .select('id, discount_rate')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    return { success: true, data };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function getChequeRegisterAction(params?: {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  filter?: string;
+  sort?: string;
+}): Promise<{
+  success: boolean;
+  data?: ChequeRegisterItem[];
+  total?: number;
+  page?: number;
+  pageSize?: number;
+  totalPages?: number;
+  error?: string;
+}> {
+  const perm = await checkPermission('orders', 'read');
+  if (!perm.allowed) {
+    return { success: false, error: 'Unauthorized: Read permission required.' };
+  }
+
+  const {
+    page = 1,
+    pageSize = 20,
+    search = '',
+    filter = 'all',
+    sort = 'priority',
+  } = params || {};
+
+  const limit = Math.max(1, Math.min(pageSize, 100));
+  const offset = Math.max(0, (page - 1) * limit);
+
+  try {
+    const supabase = await getAdminSupabase();
+    const { data, error } = await supabase.rpc('admin_get_cheque_register', {
+      p_search: search,
+      p_filter: filter,
+      p_sort: sort,
+      p_limit: limit,
+      p_offset: offset,
+    });
+
+    if (error) throw error;
+
+    const items: ChequeRegisterItem[] = (data || []).map((row: any) => ({
+      id: row.id,
+      payment_id: row.id,
+      sale_id: row.sale_id,
+      invoice_number: row.invoice_number,
+      receipt_number: row.receipt_number,
+      customer_name: row.customer_name,
+      customer_email: row.customer_email,
+      customer_phone: row.customer_phone,
+      dealer_company: row.dealer_company,
+      dealer_contact: row.dealer_contact,
+      cheque_number: row.cheque_number,
+      bank_name: row.bank_name,
+      amount: Number(row.amount) || 0,
+      payment_date: row.payment_date,
+      cheque_date: row.cheque_date,
+      status: row.status,
+      operational_state: row.operational_state,
+      days_diff: Number(row.days_diff) || 0,
+      days_overdue: Number(row.days_overdue) || 0,
+      notes: row.notes,
+      created_by: row.created_by,
+      created_at: row.created_at,
+      cleared_by: row.cleared_by,
+      cleared_at: row.cleared_at,
+      invoice_total: Number(row.invoice_total) || 0,
+      invoice_cleared_paid: Number(row.invoice_cleared_paid) || 0,
+      invoice_pending_clearance: Number(row.invoice_pending_clearance) || 0,
+      invoice_balance_due: Number(row.invoice_balance_due) || 0,
+      available_to_record: Number(row.available_to_record ?? (Math.max(0, Number(row.invoice_total || 0) - Number(row.invoice_cleared_paid || 0) - Number(row.invoice_pending_clearance || 0)))) || 0,
+      invoice_payment_status: row.invoice_payment_status,
+      total_count: Number(row.total_count) || 0,
+    }));
+
+    const totalCount = items.length > 0 ? items[0].total_count : 0;
+    const totalPages = Math.max(1, Math.ceil(totalCount / limit));
+
+    return {
+      success: true,
+      data: items,
+      total: totalCount,
+      page,
+      pageSize: limit,
+      totalPages,
+    };
+  } catch (err: any) {
+    console.error('getChequeRegisterAction error:', err);
+    return { success: false, error: err.message || 'Failed to fetch cheque register.' };
+  }
+}
+
+export async function getChequeRegisterMetricsAction(search = ''): Promise<{
+  success: boolean;
+  data?: ChequeRegisterMetrics;
+  error?: string;
+}> {
+  const perm = await checkPermission('orders', 'read');
+  if (!perm.allowed) {
+    return { success: false, error: 'Unauthorized: Read permission required.' };
+  }
+
+  try {
+    const supabase = await getAdminSupabase();
+    const { data, error } = await supabase.rpc('admin_get_cheque_register_metrics', {
+      p_search: search,
+    });
+
+    if (error) throw error;
+
+    const row = data && data[0] ? data[0] : null;
+    return {
+      success: true,
+      data: {
+        pending_amount: Number(row?.pending_amount) || 0,
+        pending_count: Number(row?.pending_count) || 0,
+        due_today_amount: Number(row?.due_today_amount) || 0,
+        due_today_count: Number(row?.due_today_count) || 0,
+        upcoming_amount: Number(row?.upcoming_amount) || 0,
+        upcoming_count: Number(row?.upcoming_count) || 0,
+        overdue_amount: Number(row?.overdue_amount) || 0,
+        overdue_count: Number(row?.overdue_count) || 0,
+        cleared_this_month_amount: Number(row?.cleared_this_month_amount ?? row?.cleared_month_amount) || 0,
+        cleared_this_month_count: Number(row?.cleared_this_month_count ?? row?.cleared_month_count) || 0,
+        bounced_this_month_amount: Number(row?.bounced_this_month_amount ?? row?.bounced_month_amount) || 0,
+        bounced_this_month_count: Number(row?.bounced_this_month_count ?? row?.bounced_month_count) || 0,
+      },
+    };
+  } catch (err: any) {
+    console.error('getChequeRegisterMetricsAction error:', err);
+    return { success: false, error: err.message || 'Failed to fetch cheque register metrics.' };
+  }
+}
+
+// ─── Admin Profile & User Management Actions ────────────────────────────────
+
+export async function getAdminCurrentSessionAction(): Promise<{
+  success: boolean;
+  user?: {
+    id: string;
+    email: string;
+    name: string;
+    role: AdminRole | 'admin';
+    formattedRole: string;
+    avatar?: string | null;
+  };
+  error?: string;
+}> {
+  try {
+    const supabase = await createServerSupabase();
+    const { data: { user }, error: authErr } = await supabase.auth.getUser();
+    if (authErr || !user) {
+      return { success: false, error: 'Not authenticated.' };
+    }
+
+    const adminSb = getAdminSupabase();
+    const { data: profile } = await adminSb
+      .from('profiles')
+      .select('id, name, role, avatar')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    const role = (profile?.role as AdminRole) || 'admin';
+    const name = profile?.name?.trim() || '';
+    const email = user.email || '';
+
+    const roleMap: Record<string, string> = {
+      super_admin: 'Super Administrator',
+      admin: 'Administrator',
+      store_manager: 'Store Manager',
+      content_editor: 'Content Editor',
+      support_staff: 'Support Staff',
+      read_only: 'Read Only Staff',
+    };
+
+    return {
+      success: true,
+      user: {
+        id: user.id,
+        email,
+        name,
+        role,
+        formattedRole: roleMap[role] || 'Administrator',
+        avatar: profile?.avatar || null,
+      },
+    };
+  } catch (err: any) {
+    console.error('[getAdminCurrentSessionAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to retrieve admin session.' };
+  }
+}
+
+export async function updateMyProfileAction(payload: { name: string }): Promise<{
+  success: boolean;
+  name?: string;
+  error?: string;
+}> {
+  try {
+    const supabase = await createServerSupabase();
+    const { data: { user }, error: authErr } = await supabase.auth.getUser();
+    if (authErr || !user) {
+      return { success: false, error: 'Unauthorized: Not authenticated.' };
+    }
+
+    if (!payload || typeof payload.name !== 'string') {
+      return { success: false, error: 'Full Name is required.' };
+    }
+
+    const cleanName = payload.name.trim();
+
+    if (!cleanName) {
+      return { success: false, error: 'Full Name cannot be empty or whitespace only.' };
+    }
+
+    if (cleanName.length > 100) {
+      return { success: false, error: 'Full Name cannot exceed 100 characters.' };
+    }
+
+    // Reject control characters / invalid unicode sequences
+    if (/[\u0000-\u001F\u007F-\u009F]/.test(cleanName)) {
+      return { success: false, error: 'Full Name contains invalid characters.' };
+    }
+
+    const adminSb = getAdminSupabase();
+
+    // Fetch existing profile to log diff in audit
+    const { data: oldProfile } = await adminSb
+      .from('profiles')
+      .select('id, name, role')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    // STRICT UPDATE: ONLY name and updated_at. Never role, is_active, pin, or permissions.
+    const { error: updateErr } = await adminSb
+      .from('profiles')
+      .update({
+        name: cleanName,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', user.id);
+
+    if (updateErr) {
+      console.error('[updateMyProfileAction] Profile update failed:', updateErr);
+      return { success: false, error: 'Failed to update profile name.' };
+    }
+
+    // Best-effort sync to auth.users user_metadata.full_name
+    try {
+      await adminSb.auth.admin.updateUserById(user.id, {
+        user_metadata: {
+          ...user.user_metadata,
+          full_name: cleanName,
+          name: cleanName,
+        },
+      });
+    } catch (metaErr) {
+      console.warn('[updateMyProfileAction] Auth metadata sync warning:', metaErr);
+    }
+
+    let ip = '127.0.0.1';
+    let userAgent = 'unknown';
+    try {
+      const headersList = await headers();
+      ip = getTrustedClientIp(headersList);
+      userAgent = headersList.get('user-agent') || 'unknown';
+    } catch { /* ignored outside request context */ }
+
+    await writeAuditLog(
+      cleanName || user.email || 'Admin Staff',
+      'update',
+      'profiles',
+      user.id,
+      { name: oldProfile?.name || '' },
+      { name: cleanName },
+      { ip, userAgent }
+    );
+
+    revalidatePath('/admin/profile');
+    revalidatePath('/admin/system-config');
+    revalidatePath('/admin');
+    return { success: true, name: cleanName };
+  } catch (err: any) {
+    console.error('[updateMyProfileAction] Unexpected error:', err);
+    return { success: false, error: err.message || 'An unexpected error occurred.' };
+  }
+}
+
+export async function getAdminStaffProfilesAction(): Promise<{
+  success: boolean;
+  data?: Array<{
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    formattedRole: string;
+    isActive: boolean;
+    createdAt: string;
+  }>;
+  error?: string;
+}> {
+  const check = await checkPermission('users', 'read');
+  if (!check.allowed) {
+    const sysCheck = await checkPermission('systemConfig', 'read');
+    if (!sysCheck.allowed) {
+      return { success: false, error: 'Unauthorized: Permission required to view staff profiles.' };
+    }
+  }
+
+  try {
+    const adminSb = getAdminSupabase();
+
+    // Query non-customer profiles
+    const { data: profiles, error: pErr } = await adminSb
+      .from('profiles')
+      .select('id, name, role, is_active, created_at')
+      .neq('role', 'customer')
+      .order('created_at', { ascending: true });
+
+    if (pErr) throw pErr;
+
+    // Fetch auth users to correlate email
+    const { data: authData } = await adminSb.auth.admin.listUsers();
+    const userEmailMap = new Map<string, string>();
+    authData?.users?.forEach((u) => {
+      userEmailMap.set(u.id, u.email || '');
+    });
+
+    const roleMap: Record<string, string> = {
+      super_admin: 'Super Administrator',
+      admin: 'Administrator',
+      store_manager: 'Store Manager',
+      content_editor: 'Content Editor',
+      support_staff: 'Support Staff',
+      read_only: 'Read Only Staff',
+    };
+
+    const staff = (profiles || []).map((p: any) => ({
+      id: p.id,
+      name: p.name?.trim() || '',
+      email: userEmailMap.get(p.id) || '—',
+      role: p.role,
+      formattedRole: roleMap[p.role] || p.role,
+      isActive: p.is_active ?? true,
+      createdAt: p.created_at,
+    }));
+
+    return { success: true, data: staff };
+  } catch (err: any) {
+    console.error('[getAdminStaffProfilesAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to fetch staff profiles.' };
+  }
+}
+
+export async function updateStaffProfileNameByAdminAction(payload: {
+  userId: string;
+  name: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const check = await checkPermission('users', 'write');
+  if (!check.allowed) {
+    const sysCheck = await checkPermission('systemConfig', 'write');
+    if (!sysCheck.allowed) {
+      return { success: false, error: 'Unauthorized: Admin permission required to edit staff profiles.' };
+    }
+  }
+
+  // Only admin or super_admin roles can edit other profiles
+  if (check.role !== 'admin' && check.role !== 'super_admin') {
+    return { success: false, error: 'Forbidden: Only administrators can update staff profiles.' };
+  }
+
+  try {
+    if (!payload?.userId || typeof payload.userId !== 'string') {
+      return { success: false, error: 'User ID is required.' };
+    }
+    const cleanId = payload.userId.trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanId)) {
+      return { success: false, error: 'Invalid User ID format.' };
+    }
+
+    if (!payload.name || typeof payload.name !== 'string') {
+      return { success: false, error: 'Full Name is required.' };
+    }
+
+    const cleanName = payload.name.trim();
+    if (!cleanName) {
+      return { success: false, error: 'Full Name cannot be empty.' };
+    }
+
+    if (cleanName.length > 100) {
+      return { success: false, error: 'Full Name cannot exceed 100 characters.' };
+    }
+
+    if (/[\u0000-\u001F\u007F-\u009F]/.test(cleanName)) {
+      return { success: false, error: 'Full Name contains invalid characters.' };
+    }
+
+    const adminSb = getAdminSupabase();
+
+    const { data: targetProfile, error: getErr } = await adminSb
+      .from('profiles')
+      .select('id, name, role')
+      .eq('id', cleanId)
+      .maybeSingle();
+
+    if (getErr || !targetProfile) {
+      return { success: false, error: 'Staff profile not found.' };
+    }
+
+    // Strictly update name and updated_at
+    const { error: updateErr } = await adminSb
+      .from('profiles')
+      .update({
+        name: cleanName,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', cleanId);
+
+    if (updateErr) {
+      console.error('[updateStaffProfileNameByAdminAction] Update error:', updateErr);
+      return { success: false, error: 'Failed to update staff profile.' };
+    }
+
+    // Best-effort sync to auth.users user_metadata
+    try {
+      const { data: authTarget } = await adminSb.auth.admin.getUserById(cleanId);
+      if (authTarget?.user) {
+        await adminSb.auth.admin.updateUserById(cleanId, {
+          user_metadata: {
+            ...authTarget.user.user_metadata,
+            full_name: cleanName,
+            name: cleanName,
+          },
+        });
+      }
+    } catch (metaErr) {
+      console.warn('[updateStaffProfileNameByAdminAction] Auth metadata sync warning:', metaErr);
+    }
+
+    let ip = '127.0.0.1';
+    let userAgent = 'unknown';
+    try {
+      const headersList = await headers();
+      ip = getTrustedClientIp(headersList);
+      userAgent = headersList.get('user-agent') || 'unknown';
+    } catch { /* ignored */ }
+
+    await writeAuditLog(
+      check.actorName || check.actorEmail || 'Admin Staff',
+      'update',
+      'profiles',
+      cleanId,
+      { name: targetProfile.name },
+      { name: cleanName },
+      { ip, userAgent }
+    );
+
+    revalidatePath('/admin/profile');
+    revalidatePath('/admin/system-config');
+    return { success: true };
+  } catch (err: any) {
+    console.error('[updateStaffProfileNameByAdminAction] Unexpected error:', err);
+    return { success: false, error: err.message || 'An unexpected error occurred.' };
+  }
+}

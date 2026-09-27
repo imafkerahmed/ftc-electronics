@@ -110,7 +110,7 @@ export default function PosHistoryPage() {
             </thead>
             <tbody>
               {sales.map((sale) => {
-                const MIcon = methodIcon[sale.payment_method] || CreditCard;
+                const MIcon = (sale.payment_method && methodIcon[sale.payment_method]) || CreditCard;
                 const rawDateStr = sale.date || sale.created || sale.updated;
                 const d = rawDateStr ? new Date(rawDateStr) : new Date();
                 const created = isNaN(d.getTime()) ? new Date() : d;
@@ -145,11 +145,11 @@ export default function PosHistoryPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="space-y-0.5">
-                        <span className={`inline-flex items-center gap-1 font-semibold capitalize ${methodColor[sale.payment_method] || ''}`}>
+                        <span className={`inline-flex items-center gap-1 font-semibold capitalize ${sale.payment_method ? (methodColor[sale.payment_method] || '') : ''}`}>
                           <MIcon className="h-3 w-3" />
-                          {sale.payment_method}
+                          {sale.payment_method ? sale.payment_method.replace('_', ' ') : 'Unpaid'}
                         </span>
-                        {sale.payment_method === 'cash' && sale.change_due > 0 && (
+                        {sale.payment_method === 'cash' && sale.change_due && sale.change_due > 0 && (
                           <p className="text-[10px] text-amber-500 font-medium">Change: {fmt(sale.change_due)}</p>
                         )}
                       </div>

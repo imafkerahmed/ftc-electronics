@@ -59,10 +59,17 @@ export async function resolveInvoiceConfig(): Promise<InvoicePrintConfig> {
 }
 
 export interface InvoiceData {
-  docType: 'Invoice' | 'Quotation';
+  docType?: 'Invoice' | 'Quotation';
   docNumber: string;
   date: string;
   dueDate?: string;
+  paymentTerms?: string;
+  isOverdue?: boolean;
+  isRevoked?: boolean;
+  invoiceRevokedAt?: string;
+  invoiceRevokedBy?: string;
+  invoiceRevokeReason?: string;
+  invoiceRevokeNotes?: string;
   customerName?: string;
   customerCompany?: string;
   customerPhone?: string;
@@ -73,6 +80,12 @@ export interface InvoiceData {
   discountAmount?: number;
   totalAmount: number;
   paymentMethod?: string;
+  clearedPaid?: number;
+  grossClearedPaid?: number;
+  returnedAmount?: number;
+  pendingClearance?: number;
+  balanceDue?: number;
+  paymentStatus?: 'PAID' | 'BALANCE PENDING' | 'UNPAID' | 'REVOKED';
   notes?: string;
   logoUrl?: string;
 }
@@ -92,8 +105,14 @@ function safeImageUrl(url?: string): string | undefined {
 }
 
 const LEGACY_COMBINED_TITLE = 'TAX INVOICE / QUOTATION';
-const normalizeDocTitle = (t?: string, type?: 'Invoice' | 'Quotation') =>
-  !t || t === LEGACY_COMBINED_TITLE ? (type === 'Quotation' ? 'QUOTATION' : 'INVOICE') : t;
+const normalizeDocTitle = (t?: string, type?: 'Invoice' | 'Quotation', status?: string, isRevoked?: boolean) => {
+  if (type === 'Quotation') return 'QUOTATION';
+  if (isRevoked || status === 'REVOKED') return 'REVOKED INVOICE';
+  if (status === 'PAID') return 'PAID INVOICE';
+  if (status === 'BALANCE PENDING') return 'INVOICE — BALANCE PENDING';
+  if (!t || t === LEGACY_COMBINED_TITLE) return 'INVOICE';
+  return t;
+};
 
 export function getInvoiceHtml(
   rawCfg: InvoicePrintConfig,
@@ -105,7 +124,8 @@ export function getInvoiceHtml(
   const isThermal = cfg.paperWidthMm <= 100;
   const currency = 'Rs.';
   const logoSrc = safeImageUrl(data.logoUrl || cfg.logoUrl);
-  const docHeading = normalizeDocTitle(cfg.documentTitle, data.docType);
+  const docHeading = normalizeDocTitle(cfg.documentTitle, data.docType, data.paymentStatus, data.isRevoked);
+  const isQuote = data.docType === 'Quotation';
 
   const itemsHtml = data.items
     .map((item, index) => {
@@ -227,12 +247,47 @@ export function getInvoiceHtml(
           <div class="doc-header-right">
             <div class="doc-type-title">${esc(docHeading)}</div>
             <div class="doc-meta-line">#${esc(data.docNumber)} | ${esc(data.date)}</div>
-            ${cfg.showDueDate && data.dueDate ? `<div class="doc-meta-line">Due: ${esc(data.dueDate)}</div>` : ''}
+            ${isQuote && data.dueDate ? `<div class="doc-meta-line">Valid Until: ${esc(data.dueDate)}</div>` : ''}
+            ${!isQuote && data.dueDate ? `<div class="doc-meta-line">Due Date: ${esc(data.dueDate)}</div>` : ''}
+            ${!isQuote && data.paymentTerms ? `<div class="doc-meta-line">Terms: ${esc(data.paymentTerms.replace(/_/g, ' ').toUpperCase())}</div>` : ''}
+            ${!isQuote && data.paymentStatus ? `
+              <div style="margin-top: 4px; display: flex; gap: 4px; justify-content: flex-end;">
+                <span style="display: inline-block; font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 6px; border-radius: 4px; ${
+                  data.isRevoked || data.paymentStatus === 'REVOKED'
+                    ? 'background: #fef2f2; color: #991b1b; border: 1.5px solid #dc2626;'
+                    : data.paymentStatus === 'PAID'
+                    ? 'background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0;'
+                    : data.paymentStatus === 'BALANCE PENDING'
+                    ? 'background: #fffbeb; color: #b45309; border: 1px solid #fde68a;'
+                    : 'background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca;'
+                }">
+                  ${esc(data.isRevoked || data.paymentStatus === 'REVOKED' ? 'REVOKED INVOICE' : data.paymentStatus === 'PAID' ? 'PAID INVOICE' : data.paymentStatus === 'BALANCE PENDING' ? 'BALANCE PENDING' : 'UNPAID INVOICE')}
+                </span>
+                ${data.isOverdue && !data.isRevoked ? `
+                  <span style="display: inline-block; font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 6px; border-radius: 4px; background: #450a0a; color: #fecaca; border: 1px solid #dc2626;">
+                    OVERDUE
+                  </span>
+                ` : ''}
+              </div>
+            ` : ''}
           </div>
         </div>
 
+        ${data.isRevoked ? `
+          <div style="margin-bottom: 12px; background: #fef2f2; border: 1.5px solid #f87171; border-radius: 6px; padding: 8px 12px;">
+            <div style="font-size: 11px; font-weight: 900; color: #991b1b; text-transform: uppercase; letter-spacing: 0.5px;">
+              ⚠️ INVOICE REVOKED — VOIDED FOR COMMERCIAL PURPOSES
+            </div>
+            <div style="margin-top: 4px; font-size: 9.5px; color: #7f1d1d; line-height: 1.4;">
+              <div><strong>Revoked On:</strong> ${esc(data.invoiceRevokedAt || 'Recorded')} &nbsp;|&nbsp; <strong>Revoked By:</strong> ${esc(data.invoiceRevokedBy || 'Staff')}</div>
+              <div><strong>Reason:</strong> ${esc(data.invoiceRevokeReason || 'Document issued in error')}</div>
+              ${data.invoiceRevokeNotes ? `<div><strong>Notes:</strong> ${esc(data.invoiceRevokeNotes)}</div>` : ''}
+            </div>
+          </div>
+        ` : ''}
+
         <div class="customer-section">
-          <div class="section-label">Billed To</div>
+          <div class="section-label">${isQuote ? 'Quotation For' : 'Billed To'}</div>
           <div class="customer-name">${esc(data.customerName || 'Walk-in Customer')}</div>
           ${data.customerCompany ? `<div class="customer-detail">${esc(data.customerCompany)}</div>` : ''}
           ${data.customerPhone ? `<div class="customer-detail">Tel: ${esc(data.customerPhone)}</div>` : ''}
@@ -255,8 +310,8 @@ export function getInvoiceHtml(
 
         <div class="bottom-grid">
           <div>
-            ${data.paymentMethod ? `<div class="info-block"><div class="info-block-title">Payment Method</div><div class="info-block-body">${esc(data.paymentMethod)}</div></div>` : ''}
-            ${cfg.dynamicBankHtml ? `<div class="info-block"><div class="info-block-title">Payment Info</div><div class="info-block-body">${esc(cfg.dynamicBankHtml)}</div></div>` : ''}
+            ${!isQuote && data.paymentMethod ? `<div class="info-block"><div class="info-block-title">Payment Method</div><div class="info-block-body">${esc(data.paymentMethod)}</div></div>` : ''}
+            ${cfg.dynamicBankHtml ? `<div class="info-block"><div class="info-block-title">Bank Details</div><div class="info-block-body">${esc(cfg.dynamicBankHtml)}</div></div>` : ''}
             ${data.notes ? `<div class="info-block"><div class="info-block-title">Notes / Terms</div><div class="info-block-body">${esc(data.notes)}</div></div>` : ''}
             ${cfg.termsAndConditions ? `<div class="info-block"><div class="info-block-title">Terms &amp; Conditions</div><div class="info-block-body">${esc(cfg.termsAndConditions)}</div></div>` : ''}
           </div>
@@ -266,12 +321,23 @@ export function getInvoiceHtml(
               ${data.discountAmount ? `<tr><td>Discount</td><td class="col-num">-${currency} ${data.discountAmount.toLocaleString()}</td></tr>` : ''}
               ${data.taxAmount ? `<tr><td>Tax</td><td class="col-num">${currency} ${data.taxAmount.toLocaleString()}</td></tr>` : ''}
               <tr class="grand-row"><td>Total</td><td class="col-num">${currency} ${data.totalAmount.toLocaleString()}</td></tr>
+              ${!isQuote && data.returnedAmount && data.returnedAmount > 0 ? `
+                ${data.grossClearedPaid !== undefined ? `<tr><td style="color: #047857; font-weight: 600;">Payments Received</td><td class="col-num" style="color: #047857; font-weight: 600;">${currency} ${data.grossClearedPaid.toLocaleString()}</td></tr>` : ''}
+                <tr><td style="color: #e11d48; font-weight: 600;">Payments Returned</td><td class="col-num" style="color: #e11d48; font-weight: 600;">-${currency} ${data.returnedAmount.toLocaleString()}</td></tr>
+                ${data.clearedPaid !== undefined ? `<tr><td style="color: #047857; font-weight: 700;">Effective Paid</td><td class="col-num" style="color: #047857; font-weight: 700;">${currency} ${data.clearedPaid.toLocaleString()}</td></tr>` : ''}
+              ` : !isQuote && data.clearedPaid !== undefined ? `<tr><td style="color: #047857; font-weight: 600;">Cleared Paid</td><td class="col-num" style="color: #047857; font-weight: 600;">${currency} ${data.clearedPaid.toLocaleString()}</td></tr>` : ''}
+              ${!isQuote && data.pendingClearance !== undefined && data.pendingClearance > 0 ? `<tr><td style="color: #b45309; font-weight: 600;">Pending Cheques</td><td class="col-num" style="color: #b45309; font-weight: 600;">${currency} ${data.pendingClearance.toLocaleString()}</td></tr>` : ''}
+              ${!isQuote && data.balanceDue !== undefined ? `<tr style="border-top: 1px dashed #cbd5e1;"><td style="font-weight: 700; color: #0f172a;">Balance Due</td><td class="col-num" style="font-weight: 800; color: #0f172a;">${currency} ${data.balanceDue.toLocaleString()}</td></tr>` : ''}
             </table>
             ${cfg.showQrCode ? `<div class="qr-wrapper"><canvas id="invoice-qr"></canvas></div>` : ''}
           </div>
         </div>
 
-        ${cfg.showSignatureBlock ? `<div class="signature-section"><div class="sig-box">Authorized Sign</div><div class="sig-box">Customer Sign</div></div>` : ''}
+        ${data.isRevoked ? `
+          <div style="position: fixed; top: 40%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); font-size: 80px; font-weight: 900; color: rgba(239, 68, 68, 0.12); border: 8px dashed rgba(239, 68, 68, 0.2); padding: 10px 40px; border-radius: 20px; pointer-events: none; z-index: 999; text-transform: uppercase; letter-spacing: 4px;">
+            REVOKED
+          </div>
+        ` : ''}
 
         <script>
           function initDoc() {

@@ -81,7 +81,7 @@ export default function SaleDetailPage() {
           subtotal: sale.subtotal,
           discount: sale.discount,
           total: sale.total,
-          paymentMethod: sale.payment_method,
+          paymentMethod: sale.payment_method || undefined,
         },
         'POS Receipt'
       );

@@ -10,16 +10,17 @@ import {
   AlertTriangle,
   CheckCheck,
   RefreshCw,
+  Clock,
   X,
 } from 'lucide-react';
 import { getAdminNotificationsAction, type AdminNotification } from '@/app/actions/admin';
 
-export default function AdminNotificationBell() {
+export default function AdminNotificationBell({ onCountsUpdate }: { onCountsUpdate?: (orders: number, inquiries: number) => void }) {
   const [notifications, setNotifications] = useState<AdminNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<'all' | 'inquiry' | 'order' | 'quotation' | 'stock'>('all');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'inquiry' | 'order' | 'quotation' | 'stock' | 'receivable' | 'cheque'>('all');
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const fetchNotifications = async () => {
@@ -28,6 +29,9 @@ export default function AdminNotificationBell() {
       if (res.success && res.notifications) {
         setNotifications(res.notifications);
         setUnreadCount(res.unreadCount || 0);
+        const pendingOrders = res.notifications.filter((n) => n.type === 'order').length;
+        const newInquiries = res.notifications.filter((n) => n.type === 'inquiry').length;
+        onCountsUpdate?.(pendingOrders, newInquiries);
       }
     } catch (err: unknown) {
       console.warn('Failed to load notifications:', err);
@@ -88,11 +92,17 @@ export default function AdminNotificationBell() {
         return <FileText className="h-4 w-4 text-purple-500" />;
       case 'stock':
         return <AlertTriangle className="h-4 w-4 text-amber-500" />;
+      case 'receivable':
+        return <Clock className="h-4 w-4 text-rose-500" />;
+      case 'cheque':
+        return <FileText className="h-4 w-4 text-amber-500" />;
     }
   };
 
   const filterTabs = [
     { id: 'all', label: 'All' },
+    { id: 'cheque', label: 'Cheques' },
+    { id: 'receivable', label: 'Receivables' },
     { id: 'inquiry', label: 'Inquiries' },
     { id: 'order', label: 'Orders' },
     { id: 'quotation', label: 'Quotations' },

@@ -395,7 +395,13 @@ export type AuditAction =
   | "login"
   | "logout"
   | "publish"
-  | "unpublish";
+  | "unpublish"
+  | "void"
+  | "convert"
+  | "issue"
+  | "accept"
+  | "reject"
+  | "email";
 
 export interface PBAuditLog extends PBRecord {
   actor: string; // User email or ID
@@ -653,6 +659,25 @@ export interface PBWholesaleDealer extends PBRecord {
 // ─── Quotations Collection ───────────────────────────────────────────────────
 export type PBQuotationItem = InvoiceItem;
 
+export type QuotationVoidReason =
+  | 'CUSTOMER_CANCELLED'
+  | 'PRICING_ERROR'
+  | 'DUPLICATE_QUOTATION'
+  | 'INCORRECT_CUSTOMER'
+  | 'TERMS_CHANGED'
+  | 'REPLACED_BY_NEW_QUOTATION'
+  | 'ADMINISTRATIVE_ERROR'
+  | 'OTHER';
+
+export type QuotationDisplayStatus =
+  | 'DRAFT'
+  | 'ACTIVE'
+  | 'ACCEPTED'
+  | 'CONVERTED'
+  | 'REJECTED'
+  | 'EXPIRED'
+  | 'VOIDED';
+
 export interface PBQuotation extends PBRecord {
   quote_number: string;
   quote_type?: "wholesale" | "direct";
@@ -670,8 +695,12 @@ export interface PBQuotation extends PBRecord {
   discount_value?: number;
   total_amount: number;
   valid_until: string;
-  status: "draft" | "sent" | "accepted" | "rejected" | "expired";
+  status: "draft" | "sent" | "accepted" | "rejected" | "expired" | "voided";
   notes?: string;
+  voided_at?: string | null;
+  voided_by?: string | null;
+  void_reason?: QuotationVoidReason | string | null;
+  void_notes?: string | null;
 }
 
 // ─── Dealer Purchase History Sale Types ─────────────────────────────────────────
