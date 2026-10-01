@@ -41,6 +41,12 @@ import {
   resetPinRateLimit,
   isBcryptHash,
 } from '@/lib/pin-security';
+import {
+  getVerifiedPosSession,
+  setPosSessionCookie,
+  clearPosSessionCookie,
+  POS_SESSION_MAX_AGE,
+} from '@/lib/pos-server-session';
 
 // Helper to cast fields safely for audit logging
 function toRecord(obj: any): Record<string, unknown> | undefined {
@@ -172,6 +178,19 @@ async function buildProductPayloadFromFormData(data: FormData | Record<string, a
   const countInStockRaw = getVal('countInStock') ?? getVal('count_in_stock') ?? existingRecord?.count_in_stock;
   const count_in_stock = parseInt(String(countInStockRaw || '0'), 10) || 0;
 
+  const rawTracking = getVal('inventoryTrackingType') ?? getVal('inventory_tracking_type') ?? existingRecord?.inventory_tracking_type;
+  let inventory_tracking_type: 'counter' | 'unit' = 'counter';
+  if (rawTracking !== undefined && rawTracking !== null && String(rawTracking).trim() !== '') {
+    const norm = String(rawTracking).trim().toLowerCase();
+    if (norm === 'unit' || norm === 'counter') {
+      inventory_tracking_type = norm;
+    } else {
+      throw new Error(`Invalid inventory tracking type "${rawTracking}". Must be "counter" or "unit".`);
+    }
+  } else if (existingRecord?.inventory_tracking_type) {
+    inventory_tracking_type = existingRecord.inventory_tracking_type;
+  }
+
   const status = String(getVal('status') || existingRecord?.status || 'published');
   const is_featured = String(getVal('isFeatured') ?? getVal('is_featured') ?? existingRecord?.is_featured) === 'true';
   const is_pre_order = String(getVal('isPreOrder') ?? getVal('is_pre_order') ?? existingRecord?.is_pre_order) === 'true';
@@ -281,6 +300,7 @@ async function buildProductPayloadFromFormData(data: FormData | Record<string, a
     category_id,
     brand_id,
     count_in_stock,
+    inventory_tracking_type,
     status,
     is_featured,
     is_pre_order,
@@ -300,6 +320,12 @@ export async function createProductAction(formData: FormData) {
 
   try {
     const payload = await buildProductPayloadFromFormData(formData);
+    if (payload.inventory_tracking_type === 'unit' && payload.count_in_stock > 0) {
+      return {
+        success: false,
+        error: 'New Individually Tracked Unit products must be created with 0 stock count. Generate physical stock batches to add inventory.',
+      };
+    }
     (payload as any).created_at = new Date().toISOString();
 
     const supabase = getAdminSupabase();
@@ -331,8 +357,38 @@ export async function updateProductAction(id: string, formData: FormData) {
   try {
     const supabase = getAdminSupabase();
     const { data: oldRecord } = await supabase.from('products').select('*').eq('id', id).maybeSingle();
+    if (!oldRecord) return { success: false, error: 'Product not found.' };
 
     const payload = await buildProductPayloadFromFormData(formData, oldRecord);
+
+    // Safeguards for inventory tracking transitions
+    if (oldRecord.inventory_tracking_type === 'counter' && payload.inventory_tracking_type === 'unit') {
+      const { count: availUnits } = await supabase
+        .from('stock_management')
+        .select('id', { count: 'exact', head: true })
+        .eq('product_id', id)
+        .eq('status', 'available');
+
+      const targetStock = payload.count_in_stock ?? oldRecord.count_in_stock ?? 0;
+      if (targetStock > 0 && (availUnits ?? 0) !== targetStock) {
+        return {
+          success: false,
+          error: `Cannot convert product to Individually Tracked Units: current stock count (${targetStock}) does not match available physical unit records (${availUnits ?? 0}). Please generate or reconcile physical stock units before activating unit tracking.`,
+        };
+      }
+    } else if (oldRecord.inventory_tracking_type === 'unit' && payload.inventory_tracking_type === 'counter') {
+      const { count: totalUnits } = await supabase
+        .from('stock_management')
+        .select('id', { count: 'exact', head: true })
+        .eq('product_id', id);
+
+      if ((totalUnits ?? 0) > 0) {
+        return {
+          success: false,
+          error: `Cannot convert product to Counter Stock: product has existing physical unit records (${totalUnits} units recorded). Preserving individually tracked unit history is required.`,
+        };
+      }
+    }
 
     const { data: record, error } = await supabase
       .from('products')
@@ -368,6 +424,22 @@ export async function updateProductStockAction(id: string, countInStock: number)
   try {
     const supabase = getAdminSupabase();
     const { data: oldRecord } = await supabase.from('products').select('*').eq('id', id).maybeSingle();
+    if (!oldRecord) return { success: false, error: 'Product not found.' };
+
+    if (oldRecord.inventory_tracking_type === 'unit') {
+      const { count: availUnits } = await supabase
+        .from('stock_management')
+        .select('id', { count: 'exact', head: true })
+        .eq('product_id', id)
+        .eq('status', 'available');
+
+      if ((availUnits ?? 0) !== countInStock) {
+        return {
+          success: false,
+          error: `Cannot manually override stock count for Individually Tracked Unit product. Stock count is strictly determined by available physical units (${availUnits ?? 0} available).`,
+        };
+      }
+    }
 
     const { data: record, error } = await supabase
       .from('products')
@@ -414,10 +486,17 @@ export async function createStockPurchaseAction(data: {
     const supabase = getAdminSupabase();
     const { data: product, error: prodErr } = await supabase
       .from('products')
-      .select('id, slug, count_in_stock, price, discount_price')
+      .select('id, slug, count_in_stock, price, discount_price, inventory_tracking_type')
       .eq('id', data.productId)
       .single();
     if (prodErr || !product) return { success: false, error: 'Product not found.' };
+
+    if (product.inventory_tracking_type !== 'unit') {
+      return {
+        success: false,
+        error: 'Cannot add physical unit stock batches: product is configured for Counter Stock tracking. Update inventory tracking to Individually Tracked Units before creating stock units.',
+      };
+    }
 
     const initialStock = product.count_in_stock || 0;
     const initialPrice = product.price;
@@ -558,6 +637,20 @@ export async function createStockUnitAction(data: {
 
   try {
     const supabase = getAdminSupabase();
+    const { data: prod, error: pErr } = await supabase
+      .from('products')
+      .select('id, inventory_tracking_type')
+      .eq('id', data.productId)
+      .single();
+    if (pErr || !prod) return { success: false, error: 'Product not found.' };
+
+    if (prod.inventory_tracking_type !== 'unit') {
+      return {
+        success: false,
+        error: 'Cannot create physical stock unit: product is configured for Counter Stock tracking. Update inventory tracking to Individually Tracked Units before creating stock units.',
+      };
+    }
+
     const barcode = data.barcode || `STK-${data.productId.slice(-6).toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`;
 
     const { data: unit, error } = await supabase
@@ -574,6 +667,17 @@ export async function createStockUnitAction(data: {
       .single();
     if (error) throw error;
 
+    // Synchronize count_in_stock for unit product
+    const { count: availUnits } = await supabase
+      .from('stock_management')
+      .select('id', { count: 'exact', head: true })
+      .eq('product_id', data.productId)
+      .eq('status', 'available');
+
+    if (typeof availUnits === 'number') {
+      await supabase.from('products').update({ count_in_stock: availUnits }).eq('id', data.productId);
+    }
+
     revalidatePath(`/admin/inventory/${data.productId}`);
     revalidatePath('/admin/inventory');
     return { success: true, data: unit };
@@ -588,6 +692,20 @@ export async function generateBatchBarcodesAction(productId: string, quantity: n
 
   try {
     const supabase = getAdminSupabase();
+    const { data: prod, error: pErr } = await supabase
+      .from('products')
+      .select('id, inventory_tracking_type')
+      .eq('id', productId)
+      .single();
+    if (pErr || !prod) return { success: false, error: 'Product not found.' };
+
+    if (prod.inventory_tracking_type !== 'unit') {
+      return {
+        success: false,
+        error: 'Cannot generate physical stock units: product is configured for Counter Stock tracking. Update inventory tracking to Individually Tracked Units before creating stock units.',
+      };
+    }
+
     const batch = batchNumber || `PO-${Date.now().toString().slice(-6)}`;
 
     const units = Array.from({ length: quantity }, (_, i) => ({
@@ -603,6 +721,17 @@ export async function generateBatchBarcodesAction(productId: string, quantity: n
       const { data, error } = await supabase.from('stock_management').insert(units.slice(i, i + 50)).select();
       if (error) throw error;
       inserted += data?.length || 0;
+    }
+
+    // Synchronize count_in_stock for unit product
+    const { count: availUnits } = await supabase
+      .from('stock_management')
+      .select('id', { count: 'exact', head: true })
+      .eq('product_id', productId)
+      .eq('status', 'available');
+
+    if (typeof availUnits === 'number') {
+      await supabase.from('products').update({ count_in_stock: availUnits }).eq('id', productId);
     }
 
     revalidatePath(`/admin/inventory/${productId}`);
@@ -626,6 +755,17 @@ export async function updateStockUnitStatusAction(id: string, productId: string,
       .select()
       .single();
     if (error) throw error;
+
+    // Synchronize count_in_stock for unit product
+    const { count: availUnits } = await supabase
+      .from('stock_management')
+      .select('id', { count: 'exact', head: true })
+      .eq('product_id', productId)
+      .eq('status', 'available');
+
+    if (typeof availUnits === 'number') {
+      await supabase.from('products').update({ count_in_stock: availUnits }).eq('id', productId);
+    }
 
     revalidatePath(`/admin/inventory/${productId}`);
     revalidatePath('/admin/inventory');
@@ -2953,8 +3093,9 @@ export async function getReceiptPrintPresetsAction(): Promise<{
   error?: string;
   data: ReceiptPrintPreset[];
 }> {
+  const posSession = await getVerifiedPosSession();
   const check = await checkPermission('systemConfig', 'read');
-  if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
+  if (!posSession && !check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
 
   try {
     const supabase = getAdminSupabase();
@@ -3116,8 +3257,9 @@ export async function setDefaultReceiptPrintPresetAction(id: string) {
 // ─── System Configurations (Sales Invoice & Quotation Presets) ─────────────────
 
 export async function getInvoicePrintPresetsAction() {
+  const posSession = await getVerifiedPosSession();
   const check = await checkPermission('systemConfig', 'read');
-  if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
+  if (!posSession && !check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
 
   try {
     const supabase = getAdminSupabase();
@@ -3504,6 +3646,20 @@ export async function verifyPosEmployeePinAction(
       loginTime: new Date().toISOString(),
     };
 
+    // Issue cryptographic HttpOnly session cookie
+    try {
+      await setPosSessionCookie({
+        employeeId: employee.id,
+        role: session.role,
+        issuedAt: Date.now(),
+        expiresAt: Date.now() + POS_SESSION_MAX_AGE * 1000,
+        sessionId: crypto.randomUUID(),
+      });
+    } catch (cookieErr) {
+      console.error('[verifyPosEmployeePinAction] Failed to set POS session cookie:', cookieErr);
+      return { success: false, error: 'Session initialization failed.' };
+    }
+
     return { success: true, session };
   } catch (err) {
     console.error('[verifyPosEmployeePinAction] Unexpected error:', err);
@@ -3511,11 +3667,150 @@ export async function verifyPosEmployeePinAction(
   }
 }
 
+export async function logoutPosEmployeeAction(): Promise<{ success: boolean }> {
+  try {
+    await clearPosSessionCookie();
+    return { success: true };
+  } catch (err) {
+    console.error('[logoutPosEmployeeAction] Error:', err);
+    return { success: false };
+  }
+}
+
+export async function getPosSessionAction(): Promise<{ success: boolean; session?: PosEmployeeSession }> {
+  try {
+    const verified = await getVerifiedPosSession();
+    if (!verified) {
+      return { success: false };
+    }
+    return {
+      success: true,
+      session: {
+        id: verified.employeeId,
+        name: verified.name,
+        role: verified.role,
+        loginTime: new Date().toISOString(),
+      },
+    };
+  } catch {
+    return { success: false };
+  }
+}
+
 // ─── POS — Sales ──────────────────────────────────────────────────────────────
 
-export async function createSaleAction(payload: SalePayload) {
+export async function createSaleAction(payload: SalePayload, idempotencyKey?: string) {
   try {
-    const result = await pbSales.createSale(payload);
+    const posSession = await getVerifiedPosSession();
+    const adminCheck = await checkPermission('orders', 'write');
+
+    if (!posSession && !adminCheck.allowed) {
+      return { success: false, error: 'Unauthorized: Staff session required to record sales.' };
+    }
+
+    // Authoritative cashier resolution:
+    // If POS session is active, cashier MUST be the verified employee
+    if (posSession) {
+      payload.cashier_id = posSession.employeeId;
+      payload.cashier_name = posSession.name;
+    } else if (adminCheck.allowed) {
+      payload.cashier_id = adminCheck.actorId || payload.cashier_id || '';
+      payload.cashier_name = adminCheck.actorName || payload.cashier_name || 'Admin';
+    }
+
+    // Server-side inventory & financial recalculation & validation
+    if (!Array.isArray(payload.items) || payload.items.length === 0) {
+      return { success: false, error: 'POS sale must contain at least one item.' };
+    }
+
+    const productIds = payload.items.map((i) => i.product_id).filter(Boolean);
+    if (productIds.length !== payload.items.length) {
+      return { success: false, error: 'Every item must have a valid product_id.' };
+    }
+
+    const supabase = getAdminSupabase();
+    const { data: dbProducts, error: prodErr } = await supabase
+      .from('products')
+      .select('id, name, price, discount_price, sku, inventory_tracking_type, status, is_active')
+      .in('id', productIds);
+
+    if (prodErr || !dbProducts || dbProducts.length === 0) {
+      return { success: false, error: 'Failed to verify items against catalog.' };
+    }
+
+    const prodMap = new Map(dbProducts.map((p) => [p.id, p]));
+
+    for (const item of payload.items) {
+      const prod = prodMap.get(item.product_id);
+      if (!prod) {
+        return { success: false, error: `Product with ID ${item.product_id} not found.` };
+      }
+      if (prod.status !== 'published' || prod.is_active === false) {
+        return { success: false, error: `Product "${prod.name}" is not active for sale.` };
+      }
+
+      const qty = Math.floor(Number(item.quantity));
+      if (isNaN(qty) || qty <= 0) {
+        return { success: false, error: `Invalid quantity for product "${prod.name}".` };
+      }
+      item.quantity = qty;
+
+      // Authoritative pricing: never trust client unit_price
+      const authoritativeUnitPrice = Number(prod.discount_price ?? prod.price ?? 0);
+      item.unit_price = authoritativeUnitPrice;
+      item.product_name = prod.name;
+      item.sku = prod.sku || '';
+
+      // Discount cannot exceed unit price
+      const itemDiscount = Math.max(0, Math.min(Number(item.item_discount || 0), authoritativeUnitPrice));
+      item.item_discount = itemDiscount;
+      item.line_total = (authoritativeUnitPrice - itemDiscount) * qty;
+    }
+
+    // Authoritative totals recalculation
+    const calculatedSubtotal = payload.items.reduce(
+      (sum, item) => sum + (item.unit_price * item.quantity),
+      0
+    );
+    const calculatedItemDiscountTotal = payload.items.reduce(
+      (sum, item) => sum + ((item.item_discount || 0) * item.quantity),
+      0
+    );
+
+    const clientDiscount = Math.max(0, Number(payload.discount || 0));
+    const calculatedDiscount = Math.min(
+      clientDiscount > 0 ? clientDiscount : calculatedItemDiscountTotal,
+      calculatedSubtotal
+    );
+
+    const calculatedTax = Math.max(0, Number(payload.tax_amount || 0));
+    const calculatedTotal = Math.max(0, calculatedSubtotal - calculatedDiscount + calculatedTax);
+
+    payload.subtotal = calculatedSubtotal;
+    payload.discount = calculatedDiscount;
+    payload.tax_amount = calculatedTax;
+    payload.total = calculatedTotal;
+    payload.status = 'completed';
+    (payload as any).payment_status = 'paid';
+
+    if (payload.payment_method === 'cash') {
+      const tendered = Number(payload.cash_tendered || 0);
+      if (tendered < calculatedTotal) {
+        return {
+          success: false,
+          error: `Cash tendered (Rs. ${tendered.toLocaleString()}) is less than total amount (Rs. ${calculatedTotal.toLocaleString()}).`,
+        };
+      }
+      payload.change_due = Math.max(0, tendered - calculatedTotal);
+    }
+
+    const finalIdempotencyKey =
+      idempotencyKey ||
+      (payload as any).idempotency_key ||
+      payload.receipt_number ||
+      crypto.randomUUID();
+
+    const result = await pbSales.createSale(payload, finalIdempotencyKey);
     revalidatePath('/pos/history');
     return { success: true, data: result };
   } catch (err: any) {
@@ -3524,8 +3819,9 @@ export async function createSaleAction(payload: SalePayload) {
 }
 
 export async function sendPosSaleEmailAction(saleId: string, emailAddress?: string) {
+  const posSession = await getVerifiedPosSession();
   const check = await checkPermission('orders', 'write');
-  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+  if (!posSession && !check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
     const sale = await pbSales.getById(saleId);
@@ -3592,7 +3888,15 @@ export async function sendPosSaleEmailAction(saleId: string, emailAddress?: stri
 
 export async function getRecentSalesAction(limit = 50) {
   try {
-    const sales = await pbSales.getRecent(limit);
+    const posSession = await getVerifiedPosSession();
+    const adminCheck = await checkPermission('orders', 'read');
+
+    if (!posSession && !adminCheck.allowed) {
+      return { success: false, error: 'Unauthorized: Staff session required.' };
+    }
+
+    const safeLimit = Math.max(1, Math.min(limit, 100));
+    const sales = await pbSales.getRecent(safeLimit);
     return { success: true, data: sales };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to load sales.' };
@@ -3603,13 +3907,20 @@ export async function getSaleByIdAction(
   id: string
 ): Promise<{ success: boolean; data?: { sale: PBSale; items: PBSaleItem[] }; error?: string }> {
   try {
+    const posSession = await getVerifiedPosSession();
+    const adminCheck = await checkPermission('orders', 'read');
+
+    if (!posSession && !adminCheck.allowed) {
+      return { success: false, error: 'Unauthorized: Staff session required.' };
+    }
+
     const sale = await pbSales.getById(id);
     if (!sale) return { success: false, error: 'Sale not found.' };
     const items = await pbSales.getItemsBySale(id);
 
+    const supabase = getAdminSupabase();
     if (sale.customer_phone && (!sale.customer_email || sale.customer_email.endsWith('@customer.local') || sale.customer_email === 'customer@ftc.lk')) {
       try {
-        const supabase = getAdminSupabase();
         const { data: cust } = await supabase
           .from('customers')
           .select('email')
@@ -3622,6 +3933,100 @@ export async function getSaleByIdAction(
         }
       } catch (custErr) {
         console.warn('[getSaleByIdAction] Warning: Failed to query customer by phone:', custErr);
+      }
+    }
+
+    // Enrich commercial items with product inventory tracking and stock
+    const productIds = Array.from(new Set(items.map((i: any) => i.product_id).filter(Boolean)));
+    if (productIds.length > 0) {
+      try {
+        const { data: prods } = await supabase
+          .from('products')
+          .select('id, inventory_tracking_type, count_in_stock')
+          .in('id', productIds);
+        const prodMap = new Map((prods || []).map(p => [p.id, p]));
+        items.forEach((item: any) => {
+          if (item.product_id && prodMap.has(item.product_id)) {
+            const p = prodMap.get(item.product_id);
+            if (p) {
+              item.inventory_tracking_type = p.inventory_tracking_type;
+              item.count_in_stock = p.count_in_stock;
+            }
+          }
+        });
+      } catch (prodErr) {
+        console.warn('[getSaleByIdAction] Warning: Failed to query product tracking info:', prodErr);
+      }
+    }
+
+    // Enrich items with fulfillment records (snapshotted serial numbers and accurate fulfilled counts)
+    const saleItemIds = items.map((i: any) => i.id).filter(Boolean);
+    if (saleItemIds.length > 0) {
+      try {
+        const { data: fulfillmentItems, error: fErr } = await supabase
+          .from('sale_fulfillment_items')
+          .select('sale_item_id, serial_number, quantity, created_at')
+          .in('sale_item_id', saleItemIds)
+          .order('created_at', { ascending: true });
+
+        if (!fErr && fulfillmentItems && fulfillmentItems.length > 0) {
+          // Group fulfillment items strictly by exact sale_item_id
+          const fulfillmentsBySaleItem = new Map<string, Array<{ serial_number: string | null; quantity: number }>>();
+          for (const fi of fulfillmentItems) {
+            const list = fulfillmentsBySaleItem.get(fi.sale_item_id) || [];
+            list.push(fi);
+            fulfillmentsBySaleItem.set(fi.sale_item_id, list);
+          }
+
+          items.forEach((item: any) => {
+            const fList = fulfillmentsBySaleItem.get(item.id);
+            if (fList && fList.length > 0) {
+              const serials: string[] = [];
+              let fulfilledSum = 0;
+
+              for (const fi of fList) {
+                fulfilledSum += (typeof fi.quantity === 'number' && fi.quantity > 0) ? fi.quantity : 1;
+                if (fi.serial_number && typeof fi.serial_number === 'string') {
+                  const s = fi.serial_number.trim();
+                  if (s && !serials.includes(s)) {
+                    serials.push(s);
+                  }
+                }
+              }
+
+              item.serial_numbers = serials;
+              if (item.quantity_fulfilled === undefined || item.quantity_fulfilled === null) {
+                item.quantity_fulfilled = fulfilledSum;
+              }
+              if (serials.length > 0) {
+                item.unit_serial = serials.join(' · ');
+              }
+            } else {
+              if (item.quantity_fulfilled === undefined || item.quantity_fulfilled === null) {
+                item.quantity_fulfilled = 0;
+              }
+              if (item.unit_serial && item.unit_serial.trim()) {
+                item.serial_numbers = [item.unit_serial.trim()];
+              } else {
+                item.serial_numbers = [];
+              }
+            }
+          });
+        } else {
+          // No fulfillment items recorded yet for these sale items
+          items.forEach((item: any) => {
+            if (item.quantity_fulfilled === undefined || item.quantity_fulfilled === null) {
+              item.quantity_fulfilled = 0;
+            }
+            if (item.unit_serial && item.unit_serial.trim()) {
+              item.serial_numbers = [item.unit_serial.trim()];
+            } else {
+              item.serial_numbers = [];
+            }
+          });
+        }
+      } catch (fErr) {
+        console.warn('[getSaleByIdAction] Warning: Failed to query sale fulfillment items:', fErr);
       }
     }
 
@@ -3829,13 +4234,31 @@ export async function verifyManagerPinAction(
   }
 }
 
-export async function voidSaleAction(id: string, managerPin: string, managerId?: string) {
+export async function voidSaleAction(id: string, managerPin: string, managerId?: string, reason?: string) {
   try {
+    const posSession = await getVerifiedPosSession();
+    const adminCheck = await checkPermission('orders', 'write');
+    if (!posSession && !adminCheck.allowed) {
+      return { success: false, error: 'Unauthorized: Valid POS or admin session required.' };
+    }
+
     const verify = await verifyManagerPinAction(managerPin, managerId);
     if (!verify.success) {
       return { success: false, error: verify.error || 'Manager PIN required to void sales.' };
     }
-    const sale = await pbSales.voidSale(id);
+
+    const existingSale = await pbSales.getById(id);
+    if (!existingSale) {
+      return { success: false, error: 'Sale record not found.' };
+    }
+    if (existingSale.quotation_id || (existingSale.invoice_number && !existingSale.receipt_number?.startsWith('FTC-POS-'))) {
+      return { success: false, error: 'Commercial wholesale invoices cannot be voided via POS void. Use the invoice revocation workflow.' };
+    }
+
+    const authoritativeManager = verify.managerName || (posSession ? posSession.name : 'Authorized Manager');
+    const voidReason = reason?.trim() || 'Voided via POS with Manager PIN authorization';
+
+    const sale = await pbSales.voidSale(id, authoritativeManager, voidReason);
     revalidatePath('/pos/history');
     return { success: true, data: sale };
   } catch (err) {
@@ -3848,6 +4271,12 @@ export async function voidSaleAction(id: string, managerPin: string, managerId?:
 
 export async function searchPosCustomersAction(query: string) {
   try {
+    const posSession = await getVerifiedPosSession();
+    const adminCheck = await checkPermission('orders', 'read');
+    if (!posSession && !adminCheck.allowed) {
+      return { success: false, error: 'Unauthorized.' };
+    }
+
     const supabase = getAdminSupabase();
     const q = query.trim();
     if (!q) {
@@ -3872,6 +4301,12 @@ export async function searchPosCustomersAction(query: string) {
 
 export async function createPosCustomerAction(data: { name: string; phone?: string; email?: string; notes?: string }) {
   try {
+    const posSession = await getVerifiedPosSession();
+    const adminCheck = await checkPermission('orders', 'write');
+    if (!posSession && !adminCheck.allowed) {
+      return { success: false, error: 'Unauthorized.' };
+    }
+
     const supabase = getAdminSupabase();
     const { data: customer, error } = await supabase
       .from('customers')
@@ -3899,6 +4334,12 @@ export async function createPosCustomerAction(data: { name: string; phone?: stri
 
 export async function validatePosCouponAction(code: string, cartTotal: number) {
   try {
+    const posSession = await getVerifiedPosSession();
+    const adminCheck = await checkPermission('promotions', 'read');
+    if (!posSession && !adminCheck.allowed) {
+      return { success: false, error: 'Unauthorized.' };
+    }
+
     const supabase = getAdminSupabase();
     const cleanCode = code.trim();
     if (!cleanCode) return { success: false, error: 'Coupon code is required.' };
@@ -4031,7 +4472,46 @@ export async function getUnifiedSalesTrackerAction(params?: {
       invoiceRevokedBy: sale.invoice_revoked_by || null,
       invoiceRevokeReason: sale.invoice_revoke_reason || null,
       invoiceRevokeNotes: sale.invoice_revoke_notes || null,
+      fulfillmentStatus: null as 'NOT HANDED OVER' | 'PARTIALLY HANDED OVER' | 'HANDED OVER' | null,
     }));
+
+    // Batch-resolve commercial fulfillment status for displayed page without N+1
+    const wholesaleSaleIds = mappedItems
+      .filter((s: any) => s.source === 'Wholesale' || s.invoiceNumber)
+      .map((s: any) => s.id);
+
+    if (wholesaleSaleIds.length > 0) {
+      try {
+        const { data: itemStats } = await supabase
+          .from('sale_items')
+          .select('sale_id, quantity, quantity_fulfilled')
+          .in('sale_id', wholesaleSaleIds);
+
+        const statsMap = new Map<string, { totalQty: number; totalFulfilled: number }>();
+        (itemStats || []).forEach((row: any) => {
+          const curr = statsMap.get(row.sale_id) || { totalQty: 0, totalFulfilled: 0 };
+          curr.totalQty += Number(row.quantity) || 0;
+          curr.totalFulfilled += Number(row.quantity_fulfilled) || 0;
+          statsMap.set(row.sale_id, curr);
+        });
+
+        mappedItems.forEach((s: any) => {
+          if (statsMap.has(s.id)) {
+            const { totalQty, totalFulfilled } = statsMap.get(s.id)!;
+            if (totalFulfilled === 0) {
+              s.fulfillmentStatus = 'NOT HANDED OVER';
+            } else if (totalFulfilled >= totalQty && totalQty > 0) {
+              s.fulfillmentStatus = 'HANDED OVER';
+            } else {
+              s.fulfillmentStatus = 'PARTIALLY HANDED OVER';
+            }
+          }
+        });
+      } catch (fErr) {
+        console.warn('[getUnifiedSalesTrackerAction] Failed to batch load fulfillment stats:', fErr);
+      }
+    }
+
     const totalCount = items.length > 0 ? Number(items[0].total_count) : 0;
     const totalPages = Math.max(1, Math.ceil(totalCount / limit));
 
@@ -4424,6 +4904,7 @@ export async function getAdminProductAction(id: string) {
         brand: data.brands?.name || data.brand_id || '',
         categoryId: data.category_id,
         brandId: data.brand_id,
+        inventoryTrackingType: (data.inventory_tracking_type as 'counter' | 'unit') || 'counter',
       }
     };
   } catch (err: any) {
@@ -4459,6 +4940,7 @@ export async function getAdminProductsAction(input: GetAdminProductsInput = {}) 
         id, name, slug, price, discount_price,
         count_in_stock, status, is_featured, is_pre_order,
         images, category_id, brand_id, created_at,
+        inventory_tracking_type,
         categories:category_id(id, name),
         brands:brand_id(id, name)
       `, { count: 'exact' });
@@ -4523,6 +5005,7 @@ export async function getAdminProductsAction(input: GetAdminProductsInput = {}) 
       isFeatured: p.is_featured || false,
       isPreOrder: p.is_pre_order || false,
       createdAt: p.created_at,
+      inventoryTrackingType: (p.inventory_tracking_type as 'counter' | 'unit') || 'counter',
     }));
 
     return {
@@ -4746,7 +5229,15 @@ export async function saveQuotationAction(
     customer_email?: string;
     customer_phone?: string;
     customer_address?: string;
-    items: Array<{ name: string; qty: number; unitPrice: number; discount?: number; total?: number }>;
+    items: Array<{
+      product_id?: string | null;
+      productId?: string | null;
+      name: string;
+      qty: number;
+      unitPrice: number;
+      discount?: number;
+      total?: number;
+    }>;
     subtotal: number;
     tax_amount?: number;
     discount_amount?: number;
@@ -4815,6 +5306,9 @@ export async function saveQuotationAction(
       return { success: false, error: 'Quotation must have at least one line item.' };
     }
 
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const catalogProductIdsToVerify = new Set<string>();
+
     for (const item of data.items) {
       if (!item.name?.trim()) {
         return { success: false, error: 'Every item in the quotation must have a name.' };
@@ -4830,13 +5324,50 @@ export async function saveQuotationAction(
       if (isNaN(unitPrice) || !Number.isFinite(unitPrice) || unitPrice < 0) {
         return { success: false, error: `Invalid unit price for item "${item.name}".` };
       }
+
+      const rawPid = item.product_id ?? (item as any).productId;
+      if (rawPid !== undefined && rawPid !== null && rawPid !== '') {
+        if (typeof rawPid !== 'string' || !uuidRegex.test(rawPid.trim())) {
+          return {
+            success: false,
+            error: `Invalid catalog product ID for item "${item.name}". Must be a valid UUID.`,
+          };
+        }
+        catalogProductIdsToVerify.add(rawPid.trim());
+      }
+    }
+
+    const supabase = getAdminSupabase();
+
+    if (catalogProductIdsToVerify.size > 0) {
+      const { data: existingProducts, error: prodErr } = await supabase
+        .from('products')
+        .select('id')
+        .in('id', Array.from(catalogProductIdsToVerify));
+
+      if (prodErr) {
+        return { success: false, error: 'Failed to verify catalog product references.' };
+      }
+
+      const foundIdSet = new Set((existingProducts || []).map((p) => p.id));
+      for (const pId of catalogProductIdsToVerify) {
+        if (!foundIdSet.has(pId)) {
+          return {
+            success: false,
+            error: `Catalog product (${pId}) does not exist in the product catalog.`,
+          };
+        }
+      }
     }
 
     const validatedItems = data.items.map((item) => {
       const safeQty = Math.floor(Number(item.qty));
       const safePrice = Math.max(0, Number(item.unitPrice) || 0);
+      const rawPid = item.product_id ?? (item as any).productId;
+      const cleanPid = rawPid && typeof rawPid === 'string' && uuidRegex.test(rawPid.trim()) ? rawPid.trim() : null;
       return {
         ...item,
+        product_id: cleanPid,
         name: item.name.trim(),
         qty: safeQty,
         unitPrice: safePrice,
@@ -4877,8 +5408,6 @@ export async function saveQuotationAction(
       discount_value: clampedDiscountValue,
       total_amount: totalAmount,
     };
-
-    const supabase = getAdminSupabase();
     let record;
     if (existingId) {
       const { data: existingQuote, error: exErr } = await supabase
@@ -5085,6 +5614,34 @@ export async function convertQuotationToSaleAction(
     }
     if (quote.status === 'expired' || (quote.valid_until && new Date(quote.valid_until).getTime() < Date.now())) {
       return { success: false, error: 'Cannot convert an expired quotation. Please create a new quotation.' };
+    }
+
+    // Verify that all catalog-backed products referenced in the quotation still exist
+    const quoteItems: any[] = Array.isArray(quote.items) ? quote.items : [];
+    const catalogProductIds = quoteItems
+      .map((it: any) => it.product_id || it.productId)
+      .filter((pid: any) => pid && typeof pid === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pid.trim()))
+      .map((pid: any) => pid.trim());
+
+    if (catalogProductIds.length > 0) {
+      const { data: existingProds, error: epErr } = await supabase
+        .from('products')
+        .select('id')
+        .in('id', catalogProductIds);
+
+      if (epErr) {
+        return { success: false, error: 'Failed to verify quotation catalog products.' };
+      }
+
+      const existingSet = new Set((existingProds || []).map((p) => p.id));
+      for (const pid of catalogProductIds) {
+        if (!existingSet.has(pid)) {
+          return {
+            success: false,
+            error: 'Quotation contains a catalog product that is no longer available. Please update the quotation before issuing the invoice.',
+          };
+        }
+      }
     }
 
     const authTotal = Number(quote.total_amount) || 0;
@@ -7787,5 +8344,257 @@ export async function updateStaffProfileNameByAdminAction(payload: {
   } catch (err: any) {
     console.error('[updateStaffProfileNameByAdminAction] Unexpected error:', err);
     return { success: false, error: err.message || 'An unexpected error occurred.' };
+  }
+}
+
+export interface FulfillCommercialSaleItemsInput {
+  saleId: string;
+  idempotencyKey?: string;
+  recipientName?: string;
+  recipientPhone?: string;
+  notes?: string;
+  items: Array<{
+    saleItemId: string;
+    quantity: number;
+    nonInventoryLine?: boolean;
+    unitIds?: string[];
+  }>;
+}
+
+export async function fulfillCommercialSaleItemsAction(input: FulfillCommercialSaleItemsInput) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    if (!input.saleId?.trim()) {
+      return { success: false, error: 'Sale ID is required.' };
+    }
+
+    if (!Array.isArray(input.items) || input.items.length === 0) {
+      return { success: false, error: 'At least one item must be specified for fulfillment.' };
+    }
+
+    const supabase = getAdminSupabase();
+
+    // Resolve authoritative staff display name
+    let staffDisplayName = 'Admin Staff';
+    if (check.actorId) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('name')
+        .eq('id', check.actorId)
+        .maybeSingle();
+
+      const profileName = profile?.name?.trim();
+      let metaFullName: string | undefined;
+      let metaName: string | undefined;
+
+      try {
+        const { data: authUser } = await supabase.auth.admin.getUserById(check.actorId);
+        metaFullName = authUser?.user?.user_metadata?.full_name?.trim();
+        metaName = authUser?.user?.user_metadata?.name?.trim();
+      } catch {
+        // Fallback gracefully if admin auth call is restricted
+      }
+
+      staffDisplayName =
+        (profileName && profileName.length > 0 ? profileName : undefined) ||
+        (metaFullName && metaFullName.length > 0 ? metaFullName : undefined) ||
+        (metaName && metaName.length > 0 ? metaName : undefined) ||
+        (check.actorEmail && check.actorEmail.trim().length > 0 ? check.actorEmail.trim() : undefined) ||
+        'Admin Staff';
+    }
+
+    const idempotencyKey = input.idempotencyKey || crypto.randomUUID();
+
+    const p_items = input.items.map((it) => ({
+      sale_item_id: it.saleItemId,
+      quantity: it.quantity,
+      non_inventory_line: Boolean(it.nonInventoryLine),
+      unit_ids: Array.isArray(it.unitIds) ? it.unitIds : [],
+    }));
+
+    const { data, error } = await supabase.rpc('fulfill_commercial_sale_items_atomic', {
+      p_sale_id: input.saleId,
+      p_idempotency_key: idempotencyKey,
+      p_actor_profile_id: check.actorId || null,
+      p_actor_name: staffDisplayName,
+      p_recipient_name: input.recipientName?.trim() || null,
+      p_recipient_phone: input.recipientPhone?.trim() || null,
+      p_notes: input.notes?.trim() || null,
+      p_items,
+    });
+
+    if (error) {
+      console.error('[fulfillCommercialSaleItemsAction] RPC Error:', error);
+      return { success: false, error: error.message };
+    }
+
+    if (!data?.success) {
+      return { success: false, error: data?.error || 'Failed to fulfill commercial sale items.' };
+    }
+
+    // Best-effort audit logging
+    try {
+      await supabase.from('audit_log').insert({
+        actor: staffDisplayName,
+        action: 'COMMERCIAL_GOODS_HANDED_OVER',
+        collection: 'sales',
+        record_id: input.saleId,
+        new_value: JSON.stringify({
+          fulfillment_id: data.fulfillment_id,
+          fulfillment_number: data.fulfillment_number,
+          sale_id: input.saleId,
+          items_count: input.items.length,
+        }),
+      });
+    } catch (logErr) {
+      console.warn('[fulfillCommercialSaleItemsAction] Audit log warning:', logErr);
+    }
+
+    revalidatePath('/admin/sales');
+    revalidatePath('/admin/inventory');
+    return { success: true, data };
+  } catch (err: any) {
+    console.error('[fulfillCommercialSaleItemsAction] Catch Error:', err);
+    return { success: false, error: err.message || 'An unexpected error occurred.' };
+  }
+}
+
+export interface AvailableStockUnit {
+  id: string;
+  barcode: string | null;
+  serial_number: string | null;
+  created_at: string;
+}
+
+export async function getAvailableUnitsForCommercialHandoverAction(
+  productId: string
+): Promise<{ success: boolean; data?: AvailableStockUnit[]; error?: string }> {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  if (!productId || !/^[0-9a-f-]{36}$/i.test(productId)) {
+    return { success: false, error: 'Valid product ID is required.' };
+  }
+
+  try {
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase
+      .from('stock_management')
+      .select('id, barcode, serial_number, created_at')
+      .eq('product_id', productId)
+      .eq('status', 'available')
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, data: data || [] };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch available units.' };
+  }
+}
+
+export interface CommercialSaleFulfillmentItem {
+  id: string;
+  fulfillment_id: string;
+  sale_item_id: string;
+  product_id: string | null;
+  quantity: number;
+  unit_id: string | null;
+  serial_number: string | null;
+  barcode: string | null;
+  created_at: string;
+  product_name?: string;
+}
+
+export interface CommercialSaleFulfillmentRecord {
+  id: string;
+  sale_id: string;
+  fulfillment_number: string;
+  idempotency_key: string;
+  handed_over_by_profile_id: string | null;
+  handed_over_by_name: string;
+  recipient_name: string | null;
+  recipient_phone: string | null;
+  notes: string | null;
+  created_at: string;
+  items: CommercialSaleFulfillmentItem[];
+}
+
+export async function getCommercialSaleFulfillmentsAction(
+  saleId: string
+): Promise<{ success: boolean; data?: CommercialSaleFulfillmentRecord[]; error?: string }> {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  if (!saleId || !/^[0-9a-f-]{36}$/i.test(saleId)) {
+    return { success: false, error: 'Valid sale ID is required.' };
+  }
+
+  try {
+    const supabase = getAdminSupabase();
+    const { data: fulfillments, error: fErr } = await supabase
+      .from('sale_fulfillments')
+      .select('*')
+      .eq('sale_id', saleId)
+      .order('created_at', { ascending: false });
+
+    if (fErr) {
+      return { success: false, error: fErr.message };
+    }
+
+    if (!fulfillments || fulfillments.length === 0) {
+      return { success: true, data: [] };
+    }
+
+    const fIds = fulfillments.map((f: any) => f.id);
+    const { data: items, error: iErr } = await supabase
+      .from('sale_fulfillment_items')
+      .select('*, sale_items(product_name)')
+      .in('fulfillment_id', fIds)
+      .order('created_at', { ascending: true });
+
+    if (iErr) {
+      return { success: false, error: iErr.message };
+    }
+
+    const itemsByFulfillment = new Map<string, CommercialSaleFulfillmentItem[]>();
+    (items || []).forEach((it: any) => {
+      const list = itemsByFulfillment.get(it.fulfillment_id) || [];
+      list.push({
+        id: it.id,
+        fulfillment_id: it.fulfillment_id,
+        sale_item_id: it.sale_item_id,
+        product_id: it.product_id,
+        quantity: it.quantity,
+        unit_id: it.unit_id,
+        serial_number: it.serial_number,
+        barcode: it.barcode,
+        created_at: it.created_at,
+        product_name: it.sale_items?.product_name || 'Line Item',
+      });
+      itemsByFulfillment.set(it.fulfillment_id, list);
+    });
+
+    const result: CommercialSaleFulfillmentRecord[] = fulfillments.map((f: any) => ({
+      id: f.id,
+      sale_id: f.sale_id,
+      fulfillment_number: f.fulfillment_number,
+      idempotency_key: f.idempotency_key,
+      handed_over_by_profile_id: f.handed_over_by_profile_id,
+      handed_over_by_name: f.handed_over_by_name,
+      recipient_name: f.recipient_name,
+      recipient_phone: f.recipient_phone,
+      notes: f.notes,
+      created_at: f.created_at,
+      items: itemsByFulfillment.get(f.id) || [],
+    }));
+
+    return { success: true, data: result };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch fulfillment history.' };
   }
 }

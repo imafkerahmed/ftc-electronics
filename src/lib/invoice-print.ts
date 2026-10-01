@@ -130,14 +130,29 @@ export function getInvoiceHtml(
   const itemsHtml = data.items
     .map((item, index) => {
       const lineTotal = item.qty * item.unitPrice - (item.discount || 0);
-      const serialHtml = item.serialNumber
-        ? `<div class="item-sn">S/N: ${esc(item.serialNumber)}</div>`
+
+      // Partial handover note (only if partially handed over: 0 < quantityFulfilled < qty)
+      const isPartial = typeof item.quantityFulfilled === 'number' && item.quantityFulfilled > 0 && item.quantityFulfilled < item.qty;
+      const partialHtml = isPartial
+        ? `<div class="item-partial">Handed Over: ${item.quantityFulfilled} / ${item.qty}</div>`
         : '';
+
+      // Authoritative snapshotted serial numbers rendered compactly as a secondary line
+      const rawSerials = item.serialNumbers && item.serialNumbers.length > 0
+        ? item.serialNumbers
+        : (item.serialNumber ? [item.serialNumber] : []);
+      const serials = Array.from(new Set(rawSerials.map(s => (s || '').trim()).filter(Boolean)));
+
+      const serialHtml = serials.length > 0
+        ? `<div class="item-sn"><span class="item-sn-label">SN: </span>${esc(serials.join(' · '))}</div>`
+        : '';
+
       return `
         <tr>
           <td class="col-idx">${String(index + 1).padStart(2, '0')}</td>
           <td class="col-desc">
             <span class="item-title">${esc(item.name)}</span>
+            ${partialHtml}
             ${serialHtml}
           </td>
           <td class="col-num">${item.qty}</td>
@@ -191,7 +206,9 @@ export function getInvoiceHtml(
           .col-idx { width: 28px; color: #94a3b8; font-size: 9.5px; text-align: center; }
           .col-desc { font-size: 10.5px; }
           .item-title { font-weight: 600; color: #0f172a; }
-          .item-sn { font-size: 8.5px; color: #2563eb; margin-top: 1px; font-family: monospace; }
+          .item-partial { font-size: 8.5px; color: #b45309; font-weight: 600; margin-top: 1.5px; }
+          .item-sn { font-size: 8.5px; color: #334155; margin-top: 1.5px; font-family: monospace; line-height: 1.35; word-break: break-word; }
+          .item-sn-label { font-weight: 700; color: #0f172a; }
           .col-num { font-size: 10px; text-align: right; color: #334155; }
           .total-cell { font-weight: 600; color: #0f172a; }
 
@@ -385,9 +402,9 @@ export function generateTestInvoiceData(type: 'Invoice' | 'Quotation' = 'Invoice
     customerPhone: '+94 11 234 5678',
     customerAddress: 'No. 45 Galle Road, Colombo 03, Sri Lanka',
     items: [
-      { name: 'Dell UltraSharp 27" 4K USB-C Monitor', qty: 2, unitPrice: 145000, discount: 5000, serialNumber: 'SN-MON-90812' },
-      { name: 'Logitech MX Master 3S Wireless Mouse', qty: 2, unitPrice: 38500, serialNumber: 'SN-MS-77123' },
-      { name: 'Anker PowerConf Bluetooth Speakerphone', qty: 1, unitPrice: 42000, serialNumber: 'SN-SPK-3341' },
+      { name: 'Dell UltraSharp 27" 4K USB-C Monitor', qty: 2, unitPrice: 145000, discount: 5000, serialNumbers: ['SN-MON-90812', 'SN-MON-90813'] },
+      { name: 'Logitech MX Master 3S Wireless Mouse', qty: 2, unitPrice: 38500, serialNumbers: ['SN-MS-77123', 'SN-MS-77124'] },
+      { name: 'Anker PowerConf Bluetooth Speakerphone', qty: 1, unitPrice: 42000, serialNumbers: ['SN-SPK-3341'] },
     ],
     subtotal: 409000,
     taxAmount: 18000,

@@ -184,6 +184,7 @@ export default function AdminProductsPage() {
   const [category, setCategory] = useState(''); // Stores category ID
   const [brand, setBrand] = useState('');       // Stores brand ID
   const [countInStock, setCountInStock] = useState('10');
+  const [inventoryTrackingType, setInventoryTrackingType] = useState<'counter' | 'unit'>('counter');
   const [description, setDescription] = useState('');
   const [descBlocks, setDescBlocks] = useState<DescriptionBlock[]>([]);
   const [descMode, setDescMode] = useState<'visual' | 'plain'>('visual');
@@ -341,6 +342,7 @@ export default function AdminProductsPage() {
     setCategory('');
     setBrand('');
     setCountInStock('10');
+    setInventoryTrackingType('counter');
     setDescription('');
     setDescBlocks([
       { id: '1', type: 'title', content: 'Product Overview' },
@@ -384,6 +386,7 @@ export default function AdminProductsPage() {
     setBrand(brandRecord ? brandRecord.id : (product.brand || ''));
 
     setCountInStock(product.countInStock.toString());
+    setInventoryTrackingType(product.inventoryTrackingType || (product as any).inventory_tracking_type || 'counter');
 
     // Temporarily clear heavy fields until they load
     setDescription('');
@@ -486,6 +489,7 @@ export default function AdminProductsPage() {
       formData.append('category', targetCategory); // category ID
       formData.append('brand', targetBrand);       // brand ID
       formData.append('countInStock', countInStock || '0');
+      formData.append('inventoryTrackingType', inventoryTrackingType);
       formData.append('description', finalDescription);
       formData.append('status', status);
       formData.append('isFeatured', isFeatured.toString());
@@ -761,11 +765,24 @@ export default function AdminProductsPage() {
                         </div>
                       </td>
                       <td className="p-4">
-                        <div className="flex items-center gap-2">
-                          <span className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider ${stock.cls}`}>
-                            {stock.label}
-                          </span>
-                          <span className="text-muted-foreground">{product.countInStock}</span>
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider ${stock.cls}`}>
+                              {stock.label}
+                            </span>
+                            <span className="text-muted-foreground">{product.countInStock}</span>
+                          </div>
+                          <div>
+                            {product.inventoryTrackingType === 'unit' || (product as any).inventory_tracking_type === 'unit' ? (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+                                Unit Tracked
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-slate-500/10 text-slate-400 border border-slate-500/20">
+                                Counter
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </td>
                       <td className="p-4 text-right">
@@ -1073,6 +1090,97 @@ export default function AdminProductsPage() {
                         </div>
                       </div>
                     )}
+
+                    {/* INVENTORY TRACKING CONTROL */}
+                    <div className="p-4 rounded-xl border border-border bg-card/60 space-y-3">
+                      <div className="space-y-0.5">
+                        <label className="text-xs font-semibold text-foreground tracking-wide block">
+                          Inventory Tracking *
+                        </label>
+                        <p className="text-[11px] text-muted-foreground">
+                          Choose how physical stock is monitored and fulfilled for this product.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                        <label
+                          className={`relative flex flex-col p-3 rounded-xl border text-xs cursor-pointer transition-all ${
+                            inventoryTrackingType === 'counter'
+                              ? 'border-blue-500 bg-blue-500/5 ring-1 ring-blue-500'
+                              : 'border-border bg-background hover:bg-muted/40'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 font-semibold text-foreground">
+                            <input
+                              type="radio"
+                              name="inventoryTrackingType"
+                              value="counter"
+                              checked={inventoryTrackingType === 'counter'}
+                              onChange={() => setInventoryTrackingType('counter')}
+                              className="accent-blue-600"
+                            />
+                            <span>Counter Stock</span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground mt-1.5 pl-5">
+                            Track only the available quantity. Stock is deducted directly without individual unit records.
+                          </p>
+                        </label>
+
+                        <label
+                          className={`relative flex flex-col p-3 rounded-xl border text-xs cursor-pointer transition-all ${
+                            inventoryTrackingType === 'unit'
+                              ? 'border-blue-500 bg-blue-500/5 ring-1 ring-blue-500'
+                              : 'border-border bg-background hover:bg-muted/40'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 font-semibold text-foreground">
+                            <input
+                              type="radio"
+                              name="inventoryTrackingType"
+                              value="unit"
+                              checked={inventoryTrackingType === 'unit'}
+                              onChange={() => setInventoryTrackingType('unit')}
+                              className="accent-blue-600"
+                            />
+                            <span>Individually Tracked Units</span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground mt-1.5 pl-5">
+                            Track each physical item using its barcode/serial record. Requires stock units for fulfillment.
+                          </p>
+                        </label>
+                      </div>
+
+                      {inventoryTrackingType === 'counter' && (
+                        <div className="pt-2 max-w-xs space-y-1.5">
+                          <label className="text-xs font-semibold text-foreground/80 tracking-wide block">
+                            Current Stock Quantity
+                          </label>
+                          <Input
+                            type="number"
+                            min="0"
+                            value={countInStock}
+                            onChange={(e) => setCountInStock(e.target.value)}
+                            placeholder="0"
+                            required
+                          />
+                          <p className="text-[10px] text-muted-foreground">
+                            Aggregate inventory available for counter sale.
+                          </p>
+                        </div>
+                      )}
+
+                      {inventoryTrackingType === 'unit' && editingProduct && (
+                        <div className="pt-2 p-3 bg-muted/30 rounded-lg border border-border text-[11px] text-muted-foreground space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium text-foreground">Tracked Unit Stock:</span>
+                            <span className="font-bold text-foreground">{editingProduct.countInStock} available units</span>
+                          </div>
+                          <p className="text-[10px]">
+                            Stock count is reconciled automatically with physical units in Stock Management.
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
 

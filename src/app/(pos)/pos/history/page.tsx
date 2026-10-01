@@ -176,7 +176,7 @@ export default function PosHistoryPage() {
                         <Link href={`/pos/history/${sale.id}`} className={buttonVariants({ variant: 'outline', size: 'xs' })}>
                           <Printer className="h-3 w-3" /> View
                         </Link>
-                        {sale.status === 'completed' && (
+                        {sale.status === 'completed' && !sale.quotation_id && (!sale.invoice_number || sale.receipt_number?.startsWith('FTC-POS-')) && (
                           <Button
                             variant="outline"
                             size="xs"

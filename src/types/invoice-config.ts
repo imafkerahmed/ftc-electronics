@@ -4,11 +4,15 @@
  */
 
 export interface InvoiceItem {
+  product_id?: string | null;
+  productId?: string | null;
   name: string;
   qty: number;
   unitPrice: number;
   discount?: number;
   serialNumber?: string;
+  serialNumbers?: string[];
+  quantityFulfilled?: number;
   total?: number;
 }
 

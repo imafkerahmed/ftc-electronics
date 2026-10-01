@@ -28,9 +28,20 @@ import {
   Mail,
   Download,
   RotateCcw,
+  PackageCheck,
+  CheckCircle2,
+  MoreHorizontal,
+  History,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import {
   getUnifiedSalesTrackerAction,
   getUnifiedSalesMetricsAction,
@@ -43,7 +54,11 @@ import {
   updateChequeStatusAction,
   recordPaymentReversalAction,
   revokeInvoiceAction,
+  getCommercialSaleFulfillmentsAction,
+  type CommercialSaleFulfillmentRecord,
 } from "@/app/actions/admin";
+import { CommercialHandoverModal } from "./commercial-handover-modal";
+import { DeliveryNoteModal } from "./delivery-note-modal";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { useDebounce } from "use-debounce";
 import type { PBSale, PBSaleItem, SalePayment, SalePaymentReversal, SalePaymentSummary, PaymentMethod } from "@/types/pos";
@@ -94,6 +109,8 @@ interface UnifiedSale {
   invoiceRevokedBy?: string | null;
   invoiceRevokeReason?: string | null;
   invoiceRevokeNotes?: string | null;
+  fulfillmentStatus?: "NOT HANDED OVER" | "PARTIALLY HANDED OVER" | "HANDED OVER" | null;
+  hasUnclassifiedLines?: boolean;
 }
 
 const methodIcon: Record<string, React.ElementType> = {
@@ -206,6 +223,13 @@ export default function SalesWorkspace({
   const [sendingWorkflow, setSendingWorkflow] = useState(false);
   const [sharingWhatsapp, setSharingWhatsapp] = useState(false);
   const [workflowMessage, setWorkflowMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+
+  // Commercial Goods Handover & Delivery Note States
+  const [showHandoverModal, setShowHandoverModal] = useState(false);
+  const [showDeliveryNoteModal, setShowDeliveryNoteModal] = useState(false);
+  const [selectedFulfillmentForDN, setSelectedFulfillmentForDN] = useState<CommercialSaleFulfillmentRecord | null>(null);
+  const [saleFulfillments, setSaleFulfillments] = useState<CommercialSaleFulfillmentRecord[]>([]);
+  const [loadingFulfillments, setLoadingFulfillments] = useState(false);
 
   const queryClient = useQueryClient();
 
@@ -330,10 +354,12 @@ export default function SalesWorkspace({
       }
       setLoadingReceipt(true);
       setLoadingPayments(true);
+      setLoadingFulfillments(true);
       try {
-        const [res, payRes] = await Promise.all([
+        const [res, payRes, fulRes] = await Promise.all([
           getSaleByIdAction(selectedPosSaleId),
           getSalePaymentsAction(selectedPosSaleId),
+          getCommercialSaleFulfillmentsAction(selectedPosSaleId),
         ]);
         if (isMounted && res.success && res.data) {
           setPosReceiptDetails(res.data);
@@ -343,17 +369,24 @@ export default function SalesWorkspace({
           setSalePaymentReversals(payRes.data.reversals || []);
           setSalePaymentSummary(payRes.data.summary);
         }
+        if (isMounted && fulRes.success && fulRes.data) {
+          setSaleFulfillments(fulRes.data);
+        } else if (isMounted) {
+          setSaleFulfillments([]);
+        }
       } catch {
         if (isMounted) {
           setPosReceiptDetails(null);
           setSalePayments([]);
           setSalePaymentReversals([]);
           setSalePaymentSummary(null);
+          setSaleFulfillments([]);
         }
       } finally {
         if (isMounted) {
           setLoadingReceipt(false);
           setLoadingPayments(false);
+          setLoadingFulfillments(false);
         }
       }
     }
@@ -362,6 +395,26 @@ export default function SalesWorkspace({
       isMounted = false;
     };
   }, [selectedPosSaleId]);
+
+  const refreshFulfillmentsAndSale = async (saleId: string) => {
+    setLoadingFulfillments(true);
+    try {
+      const [res, fulRes] = await Promise.all([
+        getSaleByIdAction(saleId),
+        getCommercialSaleFulfillmentsAction(saleId),
+      ]);
+      if (res.success && res.data) {
+        setPosReceiptDetails(res.data);
+      }
+      if (fulRes.success && fulRes.data) {
+        setSaleFulfillments(fulRes.data);
+      }
+      queryClient.invalidateQueries({ queryKey: ["unified-sales-tracker"] });
+      queryClient.invalidateQueries({ queryKey: ["unified-sales-metrics"] });
+    } finally {
+      setLoadingFulfillments(false);
+    }
+  };
 
   const refreshPayments = async (saleId: string) => {
     setLoadingPayments(true);
@@ -674,8 +727,44 @@ export default function SalesWorkspace({
     };
   }, [showSendWorkflow]);
 
+  const handleOpenRecordPaymentModal = useCallback(() => {
+    if (!salePaymentSummary || !posReceiptDetails) return;
+    setRecordAmount(String(salePaymentSummary.available_to_record));
+    setRecordMethod('cash');
+    setRecordReference('');
+    setRecordChequeNumber('');
+    setRecordChequeDate(new Date().toISOString().split('T')[0]);
+    setRecordBankName('');
+    setRecordChequeNotes('');
+    setPaymentActionMessage(null);
+    setShowRecordPaymentModal(true);
+  }, [salePaymentSummary, posReceiptDetails]);
+
+  const handleOpenSendWorkflow = useCallback(() => {
+    if (!posReceiptDetails) return;
+    const name = posReceiptDetails.sale.customer_name || '';
+    const phone = posReceiptDetails.sale.customer_phone || '';
+    const email = posReceiptDetails.sale.customer_email || '';
+
+    setWorkflowName(name);
+    setWorkflowPhone(phone);
+    setWorkflowEmail(email && !email.endsWith('@customer.local') && email !== 'customer@ftc.lk' ? email : '');
+    setWorkflowMessage(null);
+    setWorkflowTab('email');
+    setShowSendWorkflow(true);
+  }, [posReceiptDetails]);
+
   const handleReprintReceipt = async () => {
     if (!posReceiptDetails) return;
+    const isCommercial = Boolean(
+      posReceiptDetails.sale.quotation_id &&
+      !posReceiptDetails.sale.receipt_number?.startsWith('FTC-POS-') &&
+      !posReceiptDetails.sale.cashier_id
+    );
+    if (isCommercial) {
+      console.warn('[handleReprintReceipt] Thermal receipts are POS-only. Blocked for commercial sale.');
+      return;
+    }
     const { sale, items } = posReceiptDetails;
     const rawDateStr = sale.date || sale.created || sale.updated;
     const d = rawDateStr ? new Date(rawDateStr) : new Date();
@@ -746,6 +835,8 @@ export default function SalesWorkspace({
         unitPrice: i.unit_price,
         discount: i.item_discount || undefined,
         serialNumber: i.unit_serial || undefined,
+        serialNumbers: i.serial_numbers && i.serial_numbers.length > 0 ? i.serial_numbers : (i.unit_serial ? [i.unit_serial] : undefined),
+        quantityFulfilled: typeof i.quantity_fulfilled === 'number' ? i.quantity_fulfilled : undefined,
       })),
       subtotal: sale.subtotal,
       taxAmount: sale.tax_amount || 0,
@@ -795,7 +886,13 @@ export default function SalesWorkspace({
         customerName: workflowName.trim() || sale.customer_name || "Walk-in Customer",
         customerPhone: workflowPhone.trim() || sale.customer_phone || undefined,
         items: items.map((i) => ({
-          name: i.product_name, qty: i.quantity, unitPrice: i.unit_price, discount: i.item_discount || undefined, serialNumber: i.unit_serial || undefined,
+          name: i.product_name,
+          qty: i.quantity,
+          unitPrice: i.unit_price,
+          discount: i.item_discount || undefined,
+          serialNumber: i.unit_serial || undefined,
+          serialNumbers: i.serial_numbers && i.serial_numbers.length > 0 ? i.serial_numbers : (i.unit_serial ? [i.unit_serial] : undefined),
+          quantityFulfilled: typeof i.quantity_fulfilled === 'number' ? i.quantity_fulfilled : undefined,
         })),
         subtotal: sale.subtotal, taxAmount: sale.tax_amount || 0, discountAmount: sale.discount || 0, totalAmount: sale.total,
         paymentMethod: isVoided ? 'VOIDED / CANCELLED' : `PAID via ${(sale.payment_method || 'POS').toUpperCase()}`,
@@ -1240,6 +1337,24 @@ export default function SalesWorkspace({
                               )}
                             </div>
                           )}
+                          {/* Commercial Fulfillment Status Badge */}
+                          {sale.fulfillmentStatus && (
+                            <div className="pt-0.5">
+                              <span
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
+                                  sale.fulfillmentStatus === 'HANDED OVER'
+                                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                                    : sale.fulfillmentStatus === 'PARTIALLY HANDED OVER'
+                                    ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                                    : 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
+                                }`}
+                                title={`Physical Goods Fulfillment: ${sale.fulfillmentStatus}`}
+                              >
+                                <PackageCheck className="h-2.5 w-2.5 shrink-0" />
+                                {sale.fulfillmentStatus === 'PARTIALLY HANDED OVER' ? 'PARTIAL' : sale.fulfillmentStatus}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </td>
 
@@ -1380,49 +1495,88 @@ export default function SalesWorkspace({
         )}
       </div>
 
-      {/* POS Receipt Preview Modal */}
-      {selectedPosSaleId && (
-        <div
-          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setSelectedPosSaleId(null)}
-        >
+      {/* Sale / Commercial Invoice Detail Modal */}
+      {selectedPosSaleId && (() => {
+        const isCommercialSale = Boolean(
+          posReceiptDetails?.sale.quotation_id &&
+          !posReceiptDetails?.sale.receipt_number?.startsWith('FTC-POS-') &&
+          !posReceiptDetails?.sale.cashier_id
+        );
+        const isRevoked = Boolean(salePaymentSummary?.is_revoked || posReceiptDetails?.sale.invoice_revoked_at);
+        const effectivePaid = salePaymentSummary?.effective_cleared_paid ?? 0;
+        const pendingCheques = salePaymentSummary?.pending_clearance ?? 0;
+        const isEligibleToRevoke = effectivePaid === 0 && pendingCheques === 0;
+        const canRecordPayment = Boolean(salePaymentSummary && salePaymentSummary.available_to_record > 0 && !isRevoked);
+
+        const items = posReceiptDetails?.items || [];
+        const totalItemsCount = items.reduce((acc, i) => acc + i.quantity, 0);
+        const fulfilledItemsCount = items.reduce((acc, i) => acc + (i.quantity_fulfilled ?? 0), 0);
+        const hasFulfillmentRemaining = items.some(i => (i.quantity_fulfilled ?? 0) < i.quantity);
+        const isPartiallyHandedOver = fulfilledItemsCount > 0 && fulfilledItemsCount < totalItemsCount;
+        const isFullyHandedOver = totalItemsCount > 0 && fulfilledItemsCount >= totalItemsCount;
+        const fulfillmentStatus = fulfilledItemsCount === 0 ? 'NOT HANDED OVER' : isFullyHandedOver ? 'HANDED OVER' : 'PARTIALLY HANDED OVER';
+
+        return (
           <div
-            ref={modalRef}
-            tabIndex={-1}
-            role="dialog"
-            aria-modal="true"
-            aria-label="POS Receipt Detail"
-            onClick={(e) => e.stopPropagation()}
-            className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200 outline-none"
+            className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6"
+            onClick={() => setSelectedPosSaleId(null)}
           >
-            {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20">
-              <div className="flex items-center gap-2">
-                <Receipt className="h-5 w-5 text-blue-500" />
-                <h3 className="text-sm font-black text-foreground">Sale / Invoice Detail</h3>
-                {salePaymentSummary && (
-                  <span
-                    className={`ml-2 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
-                      salePaymentSummary.is_revoked || salePaymentSummary.payment_status === 'REVOKED'
-                        ? 'bg-rose-500/20 border border-rose-500/40 text-rose-400 font-extrabold'
-                        : salePaymentSummary.payment_status === 'PAID'
-                        ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
-                        : salePaymentSummary.payment_status === 'BALANCE PENDING'
-                        ? 'bg-amber-500/10 border border-amber-500/30 text-amber-400'
-                        : 'bg-rose-500/10 border border-rose-500/30 text-rose-400'
-                    }`}
-                  >
-                    {salePaymentSummary.is_revoked ? 'REVOKED' : salePaymentSummary.payment_status}
-                  </span>
-                )}
+            <div
+              ref={modalRef}
+              tabIndex={-1}
+              role="dialog"
+              aria-modal="true"
+              aria-label={isCommercialSale ? "Commercial Invoice Detail" : "POS Sale Receipt Detail"}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-card border border-border rounded-2xl w-full max-w-3xl lg:max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-200 outline-none"
+            >
+              {/* Modal Header */}
+              <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-border bg-card/95 backdrop-blur-sm">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Receipt className="h-5 w-5 text-blue-500 shrink-0" />
+                  <h3 className="text-sm font-black text-foreground">
+                    {isCommercialSale ? "Commercial Invoice Detail" : "Sale / Receipt Detail"}
+                  </h3>
+                  {salePaymentSummary && (
+                    <span
+                      className={`ml-2 px-2.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
+                        isRevoked
+                          ? 'bg-rose-500/20 border border-rose-500/40 text-rose-400 font-extrabold'
+                          : salePaymentSummary.payment_status === 'PAID'
+                          ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
+                          : salePaymentSummary.payment_status === 'BALANCE PENDING'
+                          ? 'bg-amber-500/10 border border-amber-500/30 text-amber-400'
+                          : 'bg-rose-500/10 border border-rose-500/30 text-rose-400'
+                      }`}
+                    >
+                      {isRevoked ? 'REVOKED' : salePaymentSummary.payment_status}
+                    </span>
+                  )}
+                  {/* Fulfillment Status Badge for Commercial Invoices */}
+                  {posReceiptDetails && isCommercialSale && (
+                    <span
+                      className={`ml-1 px-2.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider flex items-center gap-1 ${
+                        fulfillmentStatus === 'HANDED OVER'
+                          ? 'bg-emerald-500/15 border border-emerald-500/40 text-emerald-400'
+                          : fulfillmentStatus === 'PARTIALLY HANDED OVER'
+                          ? 'bg-amber-500/15 border border-amber-500/40 text-amber-400'
+                          : 'bg-blue-500/15 border border-blue-500/40 text-blue-400'
+                      }`}
+                      title={`Goods Handover: ${fulfillmentStatus}`}
+                    >
+                      <PackageCheck className="h-3 w-3 shrink-0" />
+                      {fulfillmentStatus}
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={() => setSelectedPosSaleId(null)}
+                  className="text-muted-foreground hover:text-foreground p-1 rounded-lg hover:bg-muted cursor-pointer shrink-0"
+                  aria-label="Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
-              <button
-                onClick={() => setSelectedPosSaleId(null)}
-                className="text-muted-foreground hover:text-foreground p-1 rounded-lg hover:bg-muted"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
 
             {/* Modal Body */}
             <div className="p-6 overflow-y-auto space-y-5 flex-1 text-xs">
@@ -1457,28 +1611,34 @@ export default function SalesWorkspace({
 
                   {/* Financial Snapshot */}
                   {salePaymentSummary && (
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 bg-muted/30 border border-border/60 rounded-xl p-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 bg-muted/30 border border-border/60 rounded-xl p-3 items-center">
                       <div>
                         <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-0.5">Invoice Total</p>
-                        <p className="font-bold text-foreground">{fmt(salePaymentSummary.invoice_total)}</p>
+                        <p className="font-bold text-foreground text-xs sm:text-sm">{fmt(salePaymentSummary.invoice_total)}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-emerald-500 uppercase font-bold tracking-wider mb-0.5">Received</p>
-                        <p className="font-bold text-emerald-400">{fmt(salePaymentSummary.gross_cleared_paid ?? salePaymentSummary.cleared_paid)}</p>
+                        <p className="text-[10px] text-emerald-500 uppercase font-bold tracking-wider mb-0.5">Gross Received</p>
+                        <p className="font-bold text-emerald-400 text-xs sm:text-sm">{fmt(salePaymentSummary.gross_cleared_paid ?? salePaymentSummary.cleared_paid)}</p>
                       </div>
                       {(salePaymentSummary.returned_amount ?? 0) > 0 && (
                         <div>
                           <p className="text-[10px] text-rose-400 uppercase font-bold tracking-wider mb-0.5">Returned</p>
-                          <p className="font-bold text-rose-400">-{fmt(salePaymentSummary.returned_amount!)}</p>
+                          <p className="font-bold text-rose-400 text-xs sm:text-sm">-{fmt(salePaymentSummary.returned_amount!)}</p>
                         </div>
                       )}
                       <div>
                         <p className="text-[10px] text-emerald-400 uppercase font-bold tracking-wider mb-0.5">Effective Paid</p>
-                        <p className="font-bold text-emerald-400">{fmt(salePaymentSummary.effective_cleared_paid ?? salePaymentSummary.cleared_paid)}</p>
+                        <p className="font-bold text-emerald-400 text-xs sm:text-sm">{fmt(salePaymentSummary.effective_cleared_paid ?? salePaymentSummary.cleared_paid)}</p>
                       </div>
-                      <div>
-                        <p className="text-[10px] text-primary uppercase font-bold tracking-wider mb-0.5">Balance Due</p>
-                        <p className="font-bold text-primary">{fmt(salePaymentSummary.balance_due)}</p>
+                      <div className={`p-2 rounded-lg border ${
+                        salePaymentSummary.balance_due > 0
+                          ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                          : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      }`}>
+                        <p className="text-[10px] uppercase font-black tracking-wider mb-0.5">Balance Due</p>
+                        <p className="font-black text-xs sm:text-sm">
+                          {salePaymentSummary.balance_due > 0 ? fmt(salePaymentSummary.balance_due) : 'Settled (Rs. 0)'}
+                        </p>
                       </div>
                     </div>
                   )}
@@ -1551,33 +1711,100 @@ export default function SalesWorkspace({
 
                   {/* Items List */}
                   <div>
-                    <h4 className="text-[10px] uppercase font-black text-muted-foreground tracking-wider mb-2">Items Purchased</h4>
-                    <div className="border border-border rounded-xl overflow-hidden">
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-[10px] uppercase font-black text-muted-foreground tracking-wider">
+                        Items Purchased ({posReceiptDetails.items.length})
+                      </h4>
+                      {isCommercialSale && (
+                        <span className="text-[11px] text-muted-foreground font-semibold">
+                          Fulfillment: <strong className={isFullyHandedOver ? "text-emerald-400" : "text-amber-400"}>{fulfilledItemsCount}</strong> / {totalItemsCount} units
+                        </span>
+                      )}
+                    </div>
+                    <div className="border border-border rounded-xl overflow-x-auto">
                       <table className="w-full text-left text-xs border-collapse">
                         <thead>
                           <tr className="bg-muted/30 border-b border-border text-muted-foreground font-bold text-[10px]">
-                            <th className="p-3">Product</th>
+                            <th className="p-3">Product / Line</th>
                             <th className="p-3 text-center">Qty</th>
+                            {isCommercialSale && (
+                              <th className="p-3 text-center">Fulfillment</th>
+                            )}
                             <th className="p-3 text-right">Price</th>
                             <th className="p-3 text-right">Total</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border font-medium">
-                          {posReceiptDetails.items.map((item) => (
-                            <tr key={item.id} className="hover:bg-muted/5">
-                              <td className="p-3">
-                                <p className="font-bold text-foreground">{item.product_name}</p>
-                                {item.unit_serial && (
-                                  <span className="font-mono text-[9px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded mt-0.5 inline-block">
-                                    SN: {item.unit_serial}
-                                  </span>
+                          {posReceiptDetails.items.map((item) => {
+                            const fulfilled = item.quantity_fulfilled ?? 0;
+                            const remaining = Math.max(0, item.quantity - fulfilled);
+                            const itemFullyHandedOver = fulfilled >= item.quantity;
+
+                            return (
+                              <tr key={item.id} className="hover:bg-muted/5">
+                                <td className="p-3">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <p className="font-bold text-foreground text-xs">{item.product_name}</p>
+                                    {item.inventory_tracking_type === 'unit' && (
+                                      <span className="text-[9px] font-mono bg-purple-500/15 border border-purple-500/30 text-purple-300 px-1.5 py-0.2 rounded font-bold">
+                                        UNIT
+                                      </span>
+                                    )}
+                                    {item.inventory_tracking_type === 'counter' && (
+                                      <span className="text-[9px] font-mono bg-blue-500/15 border border-blue-500/30 text-blue-300 px-1.5 py-0.2 rounded font-bold">
+                                        COUNTER
+                                      </span>
+                                    )}
+                                    {!item.product_id && (
+                                      <span className="text-[9px] font-mono bg-amber-500/15 border border-amber-500/30 text-amber-300 px-1.5 py-0.2 rounded font-bold">
+                                        UNCLASSIFIED
+                                      </span>
+                                    )}
+                                  </div>
+                                  {item.serial_numbers && item.serial_numbers.length > 0 ? (
+                                    <div className="font-mono text-[10px] text-muted-foreground mt-1 break-words leading-relaxed max-w-md">
+                                      <span className="font-bold text-foreground">SN: </span>
+                                      {item.serial_numbers.join(" · ")}
+                                    </div>
+                                  ) : item.unit_serial ? (
+                                    <span className="font-mono text-[9px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded mt-1 inline-block">
+                                      SN: {item.unit_serial}
+                                    </span>
+                                  ) : null}
+                                </td>
+                                <td className="p-3 text-center font-bold text-xs">{item.quantity}</td>
+                                {isCommercialSale && (
+                                  <td className="p-3 text-center">
+                                    {itemFullyHandedOver ? (
+                                      <span className="inline-flex items-center gap-1 text-emerald-400 font-bold text-[11px] whitespace-nowrap">
+                                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> All {item.quantity} Handed Over
+                                      </span>
+                                    ) : fulfilled > 0 ? (
+                                      <div className="inline-flex flex-col items-center">
+                                        <span className="font-mono font-bold text-amber-400 text-xs">
+                                          {fulfilled} / {item.quantity}
+                                        </span>
+                                        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                                          ({remaining} remaining)
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <div className="inline-flex flex-col items-center">
+                                        <span className="text-muted-foreground font-mono text-xs">
+                                          0 / {item.quantity}
+                                        </span>
+                                        <span className="text-[10px] text-muted-foreground/70 whitespace-nowrap">
+                                          (not handed over)
+                                        </span>
+                                      </div>
+                                    )}
+                                  </td>
                                 )}
-                              </td>
-                              <td className="p-3 text-center">{item.quantity}</td>
-                              <td className="p-3 text-right">{fmt(item.unit_price)}</td>
-                              <td className="p-3 text-right">{fmt(item.line_total)}</td>
-                            </tr>
-                          ))}
+                                <td className="p-3 text-right text-xs">{fmt(item.unit_price)}</td>
+                                <td className="p-3 text-right text-xs font-bold text-foreground">{fmt(item.line_total)}</td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -1589,21 +1816,11 @@ export default function SalesWorkspace({
                       <h4 className="text-[10px] uppercase font-black text-muted-foreground tracking-wider">
                         Payment History ({salePayments.length} records)
                       </h4>
-                      {salePaymentSummary && salePaymentSummary.available_to_record > 0 && !salePaymentSummary.is_revoked && !posReceiptDetails.sale.invoice_revoked_at && (
+                      {canRecordPayment && (
                         <Button
                           size="sm"
-                          onClick={() => {
-                            setRecordAmount(String(salePaymentSummary.available_to_record));
-                            setRecordMethod('cash');
-                            setRecordReference('');
-                            setRecordChequeNumber('');
-                            setRecordChequeDate(new Date().toISOString().split('T')[0]);
-                            setRecordBankName('');
-                            setRecordChequeNotes('');
-                            setPaymentActionMessage(null);
-                            setShowRecordPaymentModal(true);
-                          }}
-                          className="h-7 text-[10px] font-bold gap-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-2.5"
+                          onClick={handleOpenRecordPaymentModal}
+                          className="h-7 text-[10px] font-bold gap-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-2.5 cursor-pointer shadow-xs"
                         >
                           <Banknote className="w-3 h-3" /> Record Payment
                         </Button>
@@ -1774,6 +1991,102 @@ export default function SalesWorkspace({
                     </div>
                   )}
 
+                  {/* Handover History (Delivery Notes) */}
+                  {isCommercialSale && (
+                    <div id="handover-history-section" className="scroll-mt-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-[10px] uppercase font-black text-indigo-400 tracking-wider flex items-center gap-1.5">
+                          <PackageCheck className="h-3.5 w-3.5" />
+                          Handover History ({saleFulfillments.length} {saleFulfillments.length === 1 ? 'Delivery Note' : 'Delivery Notes'})
+                        </h4>
+                        {hasFulfillmentRemaining && !isRevoked && (
+                          <Button
+                            size="sm"
+                            onClick={() => setShowHandoverModal(true)}
+                            className="h-7 text-[10px] font-bold gap-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-2.5 cursor-pointer shadow-xs"
+                          >
+                            <PackageCheck className="w-3 h-3" /> {isPartiallyHandedOver ? 'Hand Over Remaining' : 'Hand Over Products'}
+                          </Button>
+                        )}
+                      </div>
+
+                      <div className="border border-indigo-500/20 rounded-xl overflow-hidden bg-indigo-500/5">
+                        {saleFulfillments.length === 0 ? (
+                          <div className="p-4 text-center text-muted-foreground text-xs">
+                            No physical products have been handed over yet.
+                          </div>
+                        ) : (
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-indigo-500/10 border-b border-indigo-500/20 text-indigo-300 font-bold text-[10px]">
+                                <th className="p-2.5">DN # &amp; Date</th>
+                                <th className="p-2.5">Recipient &amp; Staff</th>
+                                <th className="p-2.5 text-center">Items</th>
+                                <th className="p-2.5 text-right">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-indigo-500/10">
+                              {saleFulfillments.map((f) => {
+                                const dnDate = f.created_at
+                                  ? new Date(f.created_at).toLocaleDateString("en-GB", {
+                                      day: "numeric",
+                                      month: "short",
+                                      year: "numeric",
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })
+                                  : "—";
+                                const totalQty = f.items.reduce((s, it) => s + it.quantity, 0);
+                                const unitCount = f.items.filter(it => it.unit_id).length;
+
+                                return (
+                                  <tr key={f.id} className="hover:bg-indigo-500/10 transition-colors">
+                                    <td className="p-2.5">
+                                      <div className="font-mono font-bold text-indigo-300 text-[11px]">
+                                        {f.fulfillment_number}
+                                      </div>
+                                      <div className="text-[10px] text-muted-foreground font-mono">
+                                        {dnDate}
+                                      </div>
+                                    </td>
+                                    <td className="p-2.5">
+                                      <div className="font-semibold text-foreground">
+                                        {f.recipient_name || "Customer Staff"}
+                                      </div>
+                                      <div className="text-[10px] text-muted-foreground">
+                                        By: {f.handed_over_by_name} {f.recipient_phone ? `· ${f.recipient_phone}` : ""}
+                                      </div>
+                                    </td>
+                                    <td className="p-2.5 text-center">
+                                      <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-muted/60 text-foreground">
+                                        {totalQty} {totalQty === 1 ? "unit" : "units"}
+                                        {unitCount > 0 ? ` (${unitCount} SN)` : ""}
+                                      </span>
+                                    </td>
+                                    <td className="p-2.5 text-right">
+                                      <div className="flex items-center justify-end gap-1">
+                                        <button
+                                          onClick={() => {
+                                            setSelectedFulfillmentForDN(f);
+                                            setShowDeliveryNoteModal(true);
+                                          }}
+                                          className="px-2 py-1 text-[10px] font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded cursor-pointer transition-colors"
+                                          title="View & Print Delivery Note"
+                                        >
+                                          View DN
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Financial Breakdown */}
                   <div className="border-t border-border pt-4 space-y-2">
                     <div className="flex justify-between text-muted-foreground">
@@ -1818,9 +2131,11 @@ export default function SalesWorkspace({
                             <span>{fmt(salePaymentSummary.pending_clearance)}</span>
                           </div>
                         )}
-                        <div className="flex justify-between text-primary font-black border-t border-dashed border-border pt-1.5 text-xs">
+                        <div className={`flex justify-between border-t border-dashed border-border pt-2 text-xs font-black ${
+                          salePaymentSummary.balance_due > 0 ? "text-rose-400" : "text-emerald-400"
+                        }`}>
                           <span>Balance Due</span>
-                          <span>{fmt(salePaymentSummary.balance_due)}</span>
+                          <span>{salePaymentSummary.balance_due > 0 ? fmt(salePaymentSummary.balance_due) : "Settled (Rs. 0)"}</span>
                         </div>
                       </>
                     )}
@@ -1829,62 +2144,120 @@ export default function SalesWorkspace({
               )}
             </div>
 
-            {/* Modal Footer */}
-            <div className="px-6 py-4 border-t border-border bg-muted/20 flex flex-wrap items-center justify-between gap-2 shrink-0">
-              <div>
-                {posReceiptDetails && posReceiptDetails.sale.invoice_number && !salePaymentSummary?.is_revoked && !posReceiptDetails.sale.invoice_revoked_at && (() => {
-                  const effectivePaid = salePaymentSummary?.effective_cleared_paid ?? 0;
-                  const pendingCheques = salePaymentSummary?.pending_clearance ?? 0;
-                  const isEligibleToRevoke = effectivePaid === 0 && pendingCheques === 0;
-                  return (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!isEligibleToRevoke}
-                      onClick={() => {
-                        setRevokeReason('Invoice issued in error');
-                        setRevokeNotes('');
-                        setRevokeActionMessage(null);
-                        setShowRevokeModal(true);
-                      }}
-                      className="gap-1 text-xs border-rose-500/30 text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 font-bold disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                      title={
-                        !isEligibleToRevoke
-                          ? effectivePaid > 0
-                            ? `Return ${fmt(effectivePaid)} in cleared payments before revoking this invoice.`
-                            : `Resolve pending cheques (${fmt(pendingCheques)}) before revoking this invoice.`
-                          : 'Revoke this commercial invoice'
-                      }
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" /> Revoke Invoice
-                    </Button>
-                  );
-                })()}
-              </div>
-
+            {/* Contextual Modal Footer */}
+            <div className="sticky bottom-0 z-10 px-6 py-3.5 border-t border-border bg-card/95 backdrop-blur-sm flex flex-wrap items-center justify-between gap-3 shrink-0">
+              {/* Left Side: Close + Overflow More Menu */}
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => setSelectedPosSaleId(null)}>
+                <Button variant="outline" size="sm" onClick={() => setSelectedPosSaleId(null)} className="cursor-pointer">
                   Close
                 </Button>
+
+                {/* Overflow More Menu for Commercial Sales */}
+                {isCommercialSale && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      className="h-8 px-2.5 rounded-lg border border-border bg-background hover:bg-muted text-foreground inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors"
+                      title="More Options"
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                      <span>More</span>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-52 bg-card border border-border shadow-xl rounded-xl p-1 text-xs">
+                      {saleFulfillments.length > 0 && (
+                        <>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              const el = document.getElementById("handover-history-section");
+                              el?.scrollIntoView({ behavior: "smooth" });
+                            }}
+                            className="cursor-pointer gap-2 text-xs"
+                          >
+                            <History className="h-3.5 w-3.5 text-indigo-400" /> Handover History
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setSelectedFulfillmentForDN(saleFulfillments[0]);
+                              setShowDeliveryNoteModal(true);
+                            }}
+                            className="cursor-pointer gap-2 text-xs"
+                          >
+                            <FileText className="h-3.5 w-3.5 text-indigo-400" /> Delivery Note
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                        </>
+                      )}
+                      {!isRevoked && (
+                        <DropdownMenuItem
+                          disabled={!isEligibleToRevoke}
+                          onClick={() => {
+                            if (!isEligibleToRevoke) return;
+                            setRevokeReason("Invoice issued in error");
+                            setRevokeNotes("");
+                            setRevokeActionMessage(null);
+                            setShowRevokeModal(true);
+                          }}
+                          className={`cursor-pointer gap-2 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 focus:text-rose-300 focus:bg-rose-500/10 ${
+                            !isEligibleToRevoke ? 'opacity-50 cursor-not-allowed' : ''
+                          }`}
+                          title={
+                            !isEligibleToRevoke
+                              ? effectivePaid > 0
+                                ? `Return ${fmt(effectivePaid)} in cleared payments before revoking this invoice.`
+                                : `Resolve pending cheques (${fmt(pendingCheques)}) before revoking this invoice.`
+                              : 'Revoke this commercial invoice'
+                          }
+                        >
+                          <RotateCcw className="h-3.5 w-3.5 text-rose-400" />
+                          <span>Revoke Invoice</span>
+                          {!isEligibleToRevoke && (
+                            <span className="text-[10px] text-muted-foreground ml-auto">Blocked</span>
+                          )}
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+
+                {/* For non-commercial sales (POS), keep Revoke accessible if applicable */}
+                {!isCommercialSale && posReceiptDetails && posReceiptDetails.sale.invoice_number && !isRevoked && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!isEligibleToRevoke}
+                    onClick={() => {
+                      setRevokeReason('Invoice issued in error');
+                      setRevokeNotes('');
+                      setRevokeActionMessage(null);
+                      setShowRevokeModal(true);
+                    }}
+                    className="gap-1 text-xs border-rose-500/30 text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 font-bold disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    title={
+                      !isEligibleToRevoke
+                        ? effectivePaid > 0
+                          ? `Return ${fmt(effectivePaid)} in cleared payments before revoking this invoice.`
+                          : `Resolve pending cheques (${fmt(pendingCheques)}) before revoking this invoice.`
+                        : 'Revoke this invoice'
+                    }
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" /> Revoke Invoice
+                  </Button>
+                )}
+              </div>
+
+              {/* Right Side: Contextual Action Buttons */}
+              <div className="flex items-center gap-2">
                 {posReceiptDetails && (
                   <>
-                    {!salePaymentSummary?.is_revoked && !posReceiptDetails.sale.invoice_revoked_at && (
+                    {/* Secondary Document Actions: Send & Print Invoice */}
+                    {!isRevoked && (
                       <Button
-                        onClick={() => {
-                          const name = posReceiptDetails.sale.customer_name || '';
-                          const phone = posReceiptDetails.sale.customer_phone || '';
-                          const email = posReceiptDetails.sale.customer_email || '';
-
-                          setWorkflowName(name);
-                          setWorkflowPhone(phone);
-                          setWorkflowEmail(email && !email.endsWith('@customer.local') && email !== 'customer@ftc.lk' ? email : '');
-                          setWorkflowMessage(null);
-                          setWorkflowTab('email');
-                          setShowSendWorkflow(true);
-                        }}
-                        className="bg-emerald-600 hover:bg-emerald-500 text-white gap-1 text-xs font-bold cursor-pointer"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleOpenSendWorkflow}
+                        className="gap-1 text-xs border-border text-foreground hover:bg-muted font-bold cursor-pointer"
+                        title="Send Invoice via Email or SMS"
                       >
-                        <Mail className="h-3.5 w-3.5" /> Send Invoice
+                        <Mail className="h-3.5 w-3.5 text-blue-400" /> Send Invoice
                       </Button>
                     )}
                     <Button
@@ -1892,22 +2265,67 @@ export default function SalesWorkspace({
                       size="sm"
                       onClick={handlePrintInvoice}
                       className="gap-1 text-xs border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10 hover:text-indigo-300 font-bold cursor-pointer"
+                      title="Print Commercial A4 Invoice"
                     >
                       <FileText className="h-3.5 w-3.5" /> Print Invoice
                     </Button>
-                    <Button
-                      onClick={handleReprintReceipt}
-                      className="bg-blue-600 hover:bg-blue-500 text-white gap-1 text-xs font-bold cursor-pointer"
-                    >
-                      <Printer className="h-3.5 w-3.5" /> Thermal Receipt
-                    </Button>
+
+                    {/* Commercial Contextual Actions */}
+                    {isCommercialSale && (
+                      <>
+                        {/* Primary 1: Record Payment if balance/amount available */}
+                        {canRecordPayment && (
+                          <Button
+                            onClick={handleOpenRecordPaymentModal}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white gap-1.5 text-xs font-bold cursor-pointer shadow-xs"
+                            title="Record Payment Installment"
+                          >
+                            <Banknote className="h-3.5 w-3.5" /> Record Payment
+                          </Button>
+                        )}
+
+                        {/* Primary 2: Goods Handover if unfulfilled items remain */}
+                        {hasFulfillmentRemaining && !isRevoked && (
+                          <Button
+                            onClick={() => setShowHandoverModal(true)}
+                            className="bg-indigo-600 hover:bg-indigo-500 text-white gap-1.5 text-xs font-bold cursor-pointer shadow-xs"
+                            title="Perform Physical Goods Handover"
+                          >
+                            <PackageCheck className="h-3.5 w-3.5" /> {isPartiallyHandedOver ? 'Hand Over Remaining' : 'Hand Over Products'}
+                          </Button>
+                        )}
+                        {/* NOTE: If fully handed over, DO NOT show disabled "Fully Handed Over" button. The header badge already communicates this! */}
+                        {/* NOTE: Thermal Receipt is strictly omitted for commercial sales! */}
+                      </>
+                    )}
+
+                    {/* POS Contextual Actions (Non-commercial sales ONLY) */}
+                    {!isCommercialSale && (
+                      <>
+                        {canRecordPayment && (
+                          <Button
+                            onClick={handleOpenRecordPaymentModal}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white gap-1.5 text-xs font-bold cursor-pointer shadow-xs"
+                          >
+                            <Banknote className="h-3.5 w-3.5" /> Record Payment
+                          </Button>
+                        )}
+                        <Button
+                          onClick={handleReprintReceipt}
+                          className="bg-blue-600 hover:bg-blue-500 text-white gap-1.5 text-xs font-bold cursor-pointer"
+                        >
+                          <Printer className="h-3.5 w-3.5" /> Thermal Receipt
+                        </Button>
+                      </>
+                    )}
                   </>
                 )}
               </div>
             </div>
           </div>
         </div>
-      )}
+      );
+    })()}
 
       {/* Record Additional Payment Modal */}
       {showRecordPaymentModal && posReceiptDetails && salePaymentSummary && (
@@ -2632,6 +3050,41 @@ export default function SalesWorkspace({
             </div>
           </div>
         </div>
+      )}
+      {/* Commercial Goods Handover Modal */}
+      {showHandoverModal && posReceiptDetails && (
+        <CommercialHandoverModal
+          isOpen={showHandoverModal}
+          onClose={() => setShowHandoverModal(false)}
+          sale={posReceiptDetails.sale}
+          items={posReceiptDetails.items}
+          onSuccess={(fulfillmentRecord) => {
+            if (selectedPosSaleId) {
+              refreshFulfillmentsAndSale(selectedPosSaleId);
+            }
+          }}
+          onPrintInvoice={() => handlePrintInvoice()}
+          onOpenDeliveryNote={(record) => {
+            setSelectedFulfillmentForDN(record);
+            setShowDeliveryNoteModal(true);
+          }}
+          onOpenHistory={() => {
+            // Modal already shows history in background drawer
+          }}
+        />
+      )}
+
+      {/* Delivery Note Modal */}
+      {showDeliveryNoteModal && (
+        <DeliveryNoteModal
+          isOpen={showDeliveryNoteModal}
+          onClose={() => {
+            setShowDeliveryNoteModal(false);
+            setSelectedFulfillmentForDN(null);
+          }}
+          fulfillment={selectedFulfillmentForDN}
+          sale={posReceiptDetails?.sale || null}
+        />
       )}
     </div>
   );

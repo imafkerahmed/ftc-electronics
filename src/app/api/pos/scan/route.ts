@@ -1,10 +1,23 @@
 import { NextResponse } from 'next/server';
 import { getAdminSupabase } from '@/lib/supabase-admin';
+import { getVerifiedPosSession } from '@/lib/pos-server-session';
+import { checkPermission } from '@/app/actions/admin';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
+    const posSession = await getVerifiedPosSession();
+    let adminAuthorized = false;
+    if (!posSession) {
+      const perm = await checkPermission('orders', 'read');
+      adminAuthorized = perm.allowed;
+    }
+
+    if (!posSession && !adminAuthorized) {
+      return NextResponse.json({ success: false, error: 'Unauthorized: Staff or admin session required.' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const q = (searchParams.get('q') || '').trim();
 

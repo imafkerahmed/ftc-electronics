@@ -1738,6 +1738,7 @@ export const pbSales = {
     const { data } = await client
       .from("sales")
       .select("*")
+      .is("quotation_id", null)
       .order("created_at", { ascending: false })
       .limit(limit);
     return data || [];
@@ -1759,309 +1760,74 @@ export const pbSales = {
       .eq("sale_id", saleId);
     return data || [];
   },
-  async createSale(payload: any) {
+  async createSale(payload: any, idempotencyKey?: string) {
     const client = getClient(true);
     const { items = [], ...saleData } = payload;
-    const totalItemsCount = items.reduce(
-      (sum: number, item: any) => sum + (item.quantity || 1),
-      0,
-    );
-    const receiptNo =
-      saleData.receipt_number ||
-      `FTC-POS-${Date.now().toString(36).toUpperCase()}`;
 
-    // 1. Pre-validation and reservation planning
-    // Track assigned unit IDs for serialized inventory and counter deductions for non-serialized stock
-    const assignedUnitIds: string[] = [];
-    const claimedUnitIdSet = new Set<string>();
-    const affectedProductIds = new Set<string>();
-    const counterDeductions = new Map<string, number>();
+    const formattedItems = items.map((i: any) => ({
+      product_id: i.product_id || i.productId,
+      product_name: i.product_name || i.productName || "Product",
+      sku: i.sku || "",
+      unit_price: Number(i.unit_price ?? i.unitPrice ?? 0),
+      item_discount: Number(i.item_discount ?? i.itemDiscount ?? 0),
+      unit_cost: Number(i.unit_cost ?? i.unitCost ?? 0),
+      quantity: Number(i.quantity || 1),
+      line_total: Number(i.line_total ?? i.lineTotal ?? 0),
+      unit_id: i.unit_id || i.unitId || null,
+      unit_barcode: i.unit_barcode || i.unitBarcode || null,
+      unit_serial: i.unit_serial || i.unitSerial || null,
+      image_url: i.image_url || i.imageUrl || null,
+      category: i.category || null,
+    }));
 
-    for (const item of items) {
-      const pId = item.product_id || item.productId;
-      if (pId) affectedProductIds.add(pId);
+    const finalIdempotencyKey = idempotencyKey || saleData.idempotency_key || null;
 
-      const uId = item.unit_id || item.unitId;
-      const barcode = item.unit_barcode || item.unitBarcode;
-      const serial = item.unit_serial || item.unitSerial;
-      const qty = item.quantity || 1;
-
-      if (uId && /^[0-9a-f-]{36}$/i.test(uId)) {
-        if (claimedUnitIdSet.has(uId)) {
-          throw new Error(
-            `Stock unit ${uId} is selected multiple times in this sale.`,
-          );
-        }
-        const { data: unit, error: unitErr } = await client
-          .from("stock_management")
-          .select("id, status, product_id")
-          .eq("id", uId)
-          .maybeSingle();
-
-        if (unitErr || !unit || unit.status !== "available") {
-          throw new Error(
-            `Specific stock unit (${uId}) is no longer available.`,
-          );
-        }
-        claimedUnitIdSet.add(unit.id);
-        assignedUnitIds.push(unit.id);
-        if (unit.product_id) affectedProductIds.add(unit.product_id);
-      } else if (barcode) {
-        const { data: unit, error: unitErr } = await client
-          .from("stock_management")
-          .select("id, status, product_id")
-          .eq("barcode", barcode)
-          .eq("status", "available")
-          .maybeSingle();
-
-        if (unitErr || !unit || claimedUnitIdSet.has(unit.id)) {
-          throw new Error(`Barcode unit (${barcode}) is no longer available.`);
-        }
-        claimedUnitIdSet.add(unit.id);
-        assignedUnitIds.push(unit.id);
-        if (unit.product_id) affectedProductIds.add(unit.product_id);
-      } else if (serial) {
-        const { data: unit, error: unitErr } = await client
-          .from("stock_management")
-          .select("id, status, product_id")
-          .eq("serial_number", serial)
-          .eq("status", "available")
-          .maybeSingle();
-
-        if (unitErr || !unit || claimedUnitIdSet.has(unit.id)) {
-          throw new Error(`Serial unit (${serial}) is no longer available.`);
-        }
-        claimedUnitIdSet.add(unit.id);
-        assignedUnitIds.push(unit.id);
-        if (unit.product_id) affectedProductIds.add(unit.product_id);
-      } else if (pId) {
-        // Generic product sale: check for serialized unit rows first
-        const { data: avail, error: availErr } = await client
-          .from("stock_management")
-          .select("id")
-          .eq("product_id", pId)
-          .eq("status", "available")
-          .limit(qty + claimedUnitIdSet.size);
-
-        if (availErr) {
-          throw new Error(
-            `Failed to query stock for product ${pId}: ${availErr.message}`,
-          );
-        }
-
-        const availableUnclaimed = (avail || []).filter(
-          (u) => !claimedUnitIdSet.has(u.id),
-        );
-        if (availableUnclaimed.length < qty) {
-          // Counter-only inventory model: verify count_in_stock
-          const { data: prod, error: prodErr } = await client
-            .from("products")
-            .select("count_in_stock")
-            .eq("id", pId)
-            .maybeSingle();
-          if (prodErr || !prod || (prod.count_in_stock ?? 0) < qty) {
-            throw new Error(
-              `Insufficient stock for product (${pId}). Requested: ${qty}, Available: ${prod?.count_in_stock ?? 0}`,
-            );
-          }
-          // Product uses counter-only stock; exclude from serialized-unit recount
-          affectedProductIds.delete(pId);
-          counterDeductions.set(pId, (counterDeductions.get(pId) || 0) + qty);
-        } else {
-          for (let i = 0; i < qty; i++) {
-            const uid = availableUnclaimed[i].id;
-            claimedUnitIdSet.add(uid);
-            assignedUnitIds.push(uid);
-          }
-        }
-      }
-    }
-
-    // 2. Insert the sale record
-    const fullSaleData = {
-      status: "completed",
-      receipt_number: receiptNo,
-      date: saleData.date || new Date().toISOString(),
-      items_count: totalItemsCount,
-      cashier_name: saleData.cashier_name || "Cashier",
+    const pSaleData = {
       cashier_id: saleData.cashier_id || null,
+      cashier_name: saleData.cashier_name || "Staff",
+      customer_id: saleData.customer_id || null,
       customer_name: saleData.customer_name || null,
       customer_phone: saleData.customer_phone || null,
       customer_email: saleData.customer_email || null,
-      customer_id: saleData.customer_id || null,
-      subtotal: saleData.subtotal || 0,
-      discount: saleData.discount || 0,
-      tax_amount: saleData.tax_amount || 0,
-      total: saleData.total || 0,
       payment_method: saleData.payment_method || "cash",
-      cash_tendered: saleData.cash_tendered || 0,
-      change_due: saleData.change_due || 0,
+      cash_tendered: Number(saleData.cash_tendered || 0),
+      change_due: Number(saleData.change_due || 0),
       notes: saleData.notes || null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      receipt_number: saleData.receipt_number || null,
+      date: saleData.date || new Date().toISOString(),
+      subtotal: Number(saleData.subtotal || 0),
+      discount: Number(saleData.discount || 0),
+      tax_amount: Number(saleData.tax_amount || 0),
+      total: Number(saleData.total || 0),
+      idempotency_key: finalIdempotencyKey,
     };
 
-    const { data: sale, error: saleErr } = await client
-      .from("sales")
-      .insert(fullSaleData)
-      .select()
-      .single();
-    if (saleErr) throw saleErr;
+    const { data: rpcRes, error: rpcErr } = await client.rpc("create_pos_sale_atomic", {
+      p_sale_data: pSaleData,
+      p_items: formattedItems,
+    });
 
-    // 3. Insert sale_items and mutate inventory with rollback guard
-    const createdItems: any[] = [];
-    try {
-      if (items.length > 0) {
-        const itemsToInsert = items.map((item: any) => ({
-          sale_id: sale.id,
-          product_id: item.product_id || item.productId || null,
-          product_name: item.product_name || item.productName || "Product",
-          sku: item.sku || "",
-          unit_price: item.unit_price ?? item.unitPrice ?? 0,
-          item_discount: item.item_discount ?? item.itemDiscount ?? 0,
-          unit_cost: item.unit_cost ?? item.unitCost ?? 0,
-          quantity: item.quantity || 1,
-          line_total: item.line_total ?? item.lineTotal ?? 0,
-          unit_id: item.unit_id || item.unitId || null,
-          unit_barcode: item.unit_barcode || item.unitBarcode || null,
-          unit_serial: item.unit_serial || item.unitSerial || null,
-          image_url: item.image_url || item.imageUrl || null,
-          category: item.category || null,
-        }));
-
-        const { data: inserted, error: itemsErr } = await client
-          .from("sale_items")
-          .insert(itemsToInsert)
-          .select();
-        if (itemsErr) throw itemsErr;
-        if (inserted) createdItems.push(...inserted);
-
-        // 3a. Batch claim stock_management units with strict available status guard to prevent race conditions
-        if (assignedUnitIds.length > 0) {
-          const { data: claimed, error: stockErr } = await client
-            .from("stock_management")
-            .update({ status: "sold", order_id: sale.id })
-            .in("id", assignedUnitIds)
-            .eq("status", "available")
-            .select("id");
-          if (stockErr) throw stockErr;
-
-          if ((claimed?.length ?? 0) !== assignedUnitIds.length) {
-            throw new Error(
-              "One or more stock units were already claimed by another concurrent transaction.",
-            );
-          }
-        }
-
-        // 3b. Apply counter-only stock deductions safely
-        for (const [pId, qtyToDeduct] of counterDeductions.entries()) {
-          const { data: prod, error: pGetErr } = await client
-            .from("products")
-            .select("count_in_stock")
-            .eq("id", pId)
-            .single();
-          if (pGetErr) throw pGetErr;
-          const currentStock = prod?.count_in_stock ?? 0;
-          if (currentStock < qtyToDeduct) {
-            throw new Error(
-              `Insufficient stock for counter-only product ${pId}.`,
-            );
-          }
-          const newStock = Math.max(0, currentStock - qtyToDeduct);
-          const { error: pUpdErr } = await client
-            .from("products")
-            .update({ count_in_stock: newStock })
-            .eq("id", pId);
-          if (pUpdErr) throw pUpdErr;
-        }
-
-        // 3c. Recount available stock for affected products with serialized units
-        for (const pId of Array.from(affectedProductIds)) {
-          const { count, error: countErr } = await client
-            .from("stock_management")
-            .select("id", { count: "exact", head: true })
-            .eq("product_id", pId)
-            .eq("status", "available");
-          if (countErr) throw countErr;
-          if (typeof count === "number") {
-            const { error: pCountErr } = await client
-              .from("products")
-              .update({ count_in_stock: count })
-              .eq("id", pId);
-            if (pCountErr) throw pCountErr;
-          }
-        }
-      }
-    } catch (mutationErr: any) {
-      logError(
-        "[createSale] Failure during mutation, rolling back sale:",
-        mutationErr,
-      );
-      if (assignedUnitIds.length > 0) {
-        await client
-          .from("stock_management")
-          .update({ status: "available", order_id: null })
-          .in("id", assignedUnitIds)
-          .eq("order_id", sale.id);
-      }
-      for (const [pId, qtyToRestore] of counterDeductions.entries()) {
-        const { data: pData } = await client
-          .from("products")
-          .select("count_in_stock")
-          .eq("id", pId)
-          .maybeSingle();
-        if (pData) {
-          await client
-            .from("products")
-            .update({
-              count_in_stock: (pData.count_in_stock ?? 0) + qtyToRestore,
-            })
-            .eq("id", pId);
-        }
-      }
-      await client.from("sale_items").delete().eq("sale_id", sale.id);
-      await client.from("sales").delete().eq("id", sale.id);
-      throw new Error(`Failed to complete POS sale: ${mutationErr.message}`);
+    if (rpcErr) {
+      logError("[createSale] create_pos_sale_atomic error:", rpcErr);
+      throw new Error(rpcErr.message || "Failed to complete POS sale.");
     }
 
-    return { sale, items: createdItems };
-  },
-  async voidSale(id: string) {
-    const client = getClient(true);
-    const { data: res, error } = await client
-      .from("sales")
-      .update({ status: "voided", updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .select()
-      .single();
-    if (error) throw error;
+    const saleId = rpcRes.sale_id;
+    const sale = await this.getById(saleId);
+    const createdItems = await this.getItemsBySale(saleId);
 
-    // Release linked units back to available
-    const { data: linkedUnits } = await client
-      .from("stock_management")
-      .select("id, product_id")
-      .eq("order_id", id);
-    if (linkedUnits && linkedUnits.length > 0) {
-      await client
-        .from("stock_management")
-        .update({ status: "available", order_id: null })
-        .eq("order_id", id);
-      const affectedProducts = Array.from(
-        new Set(linkedUnits.map((u: any) => u.product_id).filter(Boolean)),
-      );
-      for (const pId of affectedProducts) {
-        const { count } = await client
-          .from("stock_management")
-          .select("id", { count: "exact", head: true })
-          .eq("product_id", pId)
-          .eq("status", "available");
-        if (typeof count === "number") {
-          await client
-            .from("products")
-            .update({ count_in_stock: count })
-            .eq("id", pId);
-        }
-      }
+    return { sale, items: createdItems, ...rpcRes };
+  },
+  async voidSale(id: string, voidedBy = "Manager", reason = "Voided via POS") {
+    const client = getClient(true);
+    const { data: res, error } = await client.rpc("void_pos_sale_atomic", {
+      p_sale_id: id,
+      p_voided_by: voidedBy,
+      p_void_reason: reason,
+    });
+    if (error) {
+      logError("[voidSale] void_pos_sale_atomic error:", error);
+      throw new Error(error.message || "Failed to void sale.");
     }
     return res;
   },

@@ -243,6 +243,8 @@ export interface PBSale extends PBRecord {
   invoice_revoked_by?: string;
   invoice_revoke_reason?: string;
   invoice_revoke_notes?: string;
+  payment_status?: PaymentStatus;
+  isPaid?: boolean;
 }
 
 export interface PBSaleItem extends PBRecord {
@@ -258,8 +260,12 @@ export interface PBSaleItem extends PBRecord {
   unit_id?: string;
   unit_barcode?: string;
   unit_serial?: string;
+  serial_numbers?: string[];
   image_url?: string;
   category?: string;
+  quantity_fulfilled?: number;
+  inventory_tracking_type?: 'counter' | 'unit';
+  count_in_stock?: number;
 }
 
 // ─── Checkout Payload ─────────────────────────────────────────────────────────

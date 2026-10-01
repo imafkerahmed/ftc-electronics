@@ -5,6 +5,7 @@ import { Lock, History, RefreshCw, User } from "lucide-react";
 import type { PosCartItem, PosEmployeeSession } from "@/types/pos";
 import {
   getPosSession,
+  setPosSession,
   clearPosSession,
   isPosSessionValid,
 } from "@/lib/pos-session";
@@ -17,7 +18,7 @@ import PosPaymentModal from "@/components/pos/pos-payment-modal";
 import { clearAllClientSessions } from "@/lib/clear-client-storage";
 import Link from "next/link";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { validatePosCouponAction } from "@/app/actions/admin";
+import { validatePosCouponAction, getPosSessionAction, logoutPosEmployeeAction } from "@/app/actions/admin";
 
 const POS_CART_STORAGE_KEY = 'ftc_pos_cart_v1';
 
@@ -67,9 +68,24 @@ export default function PosPage() {
     updateDate();
     const dateInterval = setInterval(updateDate, 60000);
 
-    const s = getPosSession();
-    if (isPosSessionValid(s)) setSession(s);
-    setSessionChecked(true);
+    // Authoritatively derive session from server HttpOnly cookie first
+    getPosSessionAction()
+      .then((res) => {
+        if (res.success && res.session) {
+          setSession(res.session);
+          setPosSession(res.session);
+        } else {
+          clearPosSession();
+          setSession(null);
+        }
+      })
+      .catch(() => {
+        clearPosSession();
+        setSession(null);
+      })
+      .finally(() => {
+        setSessionChecked(true);
+      });
 
     try {
       const saved = localStorage.getItem(POS_CART_STORAGE_KEY);
@@ -352,9 +368,10 @@ export default function PosPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
+            onClick={async () => {
               clearPosSession();
               clearAllClientSessions();
+              await logoutPosEmployeeAction();
               setSession(null);
             }}
             title="Switch cashier"

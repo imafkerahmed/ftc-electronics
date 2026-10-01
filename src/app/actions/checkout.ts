@@ -718,22 +718,34 @@ export async function deductStockForConfirmedOrderAction(orderIdRecord: string) 
       const qty = typeof item.quantity === 'number' && item.quantity > 0 ? item.quantity : 1;
       if (!pId) continue;
 
-      // Find available units in stock_management
-      const { data: availUnits, error: availErr } = await supabase
-        .from('stock_management')
-        .select('id')
-        .eq('product_id', pId)
-        .eq('status', 'available')
-        .limit(qty);
+      // 1. Fetch authoritative product tracking model
+      const { data: prod, error: prodErr } = await supabase
+        .from('products')
+        .select('count_in_stock, inventory_tracking_type')
+        .eq('id', pId)
+        .single();
 
-      if (availErr) {
-        throw new Error(`Failed to query stock units for product ${pId}: ${availErr.message}`);
+      if (prodErr || !prod) {
+        throw new Error(`Product ${pId} not found for stock deduction.`);
       }
 
-      if (availUnits && availUnits.length > 0) {
-        // Unit-backed product
-        if (availUnits.length < qty) {
-          throw new Error(`Insufficient unit stock for product ${pId}. Required: ${qty}, Available: ${availUnits.length}`);
+      if (prod.inventory_tracking_type === 'unit') {
+        // Individually Tracked Unit product: strictly claim available units
+        const { data: availUnits, error: availErr } = await supabase
+          .from('stock_management')
+          .select('id')
+          .eq('product_id', pId)
+          .eq('status', 'available')
+          .limit(qty);
+
+        if (availErr) {
+          throw new Error(`Failed to query stock units for product ${pId}: ${availErr.message}`);
+        }
+
+        if (!availUnits || availUnits.length < qty) {
+          throw new Error(
+            `Insufficient unit stock for product ${pId}. Required: ${qty}, Available: ${availUnits?.length ?? 0}`
+          );
         }
         unitBackedProductIds.add(pId);
         const unitIds = availUnits.map((u) => u.id);
@@ -755,15 +767,6 @@ export async function deductStockForConfirmedOrderAction(orderIdRecord: string) 
         }
       } else {
         // Counter-only product: verify current count_in_stock
-        const { data: prod, error: prodErr } = await supabase
-          .from('products')
-          .select('count_in_stock')
-          .eq('id', pId)
-          .single();
-
-        if (prodErr || !prod) {
-          throw new Error(`Product ${pId} not found for stock deduction.`);
-        }
         const currentStock = prod.count_in_stock ?? 0;
         if (currentStock < qty) {
           throw new Error(`Insufficient counter stock for product ${pId}. Required: ${qty}, Available: ${currentStock}`);

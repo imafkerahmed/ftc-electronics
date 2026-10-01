@@ -321,7 +321,7 @@ export default function QuotationsWorkspace({
   const [validDays, setValidDays] = useState(14);
   const [notes, setNotes] = useState('Quotation valid for 14 days from issue date. Prices subject to stock availability.');
   const [lineItems, setLineItems] = useState<InvoiceItem[]>([
-    { name: '', qty: 1, unitPrice: 0 },
+    { name: '', qty: 1, unitPrice: 0, product_id: null },
   ]);
   const [globalDiscount, setGlobalDiscount] = useState<number>(0);
   const [globalDiscountType, setGlobalDiscountType] = useState<'flat' | 'percent'>('flat');
@@ -708,7 +708,17 @@ export default function QuotationsWorkspace({
         ? Math.max(1, Math.round((new Date(fullQuote.validUntil).getTime() - Date.now()) / 86400000))
         : 14;
       setValidDays(remaining);
-      setLineItems(fullQuote.items && fullQuote.items.length > 0 ? fullQuote.items : [{ name: '', qty: 1, unitPrice: 0 }]);
+      setLineItems(
+        fullQuote.items && fullQuote.items.length > 0
+          ? fullQuote.items.map((it: any) => ({
+              ...it,
+              product_id: it.product_id || it.productId || null,
+              name: it.name || '',
+              qty: it.qty || it.quantity || 1,
+              unitPrice: it.unitPrice || it.unit_price || 0,
+            }))
+          : [{ name: '', qty: 1, unitPrice: 0, product_id: null }]
+      );
       setGlobalDiscount(fullQuote.discountValue !== undefined ? fullQuote.discountValue : (fullQuote.discountAmount || 0));
       setGlobalDiscountType(fullQuote.discountType || 'flat');
     } else {
@@ -723,7 +733,7 @@ export default function QuotationsWorkspace({
       setCustAddress('');
       setValidDays(14);
       setNotes('Quotation valid for 14 days from issue date. Prices subject to stock availability.');
-      setLineItems([{ name: '', qty: 1, unitPrice: 0 }]);
+      setLineItems([{ name: '', qty: 1, unitPrice: 0, product_id: null }]);
       setGlobalDiscount(0);
       setGlobalDiscountType('flat');
     }
@@ -732,7 +742,7 @@ export default function QuotationsWorkspace({
   };
 
   const handleAddLineItem = () => {
-    setLineItems((prev) => [...prev, { name: '', qty: 1, unitPrice: 0 }]);
+    setLineItems((prev) => [...prev, { name: '', qty: 1, unitPrice: 0, product_id: null }]);
   };
 
   const handleRemoveLineItem = (index: number) => {
@@ -829,8 +839,12 @@ export default function QuotationsWorkspace({
         items: validLines.map((i) => {
           const validQty = Math.floor(Number(i.qty));
           const validPrice = Number(i.unitPrice) || 0;
+          const cleanPid = i.product_id && typeof i.product_id === 'string' && /^[0-9a-f-]{36}$/i.test(i.product_id.trim())
+            ? i.product_id.trim()
+            : null;
           return {
             ...i,
+            product_id: cleanPid,
             name: i.name.trim(),
             qty: validQty,
             unitPrice: validPrice,
@@ -1272,7 +1286,7 @@ export default function QuotationsWorkspace({
                           {quote.linkedInvoiceNumber && (
                             <span
                               className="font-mono text-[10px] text-muted-foreground hover:text-foreground cursor-pointer underline decoration-dotted"
-                              onClick={() => onNavigateTab?.('sales', { search: quote.linkedInvoiceNumber! })}
+                              onClick={() => onNavigateTab?.('sales', { id: quote.linkedSaleId || undefined, search: quote.linkedInvoiceNumber! })}
                               title="Click to view linked invoice in Sales"
                             >
                               {quote.linkedInvoiceNumber}
@@ -1410,7 +1424,7 @@ export default function QuotationsWorkspace({
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => onNavigateTab?.('sales', { search: quote.linkedInvoiceNumber! })}
+                            onClick={() => onNavigateTab?.('sales', { id: quote.linkedSaleId || undefined, search: quote.linkedInvoiceNumber! })}
                             className="h-8 text-[11px] font-bold gap-1 text-blue-400 border-blue-500/30 hover:bg-blue-500/10 rounded-lg cursor-pointer"
                             title={`View Commercial Invoice #${quote.linkedInvoiceNumber} in Sales`}
                           >
@@ -1942,8 +1956,16 @@ export default function QuotationsWorkspace({
 
                           const selectProduct = (prod: any) => {
                             const retailPrice = Number(prod.discount_price || prod.discountPrice || prod.price) || 0;
-                            handleUpdateLineItem(idx, 'name', prod.name);
-                            handleUpdateLineItem(idx, 'unitPrice', retailPrice);
+                            setLineItems((prev) => {
+                              const updated = [...prev];
+                              updated[idx] = {
+                                ...updated[idx],
+                                product_id: prod.id,
+                                name: prod.name,
+                                unitPrice: retailPrice,
+                              };
+                              return updated;
+                            });
                             setFocusedLineItemIndex(null);
                             setActiveSuggestionIdx(-1);
                           };
@@ -1963,7 +1985,16 @@ export default function QuotationsWorkspace({
                                     : undefined
                                 }
                                 onChange={(e) => {
-                                  handleUpdateLineItem(idx, 'name', e.target.value);
+                                  setLineItems((prev) => {
+                                    const updated = [...prev];
+                                    const currentItem = updated[idx];
+                                    updated[idx] = {
+                                      ...currentItem,
+                                      name: e.target.value,
+                                      product_id: null, // Clear product_id on manual name typing to prevent stale catalog association
+                                    };
+                                    return updated;
+                                  });
                                   setActiveSuggestionIdx(-1);
                                 }}
                                 onFocus={() => {
@@ -2006,6 +2037,12 @@ export default function QuotationsWorkspace({
                                 className="text-xs bg-background"
                                 required
                               />
+                              {item.product_id && (
+                                <div className="flex items-center gap-1.5 mt-1 text-[10px] text-emerald-500 font-medium">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                  <span>Catalog Linked</span>
+                                </div>
+                              )}
                               {focusedLineItemIndex === idx && term.length === 1 && (
                                 <div className="absolute z-50 left-0 top-full mt-1 w-[160%] min-w-[320px] max-w-[500px] bg-background border border-border rounded-lg p-2 text-xs text-muted-foreground shadow-lg">
                                   Type at least 2 characters to search...
@@ -2521,7 +2558,7 @@ export default function QuotationsWorkspace({
                           const targetInv = convertedSale.invoiceNumber || convertedSale.receiptNumber || '';
                           setConvertingQuote(null);
                           setConvertedSale(null);
-                          onNavigateTab('sales', { search: targetInv });
+                          onNavigateTab('sales', { id: convertedSale.saleId, search: targetInv });
                         }}
                         className="h-9 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
                       >
@@ -3009,7 +3046,7 @@ export default function QuotationsWorkspace({
                               variant="outline"
                               onClick={() => {
                                 setHistoryQuoteId(null);
-                                onNavigateTab('sales', { search: historyData.linkedInvoice.invoiceNumber });
+                                onNavigateTab('sales', { id: historyData.linkedInvoice.id, search: historyData.linkedInvoice.invoiceNumber });
                               }}
                               className="h-7 text-[10px] font-bold gap-1 text-blue-400 border-blue-500/30 hover:bg-blue-500/10 cursor-pointer"
                             >

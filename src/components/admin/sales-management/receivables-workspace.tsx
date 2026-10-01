@@ -459,6 +459,8 @@ export default function ReceivablesWorkspace({
           unitPrice: i.unit_price,
           discount: i.item_discount || undefined,
           serialNumber: i.unit_serial || undefined,
+          serialNumbers: i.serial_numbers && i.serial_numbers.length > 0 ? i.serial_numbers : (i.unit_serial ? [i.unit_serial] : undefined),
+          quantityFulfilled: typeof i.quantity_fulfilled === 'number' ? i.quantity_fulfilled : undefined,
         })),
         subtotal: sale.subtotal,
         taxAmount: sale.tax_amount || 0,
@@ -843,9 +845,13 @@ export default function ReceivablesWorkspace({
                       {/* Invoice No */}
                       <td className="p-3.5">
                         <div className="flex flex-col">
-                          <span className="font-mono font-bold text-foreground text-xs">
+                          <button
+                            onClick={() => onNavigateTab ? onNavigateTab('sales', { id: rec.id, search: rec.invoice_number || undefined }) : handleOpenSaleDetails(rec)}
+                            className="font-mono font-bold text-blue-400 hover:text-blue-300 text-xs text-left hover:underline cursor-pointer"
+                            title="Open Central Commercial Invoice Workspace"
+                          >
                             {rec.invoice_number || `INV-${rec.id.slice(-6).toUpperCase()}`}
-                          </span>
+                          </button>
                           <span className="text-[10px] font-mono text-muted-foreground">
                             {rec.receipt_number}
                           </span>
@@ -984,7 +990,7 @@ export default function ReceivablesWorkspace({
                               onClick={() => handleOpenRecordPayment(rec)}
                               className="h-7 text-[10px] font-bold gap-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-2.5 cursor-pointer shadow-xs"
                             >
-                              <Banknote className="h-3 w-3" /> Record Pay
+                              <Banknote className="h-3 w-3" /> Record Payment
                             </Button>
                           )}
                           <Button
@@ -997,13 +1003,14 @@ export default function ReceivablesWorkspace({
                             <Printer className="h-3.5 w-3.5" />
                           </Button>
                           <Button
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
-                            onClick={() => handleOpenSaleDetails(rec)}
-                            title="View Invoice & Ledger Details"
-                            className="h-7 w-7 p-0 rounded-lg cursor-pointer text-blue-400 hover:text-blue-300"
+                            onClick={() => onNavigateTab ? onNavigateTab('sales', { id: rec.id, search: rec.invoice_number || undefined }) : handleOpenSaleDetails(rec)}
+                            title="Open Central Commercial Invoice Workspace"
+                            className="h-7 px-2 text-[10px] font-bold gap-1 rounded-lg cursor-pointer text-blue-400 hover:text-blue-300 border-blue-500/30 hover:bg-blue-500/10"
                           >
-                            <ArrowUpRight className="h-3.5 w-3.5" />
+                            <span>View Invoice</span>
+                            <ArrowUpRight className="h-3 w-3" />
                           </Button>
                         </div>
                       </td>

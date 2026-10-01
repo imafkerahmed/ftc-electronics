@@ -30,6 +30,8 @@ export interface PBProduct extends PBRecord {
   rating: number;
   numReviews: number;
   countInStock: number;
+  inventoryTrackingType?: 'counter' | 'unit';
+  inventory_tracking_type?: 'counter' | 'unit';
   isFeatured: boolean;
   isPreOrder: boolean;
   currency: "USD" | "LKR";
@@ -612,6 +614,8 @@ export function pbProductToProduct(record: PBProduct, pbUrl: string): Product {
     rating: record.rating || 0,
     numReviews: record.numReviews || 0,
     countInStock: record.countInStock || 0,
+    inventoryTrackingType: (record as any).inventory_tracking_type || (record as any).inventoryTrackingType || 'counter',
+    inventory_tracking_type: (record as any).inventory_tracking_type || (record as any).inventoryTrackingType || 'counter',
     isFeatured: record.isFeatured || false,
     isPreOrder: record.isPreOrder || false,
     currency: record.currency || "LKR",

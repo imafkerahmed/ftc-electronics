@@ -788,14 +788,25 @@ export default function ChequesWorkspace({
 
                       {/* Invoice # */}
                       <td className="py-3.5 px-4">
-                        <Link
-                          href={`/admin/sales?search=${encodeURIComponent(invNum)}`}
-                          className="font-mono font-bold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1"
-                          title="View Invoice in Sales Tracker"
-                        >
-                          {invNum}
-                          <ArrowUpRight className="h-3 w-3 opacity-70" />
-                        </Link>
+                        {onNavigateTab ? (
+                          <button
+                            onClick={() => onNavigateTab('sales', { id: item.sale_id || undefined, search: invNum })}
+                            className="font-mono font-bold text-blue-400 hover:text-blue-300 hover:underline inline-flex items-center gap-1 cursor-pointer text-left"
+                            title="Open Central Commercial Invoice Workspace"
+                          >
+                            {invNum}
+                            <ArrowUpRight className="h-3 w-3 opacity-70" />
+                          </button>
+                        ) : (
+                          <Link
+                            href={`/admin/sales?search=${encodeURIComponent(invNum)}`}
+                            className="font-mono font-bold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1"
+                            title="View Invoice in Sales Tracker"
+                          >
+                            {invNum}
+                            <ArrowUpRight className="h-3 w-3 opacity-70" />
+                          </Link>
+                        )}
                         <div className="text-[10px] text-muted-foreground mt-0.5">
                           Bal: LKR {item.invoice_balance_due.toLocaleString()}
                         </div>
@@ -1046,13 +1057,28 @@ export default function ChequesWorkspace({
               <div className="p-3.5 rounded-xl border border-border/80 bg-muted/20 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-xs text-foreground">Invoice Summary</span>
-                  <Link
-                    href={`/admin/sales?search=${encodeURIComponent(selectedCheque.invoice_number || selectedCheque.receipt_number || "")}`}
-                    className="text-[11px] text-blue-600 font-semibold hover:underline inline-flex items-center gap-1"
-                  >
-                    #{selectedCheque.invoice_number || selectedCheque.receipt_number || "INV"}
-                    <ArrowUpRight className="h-3 w-3" />
-                  </Link>
+                  {onNavigateTab ? (
+                    <button
+                      onClick={() => {
+                        const targetInv = selectedCheque.invoice_number || selectedCheque.receipt_number || "";
+                        setSelectedCheque(null);
+                        onNavigateTab('sales', { id: selectedCheque.sale_id || undefined, search: targetInv });
+                      }}
+                      className="text-[11px] text-blue-400 font-semibold hover:underline inline-flex items-center gap-1 cursor-pointer"
+                      title="Open Central Commercial Invoice Workspace"
+                    >
+                      #{selectedCheque.invoice_number || selectedCheque.receipt_number || "INV"}
+                      <ArrowUpRight className="h-3 w-3" />
+                    </button>
+                  ) : (
+                    <Link
+                      href={`/admin/sales?search=${encodeURIComponent(selectedCheque.invoice_number || selectedCheque.receipt_number || "")}`}
+                      className="text-[11px] text-blue-600 font-semibold hover:underline inline-flex items-center gap-1"
+                    >
+                      #{selectedCheque.invoice_number || selectedCheque.receipt_number || "INV"}
+                      <ArrowUpRight className="h-3 w-3" />
+                    </Link>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-border/60">

@@ -28,6 +28,8 @@ export interface Product {
   rating: number;
   numReviews: number;
   countInStock: number;
+  inventoryTrackingType?: 'counter' | 'unit';
+  inventory_tracking_type?: 'counter' | 'unit';
   isFeatured?: boolean;
   isPreOrder?: boolean;
   currency?: 'USD' | 'LKR';
