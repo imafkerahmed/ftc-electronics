@@ -21,26 +21,6 @@ export function DeliveryNoteModal({
 }: DeliveryNoteModalProps) {
   const printAreaRef = useRef<HTMLDivElement>(null);
 
-  if (!isOpen || !fulfillment) return null;
-
-  const handlePrint = () => {
-    window.print();
-  };
-
-  const formattedDate = fulfillment.created_at
-    ? new Date(fulfillment.created_at).toLocaleString("en-LK", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : "—";
-
-  const customerName = sale?.customer_company
-    ? `${sale.customer_company} (${sale.customer_name || "Client"})`
-    : sale?.customer_name || "Commercial Customer";
-
   // Group individual physical unit fulfillment items into one line per product/sale item
   const groupedLines = React.useMemo(() => {
     if (!fulfillment?.items || fulfillment.items.length === 0) return [];
@@ -77,7 +57,27 @@ export function DeliveryNoteModal({
     }
 
     return lines;
-  }, [fulfillment?.items]);
+  }, [fulfillment]);
+
+  if (!isOpen || !fulfillment) return null;
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const formattedDate = fulfillment.created_at
+    ? new Date(fulfillment.created_at).toLocaleString("en-LK", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "—";
+
+  const customerName = sale?.customer_company
+    ? `${sale.customer_company} (${sale.customer_name || "Client"})`
+    : sale?.customer_name || "Commercial Customer";
 
   return (
     <>

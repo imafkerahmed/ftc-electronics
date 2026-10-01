@@ -98,6 +98,20 @@ export function CommercialHandoverModal({
   // Success state
   const [completedFulfillment, setCompletedFulfillment] = useState<CommercialSaleFulfillmentRecord | null>(null);
 
+  const fetchAvailableUnits = async (productId: string) => {
+    setLoadingUnitsForProduct((prev) => ({ ...prev, [productId]: true }));
+    try {
+      const res = await getAvailableUnitsForCommercialHandoverAction(productId);
+      if (res.success && res.data) {
+        setAvailableUnitsMap((prev) => ({ ...prev, [productId]: res.data || [] }));
+      }
+    } catch (err) {
+      console.error("[CommercialHandoverModal] Failed to load units:", err);
+    } finally {
+      setLoadingUnitsForProduct((prev) => ({ ...prev, [productId]: false }));
+    }
+  };
+
   // Initialize or reset state when modal opens
   useEffect(() => {
     if (isOpen && sale) {
@@ -139,20 +153,6 @@ export function CommercialHandoverModal({
       });
     }
   }, [isOpen, sale, items]);
-
-  const fetchAvailableUnits = async (productId: string) => {
-    setLoadingUnitsForProduct((prev) => ({ ...prev, [productId]: true }));
-    try {
-      const res = await getAvailableUnitsForCommercialHandoverAction(productId);
-      if (res.success && res.data) {
-        setAvailableUnitsMap((prev) => ({ ...prev, [productId]: res.data || [] }));
-      }
-    } catch (err) {
-      console.error("[CommercialHandoverModal] Failed to load units:", err);
-    } finally {
-      setLoadingUnitsForProduct((prev) => ({ ...prev, [productId]: false }));
-    }
-  };
 
   if (!isOpen || !sale) return null;
 
