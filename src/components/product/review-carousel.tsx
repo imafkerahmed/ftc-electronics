@@ -5,7 +5,8 @@ import Link from "next/link";
 import Image from "next/image";
 import { Star, CheckCircle2, X } from "lucide-react";
 import { motion, useInView, AnimatePresence } from "motion/react";
-import { pbReviews } from "@/lib/pb-collections";
+import { sanitizeImageUrl } from "@/lib/supabase-collections";
+import { getReviews } from "@/lib/db";
 
 interface MockReview {
   id: string;
@@ -91,15 +92,13 @@ export default function ReviewCarousel() {
   const [selectedReview, setSelectedReview] = useState<MockReview | null>(null);
 
   useEffect(() => {
-    const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'https://ftc-db.codix.site';
-    pbReviews
-      .getApproved({ limit: 10 })
-      .then((rawReviews) => {
+    getReviews("")
+      .then((rawReviews: any[]) => {
         if (!rawReviews || rawReviews.length === 0) {
           setReviews(DEFAULT_FALLBACK_REVIEWS);
           return;
         }
-        const formatted = rawReviews.map((rev) => {
+        const formatted = rawReviews.map((rev: any) => {
           const prodExpand = rev.expand?.product;
           let imageUrl = "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?q=80&w=150";
 
@@ -121,10 +120,9 @@ export default function ReviewCarousel() {
               imgPath = rawImages;
             }
 
-            if (imgPath && imgPath.startsWith("http")) {
-              imageUrl = imgPath;
-            } else if (imgPath && !imgPath.startsWith("[")) {
-              imageUrl = `${pbUrl}/api/files/${prodExpand.collectionId}/${prodExpand.id}/${imgPath}`;
+            const sanitized = sanitizeImageUrl(imgPath);
+            if (sanitized) {
+              imageUrl = sanitized;
             } else if (prodExpand.slug) {
               const slugMapping: Record<string, string> = {
                 'apexbook-pro-16': 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?q=80&w=150',
@@ -288,7 +286,7 @@ export default function ReviewCarousel() {
 
                       {/* Linked Product Card inside review */}
                       <Link
-                        href={`/products/${review.product.slug}`}
+                        href={`/products/${(review.product.slug || review.product.name || '').toLowerCase().trim().replace(/[^a-z0-9-]+/g, '-').replace(/(^-|-$)/g, '') || review.product.slug}`}
                         onClick={(e) => e.stopPropagation()}
                         className="group/prod flex items-center gap-2.5 bg-neutral-50 dark:bg-white/[0.03] border border-neutral-200/60 dark:border-white/5 hover:border-blue-500/40 hover:bg-blue-50/40 dark:hover:bg-blue-500/10 p-1.5 rounded-lg transition-all duration-300"
                       >
@@ -402,7 +400,7 @@ export default function ReviewCarousel() {
                     Product Reviewed
                   </span>
                   <Link
-                    href={`/products/${selectedReview.product.slug}`}
+                    href={`/products/${(selectedReview.product.slug || selectedReview.product.name || '').toLowerCase().trim().replace(/[^a-z0-9-]+/g, '-').replace(/(^-|-$)/g, '') || selectedReview.product.slug}`}
                     onClick={(e) => e.stopPropagation()}
                     className="group/prod flex items-center gap-4 bg-neutral-50/50 dark:bg-white/[0.02] border border-neutral-200/50 dark:border-white/5 hover:border-blue-300 dark:hover:border-blue-500/30 hover:bg-blue-50/30 dark:hover:bg-blue-500/10 p-3 rounded-2xl transition-all duration-300"
                   >

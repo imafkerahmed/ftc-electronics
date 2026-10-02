@@ -26,7 +26,7 @@ import {
   verifyOrderForSlipUploadAction,
 } from '@/app/actions/checkout';
 import { useCartStore } from '@/store/use-cart-store';
-import { BANK_DETAILS } from '@/lib/bank-details';
+import { useSiteBranding } from '@/components/providers/site-branding-provider';
 
 type PaymentMethod = 'payhere' | 'bank_transfer' | 'cash_pickup' | 'cash_delivery';
 
@@ -36,6 +36,7 @@ interface OrderInfo {
   paymentMethod: PaymentMethod;
   customerEmail: string;
   total: number;
+  slipUploadToken?: string;
 }
 
 const PAYMENT_METHOD_CONFIG = {
@@ -47,6 +48,7 @@ const PAYMENT_METHOD_CONFIG = {
 
 export default function OrderConfirmationPage() {
   const searchParams = useSearchParams();
+  const { bankDetails } = useSiteBranding();
   const [orderInfo, setOrderInfo] = useState<OrderInfo | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -66,7 +68,7 @@ export default function OrderConfirmationPage() {
   useEffect(() => {
     const orderNumberParam = searchParams.get('order') || searchParams.get('order_id');
     const methodParam = (searchParams.get('method') || 'bank_transfer') as PaymentMethod;
-
+    const tokenParam = searchParams.get('token') || undefined;
     if (!orderNumberParam) {
       setNotFound(true);
       return;
@@ -77,17 +79,22 @@ export default function OrderConfirmationPage() {
     if (methodParam === 'payhere') {
       setPayhereStatus('pending');
       confirmPayHereReturnAction(orderNumberParam).then((res) => {
-        if (res.success) {
+        if (res.success && res.isPaid) {
           setPayhereStatus('success');
           useCartStore.getState().clearCart();
+        } else if (res.success && res.status === 'pending') {
+          setPayhereStatus('pending');
         } else {
           setPayhereStatus('failed');
         }
       });
     } else {
-      // Clear cart only after validating that a valid order reference exists
       useCartStore.getState().clearCart();
     }
+
+    const payhereStatusParam = searchParams.get('payhere');
+    if (payhereStatusParam === 'success') setPayhereStatus('success');
+    else if (payhereStatusParam === 'cancel') setPayhereStatus('failed');
 
     let hasLocalSession = false;
     try {
@@ -95,7 +102,7 @@ export default function OrderConfirmationPage() {
       if (raw) {
         const stored = JSON.parse(raw);
         if (stored.orderNumber === orderNumberParam) {
-          setOrderInfo({ ...stored, paymentMethod: methodParam });
+          setOrderInfo({ ...stored, paymentMethod: methodParam, slipUploadToken: stored.slipUploadToken || tokenParam });
           setIsAuthorizedForSlip(true);
           hasLocalSession = true;
         }
@@ -103,7 +110,8 @@ export default function OrderConfirmationPage() {
     } catch { /* ignore */ }
 
     if (!hasLocalSession) {
-      verifyOrderForSlipUploadAction(orderNumberParam).then((res) => {
+      const emailParam = searchParams.get('email') || undefined;
+      verifyOrderForSlipUploadAction(orderNumberParam, emailParam, tokenParam).then((res) => {
         if (res.success && res.order) {
           setOrderInfo({
             orderNumber: res.order.orderNumber,
@@ -111,6 +119,7 @@ export default function OrderConfirmationPage() {
             paymentMethod: (res.order.paymentMethod || methodParam) as PaymentMethod,
             customerEmail: res.order.customerEmail,
             total: res.order.total,
+            slipUploadToken: res.order.slipUploadToken || tokenParam,
           });
           setIsAuthorizedForSlip(res.isAuthorized);
         } else {
@@ -173,6 +182,7 @@ export default function OrderConfirmationPage() {
     formData.append('orderNumber', orderInfo.orderNumber);
     if (orderInfo.orderId) formData.append('orderId', orderInfo.orderId);
     if (orderInfo.customerEmail) formData.append('customerEmail', orderInfo.customerEmail);
+    if (orderInfo.slipUploadToken) formData.append('token', orderInfo.slipUploadToken);
 
     const result = await uploadPaymentSlipAction(formData);
     setUploading(false);
@@ -303,7 +313,13 @@ export default function OrderConfirmationPage() {
               Transfer the exact amount and use your order reference number as the payment description.
             </p>
             <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-xs pt-1">
-              {BANK_DETAILS.map(([label, value]) => (
+              {[
+                  ['Bank', bankDetails.bankName],
+                  ['Account Name', bankDetails.accountName],
+                  ['Account No.', bankDetails.accountNo],
+                  ['Branch', bankDetails.branch],
+                  ['Branch Code', bankDetails.branchCode],
+              ].map(([label, value]) => (
                 <div key={label}>
                   <div className="text-muted-foreground mb-0.5">{label}</div>
                   <div className="font-bold font-mono text-foreground">{value}</div>

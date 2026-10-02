@@ -81,7 +81,7 @@ export default function SaleDetailPage() {
           subtotal: sale.subtotal,
           discount: sale.discount,
           total: sale.total,
-          paymentMethod: sale.payment_method,
+          paymentMethod: sale.payment_method || undefined,
         },
         'POS Receipt'
       );
@@ -106,6 +106,8 @@ export default function SaleDetailPage() {
         unitPrice: i.unit_price,
         discount: i.item_discount || undefined,
         serialNumber: i.unit_serial || undefined,
+        serialNumbers: i.serial_numbers && i.serial_numbers.length > 0 ? i.serial_numbers : (i.unit_serial ? [i.unit_serial] : undefined),
+        quantityFulfilled: typeof i.quantity_fulfilled === 'number' ? i.quantity_fulfilled : undefined,
       })),
       subtotal: sale.subtotal,
       taxAmount: sale.tax_amount || 0,
@@ -122,10 +124,10 @@ export default function SaleDetailPage() {
     printInvoice(cfg, invoiceData, isVoided ? 'POS Voided Invoice' : 'POS Paid Invoice');
   };
 
-  const handleConfirmVoid = async (pin: string) => {
+  const handleConfirmVoid = async (pin: string, managerId?: string) => {
     if (!sale) return;
     setVoiding(true);
-    const res = await voidSaleAction(sale.id, pin);
+    const res = await voidSaleAction(sale.id, pin, managerId);
     setVoiding(false);
     if (res.success) {
       setShowVoidPinModal(false);
@@ -194,7 +196,7 @@ export default function SaleDetailPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {sale.status === 'completed' && (
+            {sale.status === 'completed' && !sale.quotation_id && (!sale.invoice_number || sale.receipt_number?.startsWith('FTC-POS-')) && (
               <Button
                 variant="outline"
                 onClick={() => setShowVoidPinModal(true)}
@@ -344,10 +346,10 @@ export default function SaleDetailPage() {
 
       <ManagerPinModal
         title="Manager Approval Needed"
-        description="Please enter a Manager or Admin PIN to void this completed sale."
+        description="Please select a manager and enter their PIN to void this completed sale."
         isOpen={showVoidPinModal}
         onClose={() => setShowVoidPinModal(false)}
-        onSuccess={(pin) => handleConfirmVoid(pin)}
+        onSuccess={(pin, _name, managerId) => handleConfirmVoid(pin, managerId)}
       />
     </div>
   );

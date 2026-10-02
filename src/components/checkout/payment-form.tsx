@@ -16,21 +16,21 @@ import {
 import { useCart } from '@/hooks/use-cart';
 import { Button } from '@/components/ui/button';
 import { processCheckoutOrderAction } from '@/app/actions/checkout';
-import { BANK_DETAILS } from '@/lib/bank-details';
+import { useSiteBranding } from '@/components/providers/site-branding-provider';
 
 export type PaymentMethod = 'payhere' | 'bank_transfer' | 'cash_pickup' | 'cash_delivery';
 
 const PAYMENT_METHODS = [
-  {
-    id: 'payhere' as PaymentMethod,
-    label: 'Pay Online',
-    sublabel: 'Visa / Mastercard / Amex / Wallet — Powered by PayHere',
-    icon: CreditCard,
-    color: 'text-violet-500',
-    border: 'border-violet-500/40',
-    bg: 'bg-violet-500/5',
-    badge: 'Recommended',
-  },
+  // {
+  //   id: 'payhere' as PaymentMethod,
+  //   label: 'Pay Online',
+  //   sublabel: 'Visa / Mastercard / Amex / Wallet — Powered by PayHere',
+  //   icon: CreditCard,
+  //   color: 'text-violet-500',
+  //   border: 'border-violet-500/40',
+  //   bg: 'bg-violet-500/5',
+  //   badge: 'Recommended',
+  // },
   {
     id: 'bank_transfer' as PaymentMethod,
     label: 'Bank Transfer',
@@ -72,9 +72,10 @@ const PAYHERE_CHECKOUT_URL =
 export default function PaymentForm() {
   const router = useRouter();
   const { items, total } = useCart();
+  const { bankDetails } = useSiteBranding();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('payhere');
+  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('bank_transfer');
 
   // Hidden PayHere form ref — submitted programmatically after hash is ready
   const payhereFormRef = useRef<HTMLFormElement>(null);
@@ -321,7 +322,13 @@ export default function PaymentForm() {
             <div className="rounded-xl bg-blue-500/5 border border-blue-500/20 p-4 space-y-3">
               <p className="text-xs font-bold text-blue-400 uppercase tracking-widest">Bank Account Details</p>
               <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                {BANK_DETAILS.map(([label, value]) => (
+                {[
+                  ['Bank', bankDetails.bankName],
+                  ['Account Name', bankDetails.accountName],
+                  ['Account No.', bankDetails.accountNo],
+                  ['Branch', bankDetails.branch],
+                  ['Branch Code', bankDetails.branchCode],
+                ].map(([label, value]) => (
                   <div key={label}>
                     <span className="text-muted-foreground block">{label}</span>
                     <span className="font-bold text-foreground font-mono">{value}</span>

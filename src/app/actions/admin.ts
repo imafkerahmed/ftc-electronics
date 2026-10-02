@@ -1,16 +1,19 @@
 'use server';
 
-import { cookies, headers } from 'next/headers';
+import { headers } from 'next/headers';
 import { revalidatePath } from 'next/cache';
-import { getAdminPb, writeAuditLog } from '@/lib/pb-admin';
+import { createClient as createServerSupabase } from '@/lib/supabase/server';
+import { getAdminSupabase, writeAuditLog } from '@/lib/supabase-admin';
 import { getTrustedClientIp } from '@/lib/get-client-ip';
-import { ROLE_PERMISSIONS } from '@/types/admin';
-import type { AdminRole, AuditAction, DealerSaleRecord } from '@/types/admin';
+import { ROLE_PERMISSIONS, ADMIN_ROLES } from '@/types/admin';
+import type { AdminRole, AuditAction, DealerSaleRecord, QuotationVoidReason } from '@/types/admin';
 import type { BarcodePrintConfig } from '@/types/barcode-config';
-import type { ReceiptPrintConfig, ReceiptPrintPreset } from '@/types/receipt-config';
-import type { InvoicePrintConfig, InvoicePrintPreset } from '@/types/invoice-config';
-import { sendQuotationEmail, sendOrderInvoiceEmail, sendOrderShippingEmail } from '@/lib/email';
-import { sendInvoiceEmailForOrder } from '@/lib/order-email';
+import { DEFAULT_RECEIPT_CONFIG, type ReceiptPrintConfig, type ReceiptPrintPreset } from '@/types/receipt-config';
+import { DEFAULT_INVOICE_CONFIG, type InvoicePrintConfig, type InvoicePrintPreset } from '@/types/invoice-config';
+import { sendQuotationEmail, sendOrderInvoiceEmail, sendOrderShippingEmail, sendOrderReturnEmail, formatPaymentMethod } from '@/lib/email';
+import { sendInvoiceEmailForOrder, requiresPaymentBeforeShipment, isCashPaymentMethod } from '@/lib/order-email';
+import { ensureInvoiceForPaidOrder, generateSampleInvoiceData } from '@/lib/invoice-service';
+import { generateInvoicePdf } from '@/lib/invoice-pdf';
 import { deductStockForConfirmedOrderAction } from '@/app/actions/checkout';
 import {
   pbProducts,
@@ -22,14 +25,28 @@ import {
   pbPromotions,
   pbAnnouncements,
   pbOrders,
-  pbEmployees,
-  pbSales,
   pbCustomers,
   pbWholesaleDealers,
   pbQuotations,
   pbContactInquiries,
-} from '@/lib/pb-collections';
-import type { PaymentMethod, PBSale, PBSaleItem, SalePayload } from '@/types/pos';
+  pbEmployees,
+  pbSales,
+} from '@/lib/supabase-collections';
+import type { PaymentMethod, PaymentTerms, PBSale, PBSaleItem, SalePayload, EmployeeRole, PosEmployeeSession, SalePayment, SalePaymentReversal, SalePaymentSummary, PaymentRecordStatus, ChequeRegisterItem, ChequeRegisterMetrics } from '@/types/pos';
+import {
+  hashPin,
+  verifyPinWithLegacyMigration,
+  checkPinRateLimit,
+  recordFailedPinAttempt,
+  resetPinRateLimit,
+  isBcryptHash,
+} from '@/lib/pin-security';
+import {
+  getVerifiedPosSession,
+  setPosSessionCookie,
+  clearPosSessionCookie,
+  POS_SESSION_MAX_AGE,
+} from '@/lib/pos-server-session';
 
 // Helper to cast fields safely for audit logging
 function toRecord(obj: any): Record<string, unknown> | undefined {
@@ -37,85 +54,284 @@ function toRecord(obj: any): Record<string, unknown> | undefined {
   return obj as unknown as Record<string, unknown>;
 }
 
+function getStoragePublicUrl(path: string): string {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!supabaseUrl) {
+    throw new Error('[admin] NEXT_PUBLIC_SUPABASE_URL is not set; cannot build a storage URL.');
+  }
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  return `${supabaseUrl}/storage/v1/object/public/ftc-media/${encodedPath}`;
+}
+
 // ─── Permission Check Helper ────────────────────────────────────────────────
 
 export async function checkPermission(
   module: keyof typeof ROLE_PERMISSIONS[AdminRole],
   action: 'read' | 'write' | 'delete'
-): Promise<{ allowed: boolean; role?: AdminRole; actorEmail?: string; actorId?: string; ip?: string; userAgent?: string }> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('pb_auth_token')?.value;
-
-  const headersList = await headers();
-  const ip = getTrustedClientIp(headersList);
-  const userAgent = headersList.get('user-agent') || 'unknown';
-
-  if (!token) {
-    return { allowed: false, ip, userAgent };
-  }
-
-  const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
-  if (!pbUrl) {
-    return { allowed: false, ip, userAgent };
-  }
-  let actorEmail: string | undefined;
-  let actorId: string | undefined;
-  let effectiveRole: AdminRole | undefined;
+): Promise<{ allowed: boolean; role?: AdminRole; actorEmail?: string; actorId?: string; actorName?: string; ip?: string; userAgent?: string }> {
+  let ip = '127.0.0.1';
+  let userAgent = 'unknown';
 
   try {
-    const PocketBase = (await import('pocketbase')).default;
-    const userPb = new PocketBase(pbUrl);
-    userPb.autoCancellation(false);
-    userPb.authStore.save(token);
+    const headersList = await headers();
+    ip = getTrustedClientIp(headersList);
+    userAgent = headersList.get('user-agent') || 'unknown';
+  } catch {
+    // Outside request context
+  }
 
-    // Validates the token against the PocketBase server and refreshes auth record
-    const authData = await userPb.collection('users').authRefresh();
-    const record = authData.record;
-    if (!record) {
+  try {
+    let user: any = null;
+    try {
+      const supabase = await createServerSupabase();
+      const authRes = await supabase.auth.getUser();
+      user = authRes.data?.user;
+    } catch {
+      // In isolated environments or test runners without cookie stores
+    }
+
+    if (!user) {
       return { allowed: false, ip, userAgent };
     }
 
-    let role = record.role as string | undefined;
-    if (role === 'admin') {
-      role = 'super_admin';
-    } else if (!role && (record.isAdmin === true || record.is_admin === true)) {
-      role = 'super_admin';
+    const adminSb = getAdminSupabase();
+    const { data: profile } = await adminSb
+      .from('profiles')
+      .select('id, role, name')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    let role: AdminRole | undefined = undefined;
+    const roleStr = profile?.role;
+    if (roleStr && (ADMIN_ROLES as readonly string[]).includes(roleStr)) {
+      role = roleStr as AdminRole;
     }
 
-    effectiveRole = role as AdminRole;
-    actorEmail = record.email || undefined;
-    actorId = record.id || undefined;
-  } catch {
+    const actorName = profile?.name?.trim() || '';
+
+    if (!role) {
+      return {
+        allowed: false,
+        actorEmail: user.email || '',
+        actorId: user.id,
+        actorName,
+        ip,
+        userAgent,
+      };
+    }
+
+    const modulePerms = ROLE_PERMISSIONS[role]?.[module];
+    const isAllowed = Boolean(modulePerms && (modulePerms as any)[action]);
+
+    return {
+      allowed: isAllowed,
+      role,
+      actorEmail: user.email || '',
+      actorId: user.id,
+      actorName,
+      ip,
+      userAgent,
+    };
+  } catch (err) {
+    console.error('[checkPermission] Verification error:', err);
     return { allowed: false, ip, userAgent };
   }
-
-  if (!effectiveRole) {
-    return { allowed: false, ip, userAgent };
-  }
-
-  const permissions = ROLE_PERMISSIONS[effectiveRole];
-  if (!permissions) {
-    return { allowed: false, role: effectiveRole, actorEmail, actorId, ip, userAgent };
-  }
-
-  const modulePerms = permissions[module] as Record<string, boolean> | undefined;
-  if (!modulePerms || !modulePerms[action]) {
-    return { allowed: false, role: effectiveRole, actorEmail, actorId, ip, userAgent };
-  }
-
-  return { allowed: true, role: effectiveRole, actorEmail, actorId, ip, userAgent };
 }
 
 // ─── Products Actions ─────────────────────────────────────────────────────────
+
+async function buildProductPayloadFromFormData(data: FormData | Record<string, any>, existingRecord?: any) {
+  const isFormData = typeof FormData !== 'undefined' && data instanceof FormData;
+  const getVal = (key: string) => (isFormData ? (data as FormData).get(key) : (data as Record<string, any>)[key]);
+
+  const name = String(getVal('name') || existingRecord?.name || '').trim();
+  let rawSlug = String(getVal('slug') || existingRecord?.slug || '').trim();
+  let slug = rawSlug
+    ? rawSlug.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/(^-|-$)/g, '')
+    : (name ? name.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/(^-|-$)/g, '') : '');
+
+  const description = String(getVal('description') || existingRecord?.description || '');
+  const price = parseFloat(String(getVal('price') || existingRecord?.price || '0')) || 0;
+
+  const discountPriceRaw = getVal('discountPrice') ?? getVal('discount_price') ?? existingRecord?.discount_price;
+  const discount_price = discountPriceRaw !== undefined && discountPriceRaw !== null && String(discountPriceRaw).trim() !== ''
+    ? parseFloat(String(discountPriceRaw))
+    : null;
+
+  const wholesalePriceRaw = getVal('wholesalePrice') ?? getVal('wholesale_price') ?? existingRecord?.wholesale_price;
+  const wholesale_price = wholesalePriceRaw !== undefined && wholesalePriceRaw !== null && String(wholesalePriceRaw).trim() !== ''
+    ? parseFloat(String(wholesalePriceRaw))
+    : null;
+
+  let category_id = getVal('category') || getVal('category_id') || existingRecord?.category_id;
+  if (category_id && typeof category_id === 'string') category_id = category_id.trim();
+  if (!category_id) {
+    category_id = null;
+  }
+
+  let brand_id = getVal('brand') || getVal('brand_id') || existingRecord?.brand_id;
+  if (brand_id && typeof brand_id === 'string') brand_id = brand_id.trim();
+  if (!brand_id) {
+    brand_id = null;
+  }
+
+  const countInStockRaw = getVal('countInStock') ?? getVal('count_in_stock') ?? existingRecord?.count_in_stock;
+  const count_in_stock = parseInt(String(countInStockRaw || '0'), 10) || 0;
+
+  const rawTracking = getVal('inventoryTrackingType') ?? getVal('inventory_tracking_type') ?? existingRecord?.inventory_tracking_type;
+  let inventory_tracking_type: 'counter' | 'unit' = 'counter';
+  if (rawTracking !== undefined && rawTracking !== null && String(rawTracking).trim() !== '') {
+    const norm = String(rawTracking).trim().toLowerCase();
+    if (norm === 'unit' || norm === 'counter') {
+      inventory_tracking_type = norm;
+    } else {
+      throw new Error(`Invalid inventory tracking type "${rawTracking}". Must be "counter" or "unit".`);
+    }
+  } else if (existingRecord?.inventory_tracking_type) {
+    inventory_tracking_type = existingRecord.inventory_tracking_type;
+  }
+
+  const status = String(getVal('status') || existingRecord?.status || 'published');
+  const is_featured = String(getVal('isFeatured') ?? getVal('is_featured') ?? existingRecord?.is_featured) === 'true';
+  const is_pre_order = String(getVal('isPreOrder') ?? getVal('is_pre_order') ?? existingRecord?.is_pre_order) === 'true';
+  const currency = String(getVal('currency') || existingRecord?.currency || 'USD');
+
+  let badges: string[] = existingRecord?.badges || [];
+  const badgesRaw = getVal('badges');
+  if (badgesRaw) {
+    if (typeof badgesRaw === 'string') {
+      try { badges = JSON.parse(badgesRaw); } catch { badges = badgesRaw.split(',').map(b => b.trim()).filter(Boolean); }
+    } else if (Array.isArray(badgesRaw)) {
+      badges = badgesRaw;
+    }
+  }
+
+  let specs: Record<string, any> = existingRecord?.specs || {};
+  const specsRaw = getVal('specs');
+  if (specsRaw) {
+    if (typeof specsRaw === 'string') {
+      try { specs = JSON.parse(specsRaw); } catch { specs = {}; }
+    } else if (typeof specsRaw === 'object') {
+      specs = specsRaw;
+    }
+  }
+
+  const bannerText = getVal('bannerText') ?? getVal('banner_text') ?? existingRecord?.banner_text;
+  const banner_text = bannerText ? String(bannerText) : null;
+
+  const isFileLike = (obj: any): boolean => Boolean(obj && typeof obj === 'object' && typeof obj.arrayBuffer === 'function' && Number(obj.size || 0) > 0);
+
+  let banner_image: string | null = existingRecord?.banner_image || null;
+  const bannerImgRaw = getVal('bannerImage') ?? getVal('banner_image');
+  if (bannerImgRaw) {
+    if (isFileLike(bannerImgRaw)) {
+      const supabase = getAdminSupabase();
+      const fileName = (bannerImgRaw as any).name || 'banner.png';
+      const ext = fileName.split('.').pop() || 'png';
+      const fName = `banner_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+      const buf = Buffer.from(await (bannerImgRaw as any).arrayBuffer());
+      const { error } = await supabase.storage.from('ftc-media').upload(fName, buf, { contentType: (bannerImgRaw as any).type || 'image/png', upsert: true });
+      if (!error) banner_image = fName;
+    } else if (typeof bannerImgRaw === 'string' && bannerImgRaw.trim()) {
+      banner_image = bannerImgRaw.trim();
+    }
+  }
+
+  let imagesList: string[] = [];
+  if (isFormData) {
+    const formData = data as FormData;
+    const files = formData.getAll('images');
+    const newImgs: string[] = [];
+    for (const f of files) {
+      if (isFileLike(f)) {
+        const supabase = getAdminSupabase();
+        const fileName = (f as any).name || 'image.png';
+        const ext = fileName.split('.').pop() || 'png';
+        const fName = `prod_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+        const buf = Buffer.from(await (f as any).arrayBuffer());
+        const { error } = await supabase.storage.from('ftc-media').upload(fName, buf, { contentType: (f as any).type || 'image/png', upsert: true });
+        if (!error) {
+          const fullPublicUrl = getStoragePublicUrl(fName);
+          if (fullPublicUrl) newImgs.push(fullPublicUrl);
+        } else {
+          console.error('Failed to upload product image to Supabase ftc-media:', error);
+        }
+      } else if (typeof f === 'string' && f.startsWith('data:')) {
+        const supabase = getAdminSupabase();
+        const arr = f.split(',');
+        const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/png';
+        const ext = mime.split('/')[1] || 'png';
+        const buf = Buffer.from(arr[1], 'base64');
+        const fName = `prod_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+        const { error } = await supabase.storage.from('ftc-media').upload(fName, buf, { contentType: mime, upsert: true });
+        if (!error) {
+          const fullPublicUrl = getStoragePublicUrl(fName);
+          if (fullPublicUrl) newImgs.push(fullPublicUrl);
+        } else {
+          console.error('Failed to upload base64 image to Supabase ftc-media:', error);
+        }
+      } else if (typeof f === 'string' && f.trim()) {
+        newImgs.push(f.trim());
+      }
+    }
+    if (newImgs.length > 0) {
+      imagesList = newImgs;
+    } else if (existingRecord?.images && existingRecord.images.length > 0) {
+      imagesList = existingRecord.images;
+    }
+  } else if (Array.isArray((data as any).images)) {
+    imagesList = (data as any).images;
+  } else if (existingRecord?.images) {
+    imagesList = existingRecord.images;
+  }
+
+  if (wholesale_price !== null) {
+    specs.wholesale_price = wholesale_price;
+  }
+
+
+
+  return {
+    name,
+    slug,
+    description,
+    price,
+    discount_price,
+    category_id,
+    brand_id,
+    count_in_stock,
+    inventory_tracking_type,
+    status,
+    is_featured,
+    is_pre_order,
+    currency,
+    badges,
+    specs,
+    banner_text,
+    banner_image,
+    images: imagesList,
+    updated_at: new Date().toISOString(),
+  };
+}
 
 export async function createProductAction(formData: FormData) {
   const check = await checkPermission('products', 'write');
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const record = await pbProducts.create(formData);
-    
-    // Log to audit log
+    const payload = await buildProductPayloadFromFormData(formData);
+    if (payload.inventory_tracking_type === 'unit' && payload.count_in_stock > 0) {
+      return {
+        success: false,
+        error: 'New Individually Tracked Unit products must be created with 0 stock count. Generate physical stock batches to add inventory.',
+      };
+    }
+    (payload as any).created_at = new Date().toISOString();
+
+    const supabase = getAdminSupabase();
+    const { data: record, error } = await supabase.from('products').insert(payload).select().single();
+    if (error) throw error;
+
     await writeAuditLog(
       check.actorEmail!,
       'create',
@@ -126,12 +342,10 @@ export async function createProductAction(formData: FormData) {
       { ip: check.ip, userAgent: check.userAgent }
     );
 
-    revalidatePath('/');
-    revalidatePath('/products');
-    revalidatePath(`/products/${record.slug}`);
-    revalidatePath('/admin/products');
+    revalidatePath('/', 'layout');
     return { success: true, data: record };
   } catch (err: any) {
+    console.error('[createProductAction] Error:', err);
     return { success: false, error: err.message || 'Failed to create product.' };
   }
 }
@@ -141,8 +355,98 @@ export async function updateProductAction(id: string, formData: FormData) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const oldRecord = await pbProducts.getById(id);
-    const record = await pbProducts.update(id, formData);
+    const supabase = getAdminSupabase();
+    const { data: oldRecord } = await supabase.from('products').select('*').eq('id', id).maybeSingle();
+    if (!oldRecord) return { success: false, error: 'Product not found.' };
+
+    const payload = await buildProductPayloadFromFormData(formData, oldRecord);
+
+    type ProductUpdatePayload = Omit<Awaited<ReturnType<typeof buildProductPayloadFromFormData>>, 'count_in_stock'> & {
+      count_in_stock?: number;
+    };
+
+    let updatePayload: ProductUpdatePayload = payload;
+
+    // Finding 9 & CodeRabbit Fix: For UNIT-tracked products that are NOT transitioning to counter,
+    // count_in_stock is authoritative from stock_management and must not be
+    // overwritten by a client-submitted form value.
+    const staysUnit =
+      oldRecord.inventory_tracking_type === 'unit' &&
+      payload.inventory_tracking_type === 'unit';
+    if (staysUnit) {
+      const { count_in_stock: _ignoredCount, ...rest } = payload;
+      updatePayload = rest;
+    }
+
+    // Safeguards for inventory tracking transitions
+    if (oldRecord.inventory_tracking_type === 'counter' && payload.inventory_tracking_type === 'unit') {
+      const { count: availUnits, error: availUnitsError } = await supabase
+        .from('stock_management')
+        .select('id', { count: 'exact', head: true })
+        .eq('product_id', id)
+        .eq('status', 'available');
+
+      if (availUnitsError) {
+        console.error(
+          'Failed to verify physical inventory before tracking conversion:',
+          availUnitsError
+        );
+        return {
+          success: false,
+          error:
+            'Unable to verify physical inventory. Product tracking type was not changed. Please try again.',
+        };
+      }
+
+      const existingCounterStock = oldRecord.count_in_stock ?? 0;
+      const physicalAvailableCount = availUnits ?? 0;
+
+      if (existingCounterStock > 0 && physicalAvailableCount !== existingCounterStock) {
+        return {
+          success: false,
+          error: `Cannot convert product to Individually Tracked Units: current stock count (${existingCounterStock}) does not match available physical unit records (${physicalAvailableCount}). Please generate or reconcile physical stock units before activating unit tracking.`,
+        };
+      }
+
+      // Ensure resulting count_in_stock in products remains reconciled with available physical units
+      updatePayload = {
+        ...updatePayload,
+        count_in_stock: physicalAvailableCount,
+      };
+    } else if (oldRecord.inventory_tracking_type === 'unit' && payload.inventory_tracking_type === 'counter') {
+      const { count: totalUnits, error: totalUnitsError } = await supabase
+        .from('stock_management')
+        .select('id', { count: 'exact', head: true })
+        .eq('product_id', id);
+
+      if (totalUnitsError) {
+        console.error(
+          'Failed to verify physical inventory history before tracking conversion:',
+          totalUnitsError
+        );
+        return {
+          success: false,
+          error:
+            'Unable to verify physical inventory. Product tracking type was not changed. Please try again.',
+        };
+      }
+
+      if ((totalUnits ?? 0) > 0) {
+        return {
+          success: false,
+          error: `Cannot convert product to Counter Stock: product has existing physical unit records (${totalUnits} units recorded). Preserving individually tracked unit history is required.`,
+        };
+      }
+    }
+
+    const { data: record, error } = await supabase
+      .from('products')
+      .update(updatePayload)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
 
     await writeAuditLog(
       check.actorEmail!,
@@ -154,12 +458,10 @@ export async function updateProductAction(id: string, formData: FormData) {
       { ip: check.ip, userAgent: check.userAgent }
     );
 
-    revalidatePath('/');
-    revalidatePath('/products');
-    revalidatePath(`/products/${record.slug}`);
-    revalidatePath('/admin/products');
+    revalidatePath('/', 'layout');
     return { success: true, data: record };
   } catch (err: any) {
+    console.error('[updateProductAction] Error:', err);
     return { success: false, error: err.message || 'Failed to update product.' };
   }
 }
@@ -169,9 +471,33 @@ export async function updateProductStockAction(id: string, countInStock: number)
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const oldRecord = await pbProducts.getById(id);
-    const pb = await getAdminPb();
-    const record = await pb.collection('products').update(id, { countInStock });
+    const supabase = getAdminSupabase();
+    const { data: oldRecord } = await supabase.from('products').select('*').eq('id', id).maybeSingle();
+    if (!oldRecord) return { success: false, error: 'Product not found.' };
+
+    if (oldRecord.inventory_tracking_type === 'unit') {
+      const { count: availUnits } = await supabase
+        .from('stock_management')
+        .select('id', { count: 'exact', head: true })
+        .eq('product_id', id)
+        .eq('status', 'available');
+
+      if ((availUnits ?? 0) !== countInStock) {
+        return {
+          success: false,
+          error: `Cannot manually override stock count for Individually Tracked Unit product. Stock count is strictly determined by available physical units (${availUnits ?? 0} available).`,
+        };
+      }
+    }
+
+    const { data: record, error } = await supabase
+      .from('products')
+      .update({ count_in_stock: countInStock, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
 
     await writeAuditLog(
       check.actorEmail!,
@@ -183,12 +509,10 @@ export async function updateProductStockAction(id: string, countInStock: number)
       { ip: check.ip, userAgent: check.userAgent }
     );
 
-    revalidatePath('/');
-    revalidatePath('/products');
-    revalidatePath('/admin/products');
-    revalidatePath('/admin/inventory');
+    revalidatePath('/', 'layout');
     return { success: true, data: record };
   } catch (err: any) {
+    console.error('[updateProductStockAction] Error:', err);
     return { success: false, error: err.message || 'Failed to update product stock.' };
   }
 }
@@ -208,75 +532,107 @@ export async function createStockPurchaseAction(data: {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const product = await pbProducts.getById(data.productId);
-    if (!product) return { success: false, error: 'Product not found.' };
+    const supabase = getAdminSupabase();
+    const { data: product, error: prodErr } = await supabase
+      .from('products')
+      .select('id, slug, count_in_stock, price, discount_price, inventory_tracking_type')
+      .eq('id', data.productId)
+      .single();
+    if (prodErr || !product) return { success: false, error: 'Product not found.' };
 
-    const adminPb = await getAdminPb();
-    const purchaseRecord = await adminPb.collection('stock_purchases').create({
-      product: data.productId,
-      batchNumber: data.batchNumber,
-      quantity: data.quantity,
-      unitCost: data.unitCost || 0,
-      supplier: data.supplier || '',
-      purchaseDate: data.purchaseDate || new Date().toISOString().split('T')[0],
-      notes: data.notes || '',
-    });
-
-    const newStockCount = Math.max(0, (product.countInStock || 0) + Number(data.quantity));
-
-    // Price change logic
-    const priceUpdate: Record<string, number | null> = { countInStock: newStockCount };
-    if (data.newCost && data.newCost > 0 && data.oldPrice !== undefined) {
-      if (data.newCost > data.oldPrice) {
-        // Price increased — update price, clear discountPrice so no strikethrough shown
-        priceUpdate.price = data.newCost;
-        priceUpdate.discountPrice = null as any;
-      } else if (data.newCost < data.oldPrice) {
-        // Price dropped — keep price as old (for strikethrough), set discountPrice = new lower cost
-        priceUpdate.discountPrice = data.newCost;
-        // price stays as oldPrice (already in DB)
-      }
-      // If equal, no price change needed
+    if (product.inventory_tracking_type !== 'unit') {
+      return {
+        success: false,
+        error: 'Cannot add physical unit stock batches: product is configured for Counter Stock tracking. Update inventory tracking to Individually Tracked Units before creating stock units.',
+      };
     }
 
-    await adminPb.collection('products').update(data.productId, priceUpdate);
+    const initialStock = product.count_in_stock || 0;
+    const initialPrice = product.price;
+    const initialDiscountPrice = product.discount_price;
 
-    // Auto-generate unit barcode items in stock_management if positive quantity added
-    if (data.quantity > 0) {
-      for (let i = 0; i < data.quantity; i++) {
-        const barcode = `STK-${data.productId.slice(-5).toUpperCase()}-${Date.now().toString().slice(-5)}-${i + 1}`;
-        const serialNumber = `SN-${data.productId.slice(-4).toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`;
-        try {
-          await adminPb.collection('stock_management').create({
-            product: data.productId,
-            barcode,
-            serialNumber,
-            status: 'available',
-            batchNumber: data.batchNumber,
-          });
-        } catch {
-          // Ignore individual barcode duplicate errors
+    const { data: purchaseRecord, error: purchErr } = await supabase
+      .from('stock_purchases')
+      .insert({
+        product_id: data.productId,
+        batch_number: data.batchNumber,
+        quantity: data.quantity,
+        unit_cost: data.unitCost || 0,
+        supplier: data.supplier || '',
+        purchase_date: data.purchaseDate || new Date().toISOString().split('T')[0],
+        notes: data.notes || '',
+      })
+      .select()
+      .single();
+    if (purchErr) throw purchErr;
+
+    const createdUnitIds: string[] = [];
+
+    try {
+      const newStockCount = Math.max(0, initialStock + Number(data.quantity));
+
+      const priceUpdate: Record<string, number | null> = { count_in_stock: newStockCount };
+      if (data.newCost && data.newCost > 0 && data.oldPrice !== undefined) {
+        if (data.newCost > data.oldPrice) {
+          priceUpdate.price = data.newCost;
+          priceUpdate.discount_price = null;
+        } else if (data.newCost < data.oldPrice) {
+          priceUpdate.discount_price = data.newCost;
         }
       }
+      const { error: priceUpdateErr } = await supabase.from('products').update(priceUpdate).eq('id', data.productId);
+      if (priceUpdateErr) throw priceUpdateErr;
+
+      if (data.quantity > 0) {
+        const units = Array.from({ length: data.quantity }, (_, i) => ({
+          product_id: data.productId,
+          barcode: `STK-${data.productId.slice(-5).toUpperCase()}-${Date.now().toString().slice(-5)}-${i + 1}`,
+          serial_number: `SN-${data.productId.slice(-4).toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`,
+          status: 'available',
+          batch_number: data.batchNumber,
+        }));
+        for (let i = 0; i < units.length; i += 50) {
+          const batch = units.slice(i, i + 50);
+          const { data: insertedUnits, error: insertErr } = await supabase
+            .from('stock_management')
+            .insert(batch)
+            .select('id');
+
+          if (insertErr) {
+            throw new Error(`Failed to create inventory stock units: ${insertErr.message}`);
+          }
+          if (insertedUnits) {
+            for (const u of insertedUnits) createdUnitIds.push(u.id);
+          }
+        }
+      }
+
+      await writeAuditLog(
+        check.actorEmail!,
+        'create',
+        'stock_purchases',
+        purchaseRecord.id,
+        undefined,
+        toRecord(purchaseRecord),
+        { ip: check.ip, userAgent: check.userAgent }
+      );
+
+      revalidatePath('/', 'layout');
+      return { success: true, data: purchaseRecord, newStockCount };
+    } catch (stepErr: any) {
+      // Roll back all created units and purchase record, and restore original product prices and stock
+      if (createdUnitIds.length > 0) {
+        await supabase.from('stock_management').delete().in('id', createdUnitIds);
+      }
+      await supabase.from('stock_purchases').delete().eq('id', purchaseRecord.id);
+      await supabase.from('products').update({
+        count_in_stock: initialStock,
+        price: initialPrice,
+        discount_price: initialDiscountPrice,
+      }).eq('id', data.productId);
+
+      throw stepErr;
     }
-
-    await writeAuditLog(
-      check.actorEmail!,
-      'create',
-      'stock_purchases',
-      purchaseRecord.id,
-      undefined,
-      toRecord(purchaseRecord),
-      { ip: check.ip, userAgent: check.userAgent }
-    );
-
-    revalidatePath(`/admin/inventory/${data.productId}`);
-    revalidatePath('/admin/inventory');
-    revalidatePath('/admin/products');
-    revalidatePath('/');
-    revalidatePath('/products');
-    revalidatePath(`/products/${product.slug}`);
-    return { success: true, data: purchaseRecord, newStockCount };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to record stock purchase.' };
   }
@@ -287,12 +643,14 @@ export async function getStockPurchasesAction(productId: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.', data: [] };
 
   try {
-    const adminPb = await getAdminPb();
-    const records = await adminPb.collection('stock_purchases').getFullList({
-      filter: `product = "${productId}"`,
-      sort: '-id',
-    });
-    return { success: true, data: structuredClone(records) };
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase
+      .from('stock_purchases')
+      .select('*')
+      .eq('product_id', productId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return { success: true, data: data || [] };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to fetch stock purchases.', data: [] };
   }
@@ -303,12 +661,14 @@ export async function getStockManagementUnitsAction(productId: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.', data: [] };
 
   try {
-    const adminPb = await getAdminPb();
-    const records = await adminPb.collection('stock_management').getFullList({
-      filter: `product = "${productId}"`,
-      sort: '-id',
-    });
-    return { success: true, data: structuredClone(records) };
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase
+      .from('stock_management')
+      .select('*')
+      .eq('product_id', productId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return { success: true, data: data || [] };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to fetch stock units.', data: [] };
   }
@@ -325,17 +685,47 @@ export async function createStockUnitAction(data: {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const adminPb = await getAdminPb();
+    const supabase = getAdminSupabase();
+    const { data: prod, error: pErr } = await supabase
+      .from('products')
+      .select('id, inventory_tracking_type')
+      .eq('id', data.productId)
+      .single();
+    if (pErr || !prod) return { success: false, error: 'Product not found.' };
+
+    if (prod.inventory_tracking_type !== 'unit') {
+      return {
+        success: false,
+        error: 'Cannot create physical stock unit: product is configured for Counter Stock tracking. Update inventory tracking to Individually Tracked Units before creating stock units.',
+      };
+    }
+
     const barcode = data.barcode || `STK-${data.productId.slice(-6).toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`;
 
-    const unit = await adminPb.collection('stock_management').create({
-      product: data.productId,
-      barcode,
-      serialNumber: data.serialNumber || '',
-      status: 'available',
-      batchNumber: data.batchNumber || '',
-      notes: data.notes || '',
-    });
+    const { data: unit, error } = await supabase
+      .from('stock_management')
+      .insert({
+        product_id: data.productId,
+        barcode,
+        serial_number: data.serialNumber || '',
+        status: 'available',
+        batch_number: data.batchNumber || '',
+        notes: data.notes || '',
+      })
+      .select()
+      .single();
+    if (error) throw error;
+
+    // Synchronize count_in_stock for unit product
+    const { count: availUnits } = await supabase
+      .from('stock_management')
+      .select('id', { count: 'exact', head: true })
+      .eq('product_id', data.productId)
+      .eq('status', 'available');
+
+    if (typeof availUnits === 'number') {
+      await supabase.from('products').update({ count_in_stock: availUnits }).eq('id', data.productId);
+    }
 
     revalidatePath(`/admin/inventory/${data.productId}`);
     revalidatePath('/admin/inventory');
@@ -350,27 +740,52 @@ export async function generateBatchBarcodesAction(productId: string, quantity: n
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const adminPb = await getAdminPb();
-    const batch = batchNumber || `PO-${Date.now().toString().slice(-6)}`;
-    const createdUnits = [];
+    const supabase = getAdminSupabase();
+    const { data: prod, error: pErr } = await supabase
+      .from('products')
+      .select('id, inventory_tracking_type')
+      .eq('id', productId)
+      .single();
+    if (pErr || !prod) return { success: false, error: 'Product not found.' };
 
-    // Generate individual available stock unit barcodes
-    for (let i = 0; i < quantity; i++) {
-      const barcode = `STK-${productId.slice(-5).toUpperCase()}-${Date.now().toString().slice(-5)}-${i + 1}`;
-      const serialNumber = `SN-${productId.slice(-4).toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`;
-      const unit = await adminPb.collection('stock_management').create({
-        product: productId,
-        barcode,
-        serialNumber,
-        status: 'available',
-        batchNumber: batch,
-      });
-      createdUnits.push(unit);
+    if (prod.inventory_tracking_type !== 'unit') {
+      return {
+        success: false,
+        error: 'Cannot generate physical stock units: product is configured for Counter Stock tracking. Update inventory tracking to Individually Tracked Units before creating stock units.',
+      };
+    }
+
+    const batch = batchNumber || `PO-${Date.now().toString().slice(-6)}`;
+
+    const units = Array.from({ length: quantity }, (_, i) => ({
+      product_id: productId,
+      barcode: `STK-${productId.slice(-5).toUpperCase()}-${Date.now().toString().slice(-5)}-${i + 1}`,
+      serial_number: `SN-${productId.slice(-4).toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`,
+      status: 'available',
+      batch_number: batch,
+    }));
+
+    let inserted = 0;
+    for (let i = 0; i < units.length; i += 50) {
+      const { data, error } = await supabase.from('stock_management').insert(units.slice(i, i + 50)).select();
+      if (error) throw error;
+      inserted += data?.length || 0;
+    }
+
+    // Synchronize count_in_stock for unit product
+    const { count: availUnits } = await supabase
+      .from('stock_management')
+      .select('id', { count: 'exact', head: true })
+      .eq('product_id', productId)
+      .eq('status', 'available');
+
+    if (typeof availUnits === 'number') {
+      await supabase.from('products').update({ count_in_stock: availUnits }).eq('id', productId);
     }
 
     revalidatePath(`/admin/inventory/${productId}`);
     revalidatePath('/admin/inventory');
-    return { success: true, count: createdUnits.length };
+    return { success: true, count: inserted };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to generate batch barcodes.' };
   }
@@ -381,8 +796,25 @@ export async function updateStockUnitStatusAction(id: string, productId: string,
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const adminPb = await getAdminPb();
-    const unit = await adminPb.collection('stock_management').update(id, { status });
+    const supabase = getAdminSupabase();
+    const { data: unit, error } = await supabase
+      .from('stock_management')
+      .update({ status })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+
+    // Synchronize count_in_stock for unit product
+    const { count: availUnits } = await supabase
+      .from('stock_management')
+      .select('id', { count: 'exact', head: true })
+      .eq('product_id', productId)
+      .eq('status', 'available');
+
+    if (typeof availUnits === 'number') {
+      await supabase.from('products').update({ count_in_stock: availUnits }).eq('id', productId);
+    }
 
     revalidatePath(`/admin/inventory/${productId}`);
     revalidatePath('/admin/inventory');
@@ -397,8 +829,11 @@ export async function deleteProductAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const oldRecord = await pbProducts.getById(id);
-    await pbProducts.delete(id);
+    const supabase = getAdminSupabase();
+    const { data: oldRecord } = await supabase.from('products').select('*').eq('id', id).maybeSingle();
+
+    const { error } = await supabase.from('products').delete().eq('id', id);
+    if (error) throw error;
 
     await writeAuditLog(
       check.actorEmail!,
@@ -410,11 +845,10 @@ export async function deleteProductAction(id: string) {
       { ip: check.ip, userAgent: check.userAgent }
     );
 
-    revalidatePath('/');
-    revalidatePath('/products');
-    revalidatePath('/admin/products');
+    revalidatePath('/', 'layout');
     return { success: true };
   } catch (err: any) {
+    console.error('[deleteProductAction] Error:', err);
     return { success: false, error: err.message || 'Failed to delete product.' };
   }
 }
@@ -426,7 +860,18 @@ export async function createCategoryAction(data: { name: string; slug: string; s
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const record = await pbCategories.create(data);
+    const supabase = getAdminSupabase();
+    const { data: record, error } = await supabase
+      .from('categories')
+      .insert({
+        name: data.name,
+        slug: data.slug,
+        sort_order: data.sortOrder,
+        is_active: data.isActive ?? true,
+      })
+      .select()
+      .single();
+    if (error) throw error;
 
     await writeAuditLog(
       check.actorEmail!,
@@ -451,9 +896,24 @@ export async function updateCategoryAction(id: string, data: Partial<{ name: str
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const pb = await getAdminPb();
-    const oldRecord = await pb.collection('categories').getOne(id);
-    const record = await pbCategories.update(id, data);
+    const supabase = getAdminSupabase();
+
+    // Fetch old record for audit
+    const { data: oldRecord } = await supabase.from('categories').select('*').eq('id', id).single();
+
+    const patch: Record<string, unknown> = {};
+    if (data.name !== undefined) patch.name = data.name;
+    if (data.slug !== undefined) patch.slug = data.slug;
+    if (data.sortOrder !== undefined) patch.sort_order = data.sortOrder;
+    if (data.isActive !== undefined) patch.is_active = data.isActive;
+
+    const { data: record, error } = await supabase
+      .from('categories')
+      .update(patch)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
 
     await writeAuditLog(
       check.actorEmail!,
@@ -478,9 +938,11 @@ export async function deleteCategoryAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const pb = await getAdminPb();
-    const oldRecord = await pb.collection('categories').getOne(id);
-    await pbCategories.delete(id);
+    const supabase = getAdminSupabase();
+
+    const { data: oldRecord } = await supabase.from('categories').select('*').eq('id', id).single();
+    const { error } = await supabase.from('categories').delete().eq('id', id);
+    if (error) throw error;
 
     await writeAuditLog(
       check.actorEmail!,
@@ -505,10 +967,13 @@ export async function reorderCategoriesAction(items: { id: string; sortOrder: nu
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const adminPb = await getAdminPb();
-    // Update sortOrder sequentially
+    const supabase = getAdminSupabase();
     for (const item of items) {
-      await adminPb.collection('categories').update(item.id, { sortOrder: item.sortOrder });
+      const { error } = await supabase
+        .from('categories')
+        .update({ sort_order: item.sortOrder })
+        .eq('id', item.id);
+      if (error) throw error;
     }
 
     revalidatePath('/');
@@ -521,12 +986,49 @@ export async function reorderCategoriesAction(items: { id: string; sortOrder: nu
 
 // ─── Brands Actions ──────────────────────────────────────────────────────────
 
+export async function uploadBrandLogoAction(formData: FormData): Promise<{ success: boolean; url?: string; error?: string }> {
+  const check = await checkPermission('brands', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const supabase = getAdminSupabase();
+    const file = formData.get('file') as File | null;
+    if (!file || !file.size) return { success: false, error: 'No file provided.' };
+
+    const ext = (file.name.split('.').pop() || 'png').toLowerCase();
+    const fName = `brands/logo_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+    const buf = Buffer.from(await file.arrayBuffer());
+
+    const { error } = await supabase.storage
+      .from('ftc-media')
+      .upload(fName, buf, { contentType: file.type || 'image/png', upsert: true });
+    if (error) throw error;
+
+    const publicUrl = getStoragePublicUrl(fName);
+    return { success: true, url: publicUrl };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Upload failed.' };
+  }
+}
+
 export async function createBrandAction(formData: FormData) {
   const check = await checkPermission('brands', 'write');
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const record = await pbBrands.create(formData);
+    const supabase = getAdminSupabase();
+    const name = String(formData.get('name') || '');
+    const slug = String(formData.get('slug') || '');
+    const sort_order = parseInt(String(formData.get('sortOrder') || '1')) || 1;
+    const show_in_strip = formData.get('show_in_strip') === 'true';
+    const logo = formData.get('logoUrl') ? String(formData.get('logoUrl')) : null;
+
+    const { data: record, error } = await supabase
+      .from('brands')
+      .insert({ name, slug, sort_order, show_in_strip, logo })
+      .select()
+      .single();
+    if (error) throw error;
 
     await writeAuditLog(
       check.actorEmail!,
@@ -551,9 +1053,29 @@ export async function updateBrandAction(id: string, formData: FormData) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const pb = await getAdminPb();
-    const oldRecord = await pb.collection('brands').getOne(id);
-    const record = await pbBrands.update(id, formData);
+    const supabase = getAdminSupabase();
+    const { data: oldRecord } = await supabase.from('brands').select('*').eq('id', id).single();
+
+    const patch: Record<string, unknown> = {};
+    const name = formData.get('name');
+    const slug = formData.get('slug');
+    const sortOrder = formData.get('sortOrder');
+    const show_in_strip = formData.get('show_in_strip');
+    const logoUrl = formData.get('logoUrl');
+
+    if (name) patch.name = String(name);
+    if (slug) patch.slug = String(slug);
+    if (sortOrder) patch.sort_order = parseInt(String(sortOrder)) || 1;
+    if (show_in_strip !== null) patch.show_in_strip = show_in_strip === 'true';
+    if (logoUrl !== null && logoUrl !== undefined) patch.logo = String(logoUrl) || null;
+
+    const { data: record, error } = await supabase
+      .from('brands')
+      .update(patch)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
 
     await writeAuditLog(
       check.actorEmail!,
@@ -578,9 +1100,10 @@ export async function deleteBrandAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const pb = await getAdminPb();
-    const oldRecord = await pb.collection('brands').getOne(id);
-    await pbBrands.delete(id);
+    const supabase = getAdminSupabase();
+    const { data: oldRecord } = await supabase.from('brands').select('*').eq('id', id).single();
+    const { error } = await supabase.from('brands').delete().eq('id', id);
+    if (error) throw error;
 
     await writeAuditLog(
       check.actorEmail!,
@@ -601,6 +1124,18 @@ export async function deleteBrandAction(id: string) {
 }
 
 // ─── Reviews Actions ──────────────────────────────────────────────────────────
+
+export async function getAdminReviewsAction() {
+  const check = await checkPermission('reviews', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.', data: [] };
+
+  try {
+    const res = await pbReviews.getAll();
+    return { success: true, data: JSON.parse(JSON.stringify(res)) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch reviews.', data: [] };
+  }
+}
 
 export async function createReviewAction(data: {
   customerName: string;
@@ -686,6 +1221,18 @@ export async function deleteReviewAction(id: string) {
 }
 
 // ─── Promotions Actions ───────────────────────────────────────────────────────
+
+export async function getAdminPromotionsAction() {
+  const check = await checkPermission('promotions', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.', data: [] };
+
+  try {
+    const res = await pbPromotions.getAll();
+    return { success: true, data: JSON.parse(JSON.stringify(res)) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch promotions.', data: [] };
+  }
+}
 
 export async function createPromotionAction(data: {
   name: string;
@@ -806,8 +1353,26 @@ export async function getAnnouncementsAction() {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.', items: [] };
 
   try {
-    const res = await pbAnnouncements.getAll({ page: 1, perPage: 100 });
-    return { success: true, items: res.items || [] };
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase
+      .from('announcements')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+
+    const items = (data || []).map((row) => ({
+      id: row.id,
+      title: row.title,
+      image: row.image,
+      link: row.link,
+      isActive: row.is_active,
+      endsAt: row.ends_at,
+      description: row.description,
+      created: row.created_at,
+      updated: row.updated_at,
+    }));
+
+    return { success: true, items };
   } catch (err: any) {
     return { success: false, error: err?.message || 'Failed to fetch announcements.', items: [] };
   }
@@ -818,36 +1383,64 @@ export async function createAnnouncementAction(formData: FormData) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    formData.delete('removeImage');
-
-    if (!formData.has('id') || !formData.get('id')) {
-      formData.set('id', generatePbId());
-    }
-
-    const imageFile = formData.get('image');
-    if (!imageFile || (imageFile instanceof File && imageFile.size === 0)) {
-      formData.delete('image');
-    }
-
-    const titleVal = formData.get('title')?.toString() || '';
-    formData.set('title', titleVal);
-
-    // Normalize endsAt to end of specified day (23:59:59.999)
+    const supabase = getAdminSupabase();
+    const title = String(formData.get('title') || '');
+    const description = String(formData.get('description') || '');
+    const link = formData.get('link') ? String(formData.get('link')) : null;
+    const isActive = formData.get('isActive') !== 'false';
     const endsAtVal = formData.get('endsAt')?.toString();
+
+    let ends_at = null;
     if (endsAtVal) {
       const endOfDay = new Date(endsAtVal);
       if (!isNaN(endOfDay.getTime())) {
         endOfDay.setHours(23, 59, 59, 999);
-        formData.set('endsAt', endOfDay.toISOString());
-      } else {
-        formData.delete('endsAt');
+        ends_at = endOfDay.toISOString();
       }
-    } else {
-      formData.delete('endsAt');
     }
 
-    const record = await pbAnnouncements.create(formData);
-    if (!record) throw new Error('Failed to create announcement record.');
+    let image = null;
+    const imageFile = formData.get('image') as File | null;
+    if (imageFile && imageFile.size > 0) {
+      const ext = (imageFile.name.split('.').pop() || 'png').toLowerCase();
+      const fName = `announcements/img_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+      const buf = Buffer.from(await imageFile.arrayBuffer());
+
+      const { error: uploadErr } = await supabase.storage
+        .from('ftc-media')
+        .upload(fName, buf, { contentType: imageFile.type || 'image/png', upsert: true });
+      if (uploadErr) throw uploadErr;
+
+      image = getStoragePublicUrl(fName);
+    }
+
+    const { data: record, error: insertErr } = await supabase
+      .from('announcements')
+      .insert({
+        title,
+        description,
+        link,
+        is_active: isActive,
+        ends_at,
+        image,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+    if (insertErr) throw insertErr;
+
+    const mappedRecord = {
+      id: record.id,
+      title: record.title,
+      image: record.image,
+      link: record.link,
+      isActive: record.is_active,
+      endsAt: record.ends_at,
+      description: record.description,
+      created: record.created_at,
+      updated: record.updated_at,
+    };
 
     await writeAuditLog(
       check.actorEmail!,
@@ -855,13 +1448,13 @@ export async function createAnnouncementAction(formData: FormData) {
       'announcements',
       record.id,
       undefined,
-      toRecord(record),
+      toRecord(mappedRecord),
       { ip: check.ip, userAgent: check.userAgent }
     );
 
     revalidatePath('/admin/announcements');
     revalidatePath('/', 'layout');
-    return { success: true, data: record };
+    return { success: true, data: mappedRecord };
   } catch (err: any) {
     console.error('[createAnnouncementAction] Error:', err);
     return { success: false, error: err?.message || 'Failed to create announcement.' };
@@ -873,49 +1466,97 @@ export async function updateAnnouncementAction(id: string, formData: FormData) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
+    const supabase = getAdminSupabase();
+    const { data: oldRecord, error: getErr } = await supabase
+      .from('announcements')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (getErr || !oldRecord) throw new Error('Announcement not found.');
+
     const isRemoveImage = formData.get('removeImage') === 'true';
-    formData.delete('removeImage');
+    const title = formData.get('title');
+    const description = formData.get('description');
+    const link = formData.get('link');
+    const isActive = formData.get('isActive');
+    const endsAtVal = formData.get('endsAt')?.toString();
+
+    const patch: Record<string, any> = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (title !== null) patch.title = String(title);
+    if (description !== null) patch.description = String(description);
+    if (link !== null) patch.link = String(link) || null;
+    if (isActive !== null) patch.is_active = isActive === 'true';
+
+    if (endsAtVal !== undefined) {
+      if (endsAtVal) {
+        const endOfDay = new Date(endsAtVal);
+        if (!isNaN(endOfDay.getTime())) {
+          endOfDay.setHours(23, 59, 59, 999);
+          patch.ends_at = endOfDay.toISOString();
+        } else {
+          patch.ends_at = null;
+        }
+      } else {
+        patch.ends_at = null;
+      }
+    }
 
     if (isRemoveImage) {
-      formData.set('image', '');
+      patch.image = null;
     } else {
-      const imageFile = formData.get('image');
-      if (!imageFile || (imageFile instanceof File && imageFile.size === 0)) {
-        formData.delete('image');
+      const imageFile = formData.get('image') as File | null;
+      if (imageFile && imageFile.size > 0) {
+        const ext = (imageFile.name.split('.').pop() || 'png').toLowerCase();
+        const fName = `announcements/img_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+        const buf = Buffer.from(await imageFile.arrayBuffer());
+
+        const { error: uploadErr } = await supabase.storage
+          .from('ftc-media')
+          .upload(fName, buf, { contentType: imageFile.type || 'image/png', upsert: true });
+        if (uploadErr) throw uploadErr;
+
+        patch.image = getStoragePublicUrl(fName);
       }
     }
 
-    // Normalize endsAt
-    const endsAtVal = formData.get('endsAt')?.toString();
-    if (endsAtVal) {
-      const endOfDay = new Date(endsAtVal);
-      if (!isNaN(endOfDay.getTime())) {
-        endOfDay.setHours(23, 59, 59, 999);
-        formData.set('endsAt', endOfDay.toISOString());
-      } else {
-        formData.delete('endsAt');
-      }
-    } else {
-      formData.delete('endsAt');
-    }
+    const { data: record, error: updateErr } = await supabase
+      .from('announcements')
+      .update(patch)
+      .eq('id', id)
+      .select()
+      .single();
+    if (updateErr) throw updateErr;
 
-    const record = await pbAnnouncements.update(id, formData);
-    if (!record) throw new Error('Failed to update announcement record.');
+    const mappedRecord = {
+      id: record.id,
+      title: record.title,
+      image: record.image,
+      link: record.link,
+      isActive: record.is_active,
+      endsAt: record.ends_at,
+      description: record.description,
+      created: record.created_at,
+      updated: record.updated_at,
+    };
 
     await writeAuditLog(
       check.actorEmail!,
       'update',
       'announcements',
       id,
-      undefined,
-      toRecord(record),
+      toRecord(oldRecord),
+      toRecord(mappedRecord),
       { ip: check.ip, userAgent: check.userAgent }
     );
 
     revalidatePath('/admin/announcements');
     revalidatePath('/', 'layout');
-    return { success: true, data: record };
+    return { success: true, data: mappedRecord };
   } catch (err: any) {
+    console.error('[updateAnnouncementAction] Error:', err);
     return { success: false, error: err.message || 'Failed to update announcement.' };
   }
 }
@@ -925,7 +1566,9 @@ export async function deleteAnnouncementAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    await pbAnnouncements.delete(id);
+    const supabase = getAdminSupabase();
+    const { error } = await supabase.from('announcements').delete().eq('id', id);
+    if (error) throw error;
 
     await writeAuditLog(
       check.actorEmail!,
@@ -950,7 +1593,26 @@ export async function toggleAnnouncementActiveAction(id: string, isActive: boole
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const record = await pbAnnouncements.update(id, { isActive });
+    const supabase = getAdminSupabase();
+    const { data: record, error } = await supabase
+      .from('announcements')
+      .update({ is_active: isActive, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+
+    const mappedRecord = {
+      id: record.id,
+      title: record.title,
+      image: record.image,
+      link: record.link,
+      isActive: record.is_active,
+      endsAt: record.ends_at,
+      description: record.description,
+      created: record.created_at,
+      updated: record.updated_at,
+    };
 
     await writeAuditLog(
       check.actorEmail!,
@@ -958,14 +1620,15 @@ export async function toggleAnnouncementActiveAction(id: string, isActive: boole
       'announcements',
       id,
       undefined,
-      toRecord(record),
+      toRecord(mappedRecord),
       { ip: check.ip, userAgent: check.userAgent }
     );
 
     revalidatePath('/admin/announcements');
     revalidatePath('/', 'layout');
-    return { success: true, data: record };
+    return { success: true, data: mappedRecord };
   } catch (err: any) {
+    console.error('[admin.ts] Error in toggleAnnouncementStatusAction:', err);
     return { success: false, error: err.message || 'Failed to toggle status.' };
   }
 }
@@ -1005,19 +1668,73 @@ export async function updateSiteSettingsAction(key: string, value: Record<string
 
 // ─── Homepage Blocks Actions ──────────────────────────────────────────────────
 
+export async function getHomepageBlocksAction() {
+  const check = await checkPermission('homepage', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
+
+  try {
+    const res = await pbHomepageBlocks.getAll();
+    return { success: true, data: JSON.parse(JSON.stringify(res)) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch homepage blocks.', data: [] };
+  }
+}
+
+export async function getHeroBannersAction() {
+  const check = await checkPermission('homepage', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
+
+  try {
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase
+      .from('hero_banners')
+      .select('*')
+      .order('sort_order', { ascending: true });
+    if (error) throw error;
+
+    const normalized = (data || []).map((row) => ({
+      id: row.id,
+      eyebrow: row.eyebrow,
+      titlePrefix: row.title_prefix,
+      titleHighlight: row.title_highlight,
+      description: row.description,
+      ctaText: row.cta_text,
+      ctaSecondary: row.cta_secondary,
+      link: row.link,
+      secondaryLink: row.secondary_link,
+      accentColor: row.accent_color,
+      imageSrc: row.image_src,
+      imageAlt: row.image_alt,
+      sortOrder: row.sort_order || 0,
+      isEnabled: row.is_enabled ?? true,
+      image: row.image || undefined,
+      created: row.created_at,
+      updated: row.updated_at,
+    }));
+
+    return { success: true, data: normalized };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch hero banners.', data: [] };
+  }
+}
+
 export async function updateHomepageBlocksAction(blocks: { id: string; isEnabled: boolean; sortOrder: number }[]) {
   const check = await checkPermission('homepage', 'write');
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const pb = await getAdminPb();
-    
-    // Perform updates sequentially
+    const supabase = getAdminSupabase();
+
     for (const block of blocks) {
-      await pbHomepageBlocks.update(block.id, {
-        isEnabled: block.isEnabled,
-        sortOrder: block.sortOrder,
-      });
+      const { error } = await supabase
+        .from('homepage_blocks')
+        .update({
+          is_enabled: block.isEnabled,
+          sort_order: block.sortOrder,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', block.id);
+      if (error) throw error;
     }
 
     await writeAuditLog(
@@ -1043,7 +1760,28 @@ export async function updateHomepageBlockConfigAction(id: string, config: any) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const record = await pbHomepageBlocks.update(id, { config });
+    const supabase = getAdminSupabase();
+    const { data: record, error } = await supabase
+      .from('homepage_blocks')
+      .update({ config, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+
+    const normalized = {
+      id: record.id,
+      type: record.type,
+      title: record.title,
+      config: record.config,
+      sortOrder: record.sort_order,
+      isEnabled: record.is_enabled,
+      scheduledStart: record.scheduled_start,
+      scheduledEnd: record.scheduled_end,
+      deviceVisibility: record.device_visibility,
+      created: record.created_at,
+      updated: record.updated_at,
+    };
 
     await writeAuditLog(
       check.actorEmail!,
@@ -1051,13 +1789,13 @@ export async function updateHomepageBlockConfigAction(id: string, config: any) {
       'homepage_blocks',
       id,
       undefined,
-      toRecord(record),
+      toRecord(normalized),
       { ip: check.ip, userAgent: check.userAgent }
     );
 
     revalidatePath('/');
     revalidatePath('/admin/homepage');
-    return { success: true, data: record };
+    return { success: true, data: normalized };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to update homepage block config.' };
   }
@@ -1077,16 +1815,38 @@ export async function createHomepageBlockAction(data: {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const record = await pbHomepageBlocks.create({
-      type: data.type,
-      title: data.title,
-      isEnabled: data.isEnabled !== false,
-      sortOrder: data.sortOrder || 0,
-      config: data.config || {},
-      deviceVisibility: data.deviceVisibility || 'all',
-      scheduledStart: data.scheduledStart || '',
-      scheduledEnd: data.scheduledEnd || '',
-    });
+    const supabase = getAdminSupabase();
+    const { data: record, error } = await supabase
+      .from('homepage_blocks')
+      .insert({
+        type: data.type,
+        title: data.title,
+        is_enabled: data.isEnabled !== false,
+        sort_order: data.sortOrder || 0,
+        config: data.config || {},
+        device_visibility: data.deviceVisibility || 'all',
+        scheduled_start: data.scheduledStart || null,
+        scheduled_end: data.scheduledEnd || null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+    if (error) throw error;
+
+    const normalized = {
+      id: record.id,
+      type: record.type,
+      title: record.title,
+      config: record.config,
+      sortOrder: record.sort_order,
+      isEnabled: record.is_enabled,
+      scheduledStart: record.scheduled_start,
+      scheduledEnd: record.scheduled_end,
+      deviceVisibility: record.device_visibility,
+      created: record.created_at,
+      updated: record.updated_at,
+    };
 
     await writeAuditLog(
       check.actorEmail!,
@@ -1094,13 +1854,13 @@ export async function createHomepageBlockAction(data: {
       'homepage_blocks',
       record.id,
       undefined,
-      toRecord(record),
+      toRecord(normalized),
       { ip: check.ip, userAgent: check.userAgent }
     );
 
     revalidatePath('/');
     revalidatePath('/admin/homepage');
-    return { success: true, data: record };
+    return { success: true, data: normalized };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to create homepage block.' };
   }
@@ -1111,7 +1871,9 @@ export async function deleteHomepageBlockAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    await pbHomepageBlocks.delete(id);
+    const supabase = getAdminSupabase();
+    const { error } = await supabase.from('homepage_blocks').delete().eq('id', id);
+    if (error) throw error;
 
     await writeAuditLog(
       check.actorEmail!,
@@ -1139,8 +1901,77 @@ export async function createHeroBannerAction(formData: FormData) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const pb = await getAdminPb();
-    const record = await pb.collection('hero_banners').create(formData);
+    const supabase = getAdminSupabase();
+    const eyebrow = String(formData.get('eyebrow') || '');
+    const titlePrefix = String(formData.get('titlePrefix') || '');
+    const titleHighlight = String(formData.get('titleHighlight') || '');
+    const description = String(formData.get('description') || '');
+    const ctaText = String(formData.get('ctaText') || '');
+    const ctaSecondary = formData.get('ctaSecondary') ? String(formData.get('ctaSecondary')) : null;
+    const link = String(formData.get('link') || '');
+    const secondaryLink = formData.get('secondaryLink') ? String(formData.get('secondaryLink')) : null;
+    const accentColor = String(formData.get('accentColor') || '#000000');
+    const imageAlt = formData.get('imageAlt') ? String(formData.get('imageAlt')) : null;
+    const isEnabled = formData.get('isEnabled') !== 'false';
+    const sortOrder = parseInt(String(formData.get('sortOrder') || '0')) || 0;
+
+    let image = null;
+    const imageFile = formData.get('image') as File | null;
+    if (imageFile && imageFile.size > 0) {
+      const ext = (imageFile.name.split('.').pop() || 'png').toLowerCase();
+      const fName = `hero_banners/slide_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+      const buf = Buffer.from(await imageFile.arrayBuffer());
+
+      const { error: uploadErr } = await supabase.storage
+        .from('ftc-media')
+        .upload(fName, buf, { contentType: imageFile.type || 'image/png', upsert: true });
+      if (uploadErr) throw uploadErr;
+
+      image = getStoragePublicUrl(fName);
+    }
+
+    const { data: record, error: insertErr } = await supabase
+      .from('hero_banners')
+      .insert({
+        eyebrow,
+        title_prefix: titlePrefix,
+        title_highlight: titleHighlight,
+        description,
+        cta_text: ctaText,
+        cta_secondary: ctaSecondary,
+        link,
+        secondary_link: secondaryLink,
+        accent_color: accentColor,
+        image_alt: imageAlt,
+        is_enabled: isEnabled,
+        sort_order: sortOrder,
+        image,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+    if (insertErr) throw insertErr;
+
+    const normalized = {
+      id: record.id,
+      eyebrow: record.eyebrow,
+      titlePrefix: record.title_prefix,
+      titleHighlight: record.title_highlight,
+      description: record.description,
+      ctaText: record.cta_text,
+      ctaSecondary: record.cta_secondary,
+      link: record.link,
+      secondaryLink: record.secondary_link,
+      accentColor: record.accent_color,
+      imageSrc: record.image_src,
+      imageAlt: record.image_alt,
+      sortOrder: record.sort_order,
+      isEnabled: record.is_enabled,
+      image: record.image,
+      created: record.created_at,
+      updated: record.updated_at,
+    };
 
     await writeAuditLog(
       check.actorEmail!,
@@ -1148,14 +1979,14 @@ export async function createHeroBannerAction(formData: FormData) {
       'hero_banners',
       record.id,
       undefined,
-      toRecord(record),
+      toRecord(normalized),
       { ip: check.ip, userAgent: check.userAgent }
     );
 
     revalidatePath('/', 'layout');
     revalidatePath('/', 'page');
     revalidatePath('/admin/homepage');
-    return { success: true, data: toRecord(record) };
+    return { success: true, data: normalized };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to create hero banner.' };
   }
@@ -1166,23 +1997,100 @@ export async function updateHeroBannerAction(id: string, formData: FormData) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const pb = await getAdminPb();
-    const record = await pb.collection('hero_banners').update(id, formData);
+    const supabase = getAdminSupabase();
+    const { data: oldRecord, error: getErr } = await supabase
+      .from('hero_banners')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (getErr || !oldRecord) throw new Error('Hero banner not found.');
+
+    const patch: Record<string, any> = {
+      updated_at: new Date().toISOString(),
+    };
+
+    const eyebrow = formData.get('eyebrow');
+    const titlePrefix = formData.get('titlePrefix');
+    const titleHighlight = formData.get('titleHighlight');
+    const description = formData.get('description');
+    const ctaText = formData.get('ctaText');
+    const ctaSecondary = formData.get('ctaSecondary');
+    const link = formData.get('link');
+    const secondaryLink = formData.get('secondaryLink');
+    const accentColor = formData.get('accentColor');
+    const imageAlt = formData.get('imageAlt');
+    const isEnabled = formData.get('isEnabled');
+    const sortOrder = formData.get('sortOrder');
+
+    if (eyebrow !== null) patch.eyebrow = String(eyebrow);
+    if (titlePrefix !== null) patch.title_prefix = String(titlePrefix);
+    if (titleHighlight !== null) patch.title_highlight = String(titleHighlight);
+    if (description !== null) patch.description = String(description);
+    if (ctaText !== null) patch.cta_text = String(ctaText);
+    if (ctaSecondary !== null) patch.cta_secondary = String(ctaSecondary) || null;
+    if (link !== null) patch.link = String(link);
+    if (secondaryLink !== null) patch.secondary_link = String(secondaryLink) || null;
+    if (accentColor !== null) patch.accent_color = String(accentColor);
+    if (imageAlt !== null) patch.image_alt = String(imageAlt) || null;
+    if (isEnabled !== null) patch.is_enabled = isEnabled === 'true';
+    if (sortOrder !== null) patch.sort_order = parseInt(String(sortOrder)) || 0;
+
+    const imageFile = formData.get('image') as File | null;
+    if (imageFile && imageFile.size > 0) {
+      const ext = (imageFile.name.split('.').pop() || 'png').toLowerCase();
+      const fName = `hero_banners/slide_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+      const buf = Buffer.from(await imageFile.arrayBuffer());
+
+      const { error: uploadErr } = await supabase.storage
+        .from('ftc-media')
+        .upload(fName, buf, { contentType: imageFile.type || 'image/png', upsert: true });
+      if (uploadErr) throw uploadErr;
+
+      patch.image = getStoragePublicUrl(fName);
+    }
+
+    const { data: record, error: updateErr } = await supabase
+      .from('hero_banners')
+      .update(patch)
+      .eq('id', id)
+      .select()
+      .single();
+    if (updateErr) throw updateErr;
+
+    const normalized = {
+      id: record.id,
+      eyebrow: record.eyebrow,
+      titlePrefix: record.title_prefix,
+      titleHighlight: record.title_highlight,
+      description: record.description,
+      ctaText: record.cta_text,
+      ctaSecondary: record.cta_secondary,
+      link: record.link,
+      secondaryLink: record.secondary_link,
+      accentColor: record.accent_color,
+      imageSrc: record.image_src,
+      imageAlt: record.image_alt,
+      sortOrder: record.sort_order,
+      isEnabled: record.is_enabled,
+      image: record.image,
+      created: record.created_at,
+      updated: record.updated_at,
+    };
 
     await writeAuditLog(
       check.actorEmail!,
       'update',
       'hero_banners',
       id,
-      undefined,
-      toRecord(record),
+      toRecord(oldRecord),
+      toRecord(normalized),
       { ip: check.ip, userAgent: check.userAgent }
     );
 
     revalidatePath('/', 'layout');
     revalidatePath('/', 'page');
     revalidatePath('/admin/homepage');
-    return { success: true, data: toRecord(record) };
+    return { success: true, data: normalized };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to update hero banner.' };
   }
@@ -1193,8 +2101,9 @@ export async function deleteHeroBannerAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const pb = await getAdminPb();
-    await pb.collection('hero_banners').delete(id);
+    const supabase = getAdminSupabase();
+    const { error } = await supabase.from('hero_banners').delete().eq('id', id);
+    if (error) throw error;
 
     await writeAuditLog(
       check.actorEmail!,
@@ -1220,9 +2129,13 @@ export async function reorderHeroBannersAction(items: Array<{ id: string; sortOr
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const pb = await getAdminPb();
+    const supabase = getAdminSupabase();
     for (const item of items) {
-      await pb.collection('hero_banners').update(item.id, { sortOrder: item.sortOrder });
+      const { error } = await supabase
+        .from('hero_banners')
+        .update({ sort_order: item.sortOrder, updated_at: new Date().toISOString() })
+        .eq('id', item.id);
+      if (error) throw error;
     }
 
     revalidatePath('/', 'layout');
@@ -1241,8 +2154,39 @@ export async function uploadMediaAction(formData: FormData) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const pb = await getAdminPb();
-    const record = await pb.collection('media').create(formData);
+    const supabase = getAdminSupabase();
+    const file = formData.get('file');
+    const filename = (formData.get('filename') as string) || (file instanceof File ? file.name : 'asset');
+    const sizeBytes = Number(formData.get('sizeBytes')) || (file instanceof File ? file.size : 0);
+    const mimeType = (formData.get('mimeType') as string) || (file instanceof File ? file.type : 'application/octet-stream');
+    const tags = formData.getAll('tags').filter((t): t is string => typeof t === 'string' && t.length > 0);
+
+    let fileUrl = '';
+    if (file instanceof File) {
+      const ext = filename.split('.').pop() || 'bin';
+      const filePath = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { data: storageData, error: uploadErr } = await supabase.storage
+        .from('media')
+        .upload(filePath, file, { contentType: mimeType, upsert: false });
+      if (!uploadErr && storageData) {
+        const { data: publicUrlData } = supabase.storage.from('media').getPublicUrl(filePath);
+        fileUrl = publicUrlData.publicUrl;
+      }
+    }
+
+    const payload = {
+      filename,
+      file: fileUrl || filename,
+      url: fileUrl || filename,
+      size_bytes: sizeBytes,
+      mime_type: mimeType,
+      tags: tags.length > 0 ? tags : null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: record, error } = await supabase.from('media').insert(payload).select().single();
+    if (error) throw error;
 
     await writeAuditLog(
       check.actorEmail!,
@@ -1256,8 +2200,9 @@ export async function uploadMediaAction(formData: FormData) {
 
     revalidatePath('/admin/media');
     return { success: true, data: record };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to upload media file.' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to upload media file.';
+    return { success: false, error: message };
   }
 }
 
@@ -1266,9 +2211,10 @@ export async function deleteMediaAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const pb = await getAdminPb();
-    const oldRecord = await pb.collection('media').getOne(id);
-    await pb.collection('media').delete(id);
+    const supabase = getAdminSupabase();
+    const { data: oldRecord } = await supabase.from('media').select('*').eq('id', id).maybeSingle();
+    const { error } = await supabase.from('media').delete().eq('id', id);
+    if (error) throw error;
 
     await writeAuditLog(
       check.actorEmail!,
@@ -1282,24 +2228,99 @@ export async function deleteMediaAction(id: string) {
 
     revalidatePath('/admin/media');
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to delete media asset.' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to delete media asset.';
+    return { success: false, error: message };
   }
 }
 
 // ─── Customers Actions ────────────────────────────────────────────────────────
+
+export interface GetAdminCustomersInput {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  status?: string;
+  sort?: string;
+}
+
+export async function getAdminCustomersAction(input: GetAdminCustomersInput = {}) {
+  const check = await checkPermission('users', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
+
+  try {
+    const {
+      page = 1,
+      pageSize = 50,
+      search = '',
+      status,
+      sort
+    } = input;
+
+    const supabase = getAdminSupabase();
+    let query = supabase
+      .from('customers')
+      .select('*', { count: 'exact' });
+
+    if (search) {
+      query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%,phone.ilike.%${search}%`);
+    }
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    // sort
+    if (sort === 'oldest') {
+      query = query.order('created_at', { ascending: true });
+    } else {
+      query = query.order('created_at', { ascending: false });
+    }
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    const { data, count, error } = await query.range(from, to);
+    if (error) throw error;
+
+    return {
+      success: true,
+      data: data || [],
+      total: count || 0,
+      page,
+      pageSize,
+      totalPages: Math.ceil((count || 0) / pageSize)
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch customers.', data: [] };
+  }
+}
 
 export async function toggleCustomerStatusAction(id: string, currentStatus: 'active' | 'banned') {
   const check = await checkPermission('users', 'write');
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const pb = await getAdminPb();
+    const supabase = getAdminSupabase();
     const newStatus = currentStatus === 'active' ? 'banned' : 'active';
-    const oldRecord = await pb.collection('customers').getOne(id);
-    const record = await pb.collection('customers').update(id, {
-      status: newStatus,
-    });
+
+    const { data: oldRecord, error: getErr } = await supabase
+      .from('customers')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (getErr || !oldRecord) throw new Error('Customer profile not found.');
+
+    const { data: record, error: updateErr } = await supabase
+      .from('customers')
+      .update({
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    if (updateErr) throw updateErr;
 
     await writeAuditLog(
       check.actorEmail!,
@@ -1320,19 +2341,158 @@ export async function toggleCustomerStatusAction(id: string, currentStatus: 'act
 
 // ─── Orders Actions ──────────────────────────────────────────────────────────
 
-export async function getAdminOrdersAction() {
+export async function getAdminDashboardMetricsAction() {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
+
+  try {
+    const supabase = getAdminSupabase();
+
+    // 1. Get total order count
+    const { count: ordersCount, error: countErr } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true });
+
+    if (countErr) throw countErr;
+
+    // 2. Get totals for paid orders only via secure RPC
+    const { data: revenueData, error: revErr } = await supabase.rpc('get_admin_paid_revenue');
+    if (revErr) throw revErr;
+
+    const totalRevenue = Number(revenueData) || 0;
+
+    // 3. Get total paid order count for AOV
+    const { count: paidCount, error: paidCountErr } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_paid', true);
+
+    if (paidCountErr) throw paidCountErr;
+
+    const avgOrderValue = (paidCount && paidCount > 0) ? totalRevenue / paidCount : 0;
+
+    return {
+      success: true,
+      data: {
+        ordersCount: ordersCount || 0,
+        totalRevenue,
+        avgOrderValue,
+      }
+    };
+  } catch (err: any) {
+    console.error('[getAdminDashboardMetricsAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to fetch metrics.' };
+  }
+}
+export interface GetAdminOrdersInput {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  status?: string;
+  paymentStatus?: string;
+  paymentMethod?: string;
+  sort?: string;
+}
+
+export async function getAdminOrderByIdAction(id: string) {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) throw error;
+    return { success: true, data };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function getAdminOrdersAction(input: GetAdminOrdersInput = {}) {
   const check = await checkPermission('orders', 'read');
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.', data: [] };
 
   try {
-    const pb = await getAdminPb();
-    const result = await pb.collection('orders').getList(1, 100, {
-      sort: '-created',
-    });
+    const {
+      page = 1,
+      pageSize = 50,
+      search = '',
+      status,
+      paymentStatus,
+      paymentMethod,
+      sort
+    } = input;
+
+    const supabase = getAdminSupabase();
+
+    // Select only lightweight fields required for the list view
+    let query = supabase
+      .from('orders')
+      .select(`
+        id,
+        order_id,
+        created_at,
+        customer,
+        total,
+        status,
+        is_paid,
+        is_delivered,
+        payment_details->method
+      `, { count: 'exact' });
+
+    if (search) {
+      // Allow searching by human-readable order_id, or customer JSONB fields
+      // Wrap the ILIKE patterns in double quotes to prevent commas/parentheses from breaking PostgREST .or() parsing
+      const safeSearch = search.replace(/"/g, '');
+      query = query.or(`order_id.ilike."%${safeSearch}%",customer->>email.ilike."%${safeSearch}%",customer->>name.ilike."%${safeSearch}%"`);
+    }
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    if (paymentStatus === 'paid') {
+      query = query.eq('is_paid', true);
+    } else if (paymentStatus === 'unpaid') {
+      query = query.eq('is_paid', false);
+    }
+
+    // sorting
+    if (sort === 'total_asc') {
+      query = query.order('total', { ascending: true });
+    } else if (sort === 'total_desc') {
+      query = query.order('total', { ascending: false });
+    } else if (sort === 'oldest') {
+      query = query.order('created_at', { ascending: true });
+    } else {
+      query = query.order('created_at', { ascending: false });
+    }
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    const { data, count, error } = await query.range(from, to);
+    if (error) throw error;
+
+    // We do NOT normalize data differently unless required, we just return the flat list.
+    // However, payment_details->method comes out nested or as `method` depending on Supabase version.
+    const mapped = (data || []).map(row => ({
+      ...row,
+      payment_method: row.method || (row as any).payment_details?.method || 'N/A'
+    }));
 
     return {
       success: true,
-      data: result.items,
+      data: mapped,
+      total: count || 0,
+      page,
+      pageSize,
+      totalPages: Math.ceil((count || 0) / pageSize)
     };
   } catch (err: any) {
     console.error('[getAdminOrdersAction] Error:', err);
@@ -1345,31 +2505,90 @@ export async function updateOrderStatusAction(id: string, status: 'pending' | 'p
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const pb = await getAdminPb();
-    const oldRecord = await pb.collection('orders').getOne(id);
-    
-    const updateData: Record<string, any> = { status };
+    const supabase = getAdminSupabase();
+    const { data: oldRecord, error: getErr } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (getErr || !oldRecord) throw new Error('Order not found.');
+
+    const paymentMethod = oldRecord.payment_details?.method;
+    const isCash = isCashPaymentMethod(paymentMethod);
+    const updateData: Record<string, any> = { status, updated_at: new Date().toISOString() };
+
+    let justPaidOnDelivery = false;
+
     if (status === 'delivered') {
-      updateData.isDelivered = true;
-      updateData.deliveredAt = new Date().toISOString();
+      updateData.is_delivered = true;
+      updateData.delivered_at = new Date().toISOString();
+
+      // For Cash on Delivery and Store Pickup, marking as delivered confirms cash collection
+      if (isCash && !oldRecord.is_paid) {
+        updateData.is_paid = true;
+        updateData.paid_at = new Date().toISOString();
+        updateData.payment_details = {
+          ...(oldRecord.payment_details || {}),
+          status: 'paid',
+        };
+        justPaidOnDelivery = true;
+      }
     } else if (status === 'shipped') {
-      updateData.isDelivered = false; // reset/ensure
+      if (requiresPaymentBeforeShipment(paymentMethod) && !oldRecord.is_paid) {
+        return {
+          success: false,
+          error: `Cannot mark a ${formatPaymentMethod(paymentMethod)} order as shipped before payment is verified and marked as paid.`,
+        };
+      }
+      if (paymentMethod === 'cash_pickup') {
+        return {
+          success: false,
+          error: 'Cash on Pickup orders are fulfilled and handed over in-store upon payment, not shipped via courier.',
+        };
+      }
+      updateData.is_delivered = false;
     }
 
-    const record = await pbOrders.update(id, updateData);
+    const { data: record, error: updateErr } = await supabase
+      .from('orders')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+    if (updateErr) throw updateErr;
+
+    if (justPaidOnDelivery) {
+      try {
+        await deductStockForConfirmedOrderAction(id);
+      } catch (stockErr) {
+        console.error('[updateOrderStatusAction] Stock check error on delivery:', stockErr);
+      }
+
+      try {
+        await sendInvoiceEmailForOrder(id);
+      } catch (emailErr) {
+        console.error('[updateOrderStatusAction] Failed to send payment receipt email on delivery:', emailErr);
+      }
+    }
 
     if (status === 'shipped') {
       try {
         const customerEmail = oldRecord.customer?.email || oldRecord.customerEmail || oldRecord.email;
         if (customerEmail) {
+          const orderItems = Array.isArray(record.items) ? record.items : [];
           await sendOrderShippingEmail({
             to: customerEmail,
-            orderNumber: oldRecord.orderId || oldRecord.id,
-            customerName: oldRecord.customer?.name || oldRecord.customerName || 'Customer',
-            shippingAddress: oldRecord.shippingAddress,
-            items: Array.isArray(oldRecord.items)
-              ? oldRecord.items.map((i: any) => ({ name: i.name || 'Product', qty: i.quantity || i.qty || 1 }))
-              : [],
+            orderNumber: oldRecord.order_id || oldRecord.id,
+            customerName: oldRecord.customer?.name || 'Customer',
+            shippingAddress: oldRecord.shipping_address,
+            paymentMethod: oldRecord.payment_details?.method,
+            isPaid: oldRecord.is_paid,
+            totalAmount: oldRecord.total,
+            items: orderItems.map((i: any) => ({
+              name: i.name || 'Product',
+              qty: i.quantity || i.qty || 1,
+              serials: Array.isArray(i.assignedSerials) ? i.assignedSerials : [],
+            })),
           });
         }
       } catch (shippingEmailErr) {
@@ -1399,25 +2618,46 @@ export async function markOrderAsPaidAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const pb = await getAdminPb();
-    const oldRecord = await pb.collection('orders').getOne(id);
+    const supabase = getAdminSupabase();
+    const { data: oldRecord, error: getErr } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (getErr || !oldRecord) throw new Error('Order not found.');
+
+    const currentPaymentDetails = oldRecord.payment_details || oldRecord.paymentDetails || {};
+    const nextStatus = oldRecord.status === 'pending' || oldRecord.status === 'checkout_draft'
+      ? 'processing'
+      : oldRecord.status;
 
     const updateData: Record<string, any> = {
-      isPaid: true,
-      paidAt: new Date().toISOString(),
-      status: 'processing',
+      is_paid: true,
+      paid_at: new Date().toISOString(),
+      payment_details: {
+        ...currentPaymentDetails,
+        status: 'paid',
+      },
+      status: nextStatus,
+      updated_at: new Date().toISOString(),
     };
 
-    const record = await pbOrders.update(id, updateData);
+    const { data: record, error: updateErr } = await supabase
+      .from('orders')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+    if (updateErr) throw updateErr;
 
-    // Deduct stock upon confirmed payment
+    // Deduct stock idempotently for confirmed order
     try {
       await deductStockForConfirmedOrderAction(id);
     } catch (stockErr) {
       console.error('[markOrderAsPaidAction] Stock deduction error:', stockErr);
     }
 
-    // Send confirmation email to customer now that payment is confirmed
+    // Send confirmation/receipt email to customer now that payment is confirmed
     try {
       await sendInvoiceEmailForOrder(id);
     } catch (emailErr) {
@@ -1441,85 +2681,153 @@ export async function markOrderAsPaidAction(id: string) {
   }
 }
 
-/**
- * Marks an order as Returned (e.g. customer unreachable / package returned).
- * Restores product countInStock, releases serial units back to available status,
- * and updates order status to 'cancelled'.
- */
+export async function getPaymentSlipSignedUrlAction(orderId: string): Promise<{
+  success: boolean;
+  signedUrl?: string;
+  error?: string;
+}> {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) {
+    return { success: false, error: 'Unauthorized: Read orders permission required.' };
+  }
+
+  try {
+    const cleanOrderId = (orderId || '').replace(/[^a-zA-Z0-9-]/g, '');
+    if (!cleanOrderId) {
+      return { success: false, error: 'Invalid order reference.' };
+    }
+
+    const supabase = getAdminSupabase();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanOrderId);
+    let query = supabase.from('orders').select('id, order_id, payment_details, paymentDetails');
+    if (isUuid) {
+      query = query.or(`id.eq.${cleanOrderId},order_id.eq.${cleanOrderId}`);
+    } else {
+      query = query.eq('order_id', cleanOrderId);
+    }
+    const { data: order, error } = await query.maybeSingle();
+
+    if (error || !order) {
+      return { success: false, error: 'Order not found.' };
+    }
+
+    const pd = order.payment_details || order.paymentDetails || {};
+    const slipPath = pd.paymentSlipPath;
+    const slipUrl = pd.paymentSlipUrl || pd.paymentSlip;
+
+    if (slipPath) {
+      const { data, error: signErr } = await supabase.storage
+        .from('ftc-payment-slips')
+        .createSignedUrl(slipPath, 120); // 120s TTL
+
+      if (signErr || !data?.signedUrl) {
+        console.error('[getPaymentSlipSignedUrlAction] Failed to sign URL:', signErr);
+        return { success: false, error: 'Failed to generate secure signed URL for payment slip.' };
+      }
+
+      try {
+        await writeAuditLog(
+          check.actorEmail!,
+          'update',
+          'orders',
+          order.id,
+          undefined,
+          { action: 'view_payment_slip' },
+          { ip: check.ip, userAgent: check.userAgent }
+        );
+      } catch {
+        // non-blocking
+      }
+
+      return { success: true, signedUrl: data.signedUrl };
+    }
+
+    if (slipUrl && typeof slipUrl === 'string') {
+      return { success: true, signedUrl: slipUrl };
+    }
+
+    return { success: false, error: 'No payment slip attached to this order.' };
+  } catch (err: unknown) {
+    console.error('[getPaymentSlipSignedUrlAction] Error:', err);
+    return { success: false, error: 'Failed to access payment slip.' };
+  }
+}
+
 export async function markOrderAsReturnedAction(id: string, reason = 'Returned / Unreachable Customer') {
   const check = await checkPermission('orders', 'write');
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
   try {
-    const adminPb = await getAdminPb();
-    const order = await adminPb.collection('orders').getOne(id);
-    if (!order) return { success: false, error: 'Order not found.' };
+    const supabase = getAdminSupabase();
+    const { data: order, error: getErr } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
 
-    const items = Array.isArray(order.items) ? order.items : [];
-    const orderNum = order.orderId || order.id;
+    if (getErr || !order) return { success: false, error: 'Order not found.' };
 
-    // 1. If stock was deducted for this order, restore countInStock and log stock_purchases restock entry
-    if (order.stockDeducted) {
-      for (const item of items) {
-        const productId = item.productId || item.product || item.id;
-        const qty = item.quantity || item.qty || 1;
+    const orderNum = order.order_id || order.id;
 
-        if (productId) {
-          try {
-            const product = await pbProducts.getById(productId);
-            if (product) {
-              const currentStock = product.countInStock || 0;
-              await adminPb.collection('products').update(productId, {
-                countInStock: currentStock + qty,
-              });
-            }
-          } catch (pErr) {
-            console.warn(`[markOrderAsReturnedAction] Failed restoring stock for ${productId}:`, pErr);
-          }
+    // 1. Release all serial units linked to this order back to 'available' status
+    const { data: linkedUnits, error: linkedErr } = await supabase
+      .from('stock_management')
+      .select('id, product_id')
+      .eq('order_id', order.id);
 
-          try {
-            await adminPb.collection('stock_purchases').create({
-              product: productId,
-              batchNumber: `RESTOCK-${orderNum}`,
-              quantity: qty,
-              unitCost: item.price || 0,
-              supplier: `Returned Order (${reason})`,
-              purchaseDate: new Date().toISOString().split('T')[0],
-              notes: `Package Returned - Restocked from Order ${orderNum} (${reason})`,
-            });
-          } catch (spErr) {
-            console.warn('[markOrderAsReturnedAction] Failed creating stock_purchases restock record:', spErr);
-          }
+    if (linkedErr) throw linkedErr;
+
+    if (linkedUnits && linkedUnits.length > 0) {
+      const { error: releaseErr } = await supabase
+        .from('stock_management')
+        .update({
+          status: 'available',
+          order_id: null,
+          notes: `Restored to available stock from Returned Order ${orderNum} (${reason})`,
+        })
+        .eq('order_id', order.id);
+
+      if (releaseErr) throw releaseErr;
+
+      // Update count_in_stock for affected products using a single bulk query
+      const productIds = Array.from(new Set(linkedUnits.map((u: any) => u.product_id).filter(Boolean)));
+      if (productIds.length > 0) {
+        const { data: availUnits, error: availErr } = await supabase
+          .from('stock_management')
+          .select('product_id')
+          .in('product_id', productIds)
+          .eq('status', 'available');
+
+        if (availErr) throw availErr;
+
+        const countMap = new Map<string, number>();
+        for (const pId of productIds) countMap.set(pId, 0);
+        for (const u of (availUnits || [])) {
+          if (u.product_id) countMap.set(u.product_id, (countMap.get(u.product_id) || 0) + 1);
+        }
+        for (const [pId, count] of countMap.entries()) {
+          const { error: prodErr } = await supabase.from('products').update({ count_in_stock: count }).eq('id', pId);
+          if (prodErr) throw prodErr;
         }
       }
     }
 
-    // 2. Release all serial units linked to this order back to 'available' status
-    try {
-      const linkedUnits = await adminPb.collection('stock_management').getFullList({
-        filter: adminPb.filter('orderId = {:recId} || orderId = {:orderNo}', {
-          recId: order.id,
-          orderNo: order.orderId || order.id,
-        }),
-      });
-
-      for (const unit of linkedUnits) {
-        await adminPb.collection('stock_management').update(unit.id, {
-          status: 'available',
-          orderId: '',
-          notes: `Restored to available stock from Returned Order ${orderNum} (${reason})`,
-        });
-      }
-    } catch (unitErr) {
-      console.warn('[markOrderAsReturnedAction] Error releasing serial units:', unitErr);
+    if (order.status === 'cancelled') {
+      return { success: true, message: 'Order is already cancelled or returned.' };
     }
 
-    // 3. Update order status to 'cancelled' with return notes
-    const updatedOrder = await pbOrders.update(id, {
-      status: 'cancelled',
-      stockDeducted: false,
-      notes: `Returned: ${reason}`,
-    });
+    // 2. Update order status to 'cancelled' with return notes
+    const { data: updatedOrder, error: updateErr } = await supabase
+      .from('orders')
+      .update({
+        status: 'cancelled',
+        notes: order.notes ? `${order.notes} | Returned: ${reason}` : `Returned: ${reason}`,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    if (updateErr) throw updateErr;
 
     await writeAuditLog(
       check.actorEmail!,
@@ -1535,10 +2843,172 @@ export async function markOrderAsReturnedAction(id: string, reason = 'Returned /
     revalidatePath('/admin/inventory');
     revalidatePath('/products');
 
+    // Send return confirmation email to customer if email is valid (non-blocking)
+    const custEmail = (order.customer?.email || order.customerEmail || order.email || order.customer_email || '').trim();
+    const custName = (order.customer?.name || order.customerName || order.customer_name || order.name || 'Customer').trim();
+    const refundTotal = Number(order.total ?? order.total_amount ?? 0);
+
+    if (custEmail && custEmail !== 'guest@example.com' && !custEmail.endsWith('@customer.local')) {
+      sendOrderReturnEmail({
+        to: custEmail,
+        orderNumber: order.order_id || order.id,
+        customerName: custName,
+        refundAmount: refundTotal,
+        returnReason: reason,
+      }).catch((emailErr) => {
+        console.warn('[markOrderAsReturnedAction] Non-blocking return email error:', emailErr);
+      });
+    }
+
     return { success: true };
   } catch (err: any) {
     console.error('[markOrderAsReturnedAction] Error:', err);
     return { success: false, error: err.message || 'Failed to process order return.' };
+  }
+}
+
+export async function cancelOrderAction(id: string, reason = 'Cancelled by Admin') {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
+
+  try {
+    const supabase = getAdminSupabase();
+    const { data: order, error: getErr } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (getErr || !order) return { success: false, error: 'Order not found.' };
+
+    const orderNum = order.order_id || order.id;
+
+    // 1. Release all serial units linked to this order back to 'available' status
+    const { data: linkedUnits, error: linkedErr } = await supabase
+      .from('stock_management')
+      .select('id, product_id')
+      .eq('order_id', order.id);
+
+    if (linkedErr) throw linkedErr;
+
+    if (linkedUnits && linkedUnits.length > 0) {
+      const { error: releaseErr } = await supabase
+        .from('stock_management')
+        .update({
+          status: 'available',
+          order_id: null,
+          notes: `Restored to available stock from Cancelled Order ${orderNum} (${reason})`,
+        })
+        .eq('order_id', order.id);
+
+      if (releaseErr) throw releaseErr;
+
+      // Update count_in_stock for affected products using a single bulk query
+      const productIds = Array.from(new Set(linkedUnits.map((u: any) => u.product_id).filter(Boolean)));
+      if (productIds.length > 0) {
+        const { data: availUnits, error: availErr } = await supabase
+          .from('stock_management')
+          .select('product_id')
+          .in('product_id', productIds)
+          .eq('status', 'available');
+
+        if (availErr) throw availErr;
+
+        const countMap = new Map<string, number>();
+        for (const pId of productIds) countMap.set(pId, 0);
+        for (const u of (availUnits || [])) {
+          if (u.product_id) countMap.set(u.product_id, (countMap.get(u.product_id) || 0) + 1);
+        }
+        for (const [pId, count] of countMap.entries()) {
+          const { error: prodErr } = await supabase.from('products').update({ count_in_stock: count }).eq('id', pId);
+          if (prodErr) throw prodErr;
+        }
+      }
+    }
+
+    if (order.status === 'cancelled') {
+      return { success: true, message: 'Order is already cancelled.' };
+    }
+
+    // 2. Update order status to 'cancelled'
+    const { data: updatedOrder, error: updateErr } = await supabase
+      .from('orders')
+      .update({
+        status: 'cancelled',
+        is_paid: false,
+        notes: order.notes ? `${order.notes} | Cancelled: ${reason}` : `Cancelled: ${reason}`,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    if (updateErr) throw updateErr;
+
+    await writeAuditLog(
+      check.actorEmail!,
+      'update',
+      'orders',
+      id,
+      toRecord(order),
+      toRecord(updatedOrder),
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/admin/orders');
+    revalidatePath('/admin/inventory');
+    revalidatePath('/products');
+    revalidatePath('/account/orders');
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('[cancelOrderAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to cancel order.' };
+  }
+}
+
+export async function cancelExpiredUnpaidOrdersAction(maxHours = 24) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
+
+  try {
+    const supabase = getAdminSupabase();
+    const cutoffDate = new Date(Date.now() - maxHours * 60 * 60 * 1000).toISOString();
+
+    const { data: unpaidOrders, error } = await supabase
+      .from('orders')
+      .select('id, order_id')
+      .eq('is_paid', false)
+      .eq('status', 'pending')
+      .lt('created_at', cutoffDate);
+
+    if (error) throw error;
+
+    let cancelledCount = 0;
+    const cancelledOrders: string[] = [];
+
+    for (const order of (unpaidOrders || [])) {
+      const res = await cancelOrderAction(order.id, `Auto-cancelled (Unpaid for >${maxHours} hours)`);
+      if (res.success) {
+        cancelledCount++;
+        cancelledOrders.push(order.order_id || order.id);
+      }
+    }
+
+    revalidatePath('/admin/orders');
+    revalidatePath('/admin/inventory');
+    revalidatePath('/products');
+
+    return {
+      success: true,
+      cancelledCount,
+      cancelledOrders,
+      message: cancelledCount > 0
+        ? `Successfully cancelled ${cancelledCount} unpaid order(s) older than ${maxHours} hours.`
+        : `No unpaid orders older than ${maxHours} hours were found.`,
+    };
+  } catch (err: any) {
+    console.error('[cancelExpiredUnpaidOrdersAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to auto-cancel expired unpaid orders.' };
   }
 }
 
@@ -1552,12 +3022,15 @@ export async function getBarcodePrintPresetsAction() {
   if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
 
   try {
-    const adminPb = await getAdminPb();
-    const records = await adminPb.collection('system_configurations').getFullList({
-      filter: 'category = "barcode_print"',
-      sort: '-isDefault',
-    });
-    return { success: true, data: structuredClone(records) };
+    const supabase = getAdminSupabase();
+    const { data: records, error } = await supabase
+      .from('system_configurations')
+      .select('*')
+      .eq('category', 'barcode_print')
+      .order('isDefault', { ascending: false });
+
+    if (error) throw error;
+    return { success: true, data: structuredClone(records || []) };
   } catch {
     return { success: false, error: 'Failed to load barcode presets.', data: [] };
   }
@@ -1571,36 +3044,53 @@ export async function saveBarcodePrintPresetAction(
   if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
-    const adminPb = await getAdminPb();
+    const supabase = getAdminSupabase();
     const payload = {
       category: 'barcode_print',
       label: config.label,
       config: JSON.stringify(config),
       isDefault: config.isDefault,
+      updated_at: new Date().toISOString(),
     };
 
     if (config.isDefault) {
-      const existing = await adminPb.collection('system_configurations').getFullList({
-        filter: 'category = "barcode_print" && isDefault = true',
-      });
-      for (const rec of existing) {
-        if (rec.id !== existingId) {
-          await adminPb.collection('system_configurations').update(rec.id, { isDefault: false });
-        }
+      let unsetDefaultQuery = supabase
+        .from('system_configurations')
+        .update({ isDefault: false })
+        .eq('category', 'barcode_print')
+        .eq('isDefault', true);
+
+      if (existingId) {
+        unsetDefaultQuery = unsetDefaultQuery.neq('id', existingId);
       }
+      await unsetDefaultQuery;
     }
 
     let record;
     if (existingId) {
-      record = await adminPb.collection('system_configurations').update(existingId, payload);
+      const { data, error } = await supabase
+        .from('system_configurations')
+        .update(payload)
+        .eq('id', existingId)
+        .select()
+        .single();
+      if (error) throw error;
+      record = data;
     } else {
-      record = await adminPb.collection('system_configurations').create(payload);
+      const { data, error } = await supabase
+        .from('system_configurations')
+        .insert({ ...payload, created_at: new Date().toISOString() })
+        .select()
+        .single();
+      if (error) throw error;
+      record = data;
     }
 
     revalidatePath('/admin/system-config');
     return { success: true, data: structuredClone(record) };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to save preset.' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to save preset.';
+    return { success: false, error: message };
   }
 }
 
@@ -1609,12 +3099,14 @@ export async function deleteBarcodePrintPresetAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
-    const adminPb = await getAdminPb();
-    await adminPb.collection('system_configurations').delete(id);
+    const supabase = getAdminSupabase();
+    const { error } = await supabase.from('system_configurations').delete().eq('id', id);
+    if (error) throw error;
     revalidatePath('/admin/system-config');
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to delete preset.' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to delete preset.';
+    return { success: false, error: message };
   }
 }
 
@@ -1623,19 +3115,23 @@ export async function setDefaultBarcodePrintPresetAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
-    const adminPb = await getAdminPb();
-    const all = await adminPb.collection('system_configurations').getFullList({
-      filter: 'category = "barcode_print"',
-    });
-    for (const rec of all) {
-      await adminPb.collection('system_configurations').update(rec.id, {
-        isDefault: rec.id === id,
-      });
-    }
+    const supabase = getAdminSupabase();
+    await supabase
+      .from('system_configurations')
+      .update({ isDefault: false })
+      .eq('category', 'barcode_print');
+
+    const { error } = await supabase
+      .from('system_configurations')
+      .update({ isDefault: true, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) throw error;
+
     revalidatePath('/admin/system-config');
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to set default.' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to set default.';
+    return { success: false, error: message };
   }
 }
 
@@ -1646,11 +3142,12 @@ export async function getReceiptPrintPresetsAction(): Promise<{
   error?: string;
   data: ReceiptPrintPreset[];
 }> {
+  const posSession = await getVerifiedPosSession();
   const check = await checkPermission('systemConfig', 'read');
-  if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
+  if (!posSession && !check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
 
   try {
-    const adminPb = await getAdminPb();
+    const supabase = getAdminSupabase();
     const [genSettings, persSettings] = await Promise.all([
       pbSiteSettings.get<any>('general').catch(() => null),
       pbSiteSettings.get<any>('personalization').catch(() => null),
@@ -1658,15 +3155,28 @@ export async function getReceiptPrintPresetsAction(): Promise<{
 
     const logoUrl = persSettings?.logoUrl || persSettings?.darkLogoUrl || '';
     const dbStoreName = genSettings?.siteName || '';
-    const dbAddress = [genSettings?.location?.address, genSettings?.location?.city].filter(Boolean).join(', ');
+    const dbAddress = [genSettings?.contactInfo?.address, genSettings?.contactInfo?.city].filter(Boolean).join(', ');
     const dbPhone = genSettings?.contactInfo?.phone || '';
 
-    const records = await adminPb.collection('system_configurations').getFullList({
-      filter: 'category = "receipt_print"',
-      sort: '-isDefault',
-    });
+    const { data: recordsData } = await supabase
+      .from('system_configurations')
+      .select('*')
+      .eq('category', 'receipt_print')
+      .order('isDefault', { ascending: false });
 
-    const list = records.map((r) => {
+    const records = recordsData || [];
+
+    if (records.length === 0) {
+      records.push({
+        id: 'default',
+        category: 'receipt_print',
+        label: 'Default Preset',
+        isDefault: true,
+        config: JSON.stringify(DEFAULT_RECEIPT_CONFIG)
+      });
+    }
+
+    const list = records.map((r: any) => {
       let parsedConfig: Record<string, any> = {};
       try {
         parsedConfig = typeof r.config === 'string' ? JSON.parse(r.config) : (r.config || {});
@@ -1680,7 +3190,7 @@ export async function getReceiptPrintPresetsAction(): Promise<{
         isDefault: Boolean(r.isDefault),
         config: JSON.stringify({
           ...parsedConfig,
-          logoUrl: parsedConfig.logoUrl || logoUrl,
+          logoUrl: logoUrl || parsedConfig.logoUrl,
           storeName: dbStoreName || parsedConfig.storeName || 'FTC Electronics',
           headerAddress: dbAddress || parsedConfig.headerAddress || '',
           headerPhone: dbPhone || parsedConfig.headerPhone || '',
@@ -1702,36 +3212,53 @@ export async function saveReceiptPrintPresetAction(
   if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
-    const adminPb = await getAdminPb();
+    const supabase = getAdminSupabase();
     const payload = {
       category: 'receipt_print',
       label: config.label,
       config: JSON.stringify(config),
       isDefault: config.isDefault,
+      updated_at: new Date().toISOString(),
     };
 
     if (config.isDefault) {
-      const existing = await adminPb.collection('system_configurations').getFullList({
-        filter: 'category = "receipt_print" && isDefault = true',
-      });
-      for (const rec of existing) {
-        if (rec.id !== existingId) {
-          await adminPb.collection('system_configurations').update(rec.id, { isDefault: false });
-        }
+      let unsetQuery = supabase
+        .from('system_configurations')
+        .update({ isDefault: false })
+        .eq('category', 'receipt_print')
+        .eq('isDefault', true);
+
+      if (existingId) {
+        unsetQuery = unsetQuery.neq('id', existingId);
       }
+      await unsetQuery;
     }
 
     let record;
     if (existingId) {
-      record = await adminPb.collection('system_configurations').update(existingId, payload);
+      const { data, error } = await supabase
+        .from('system_configurations')
+        .update(payload)
+        .eq('id', existingId)
+        .select()
+        .single();
+      if (error) throw error;
+      record = data;
     } else {
-      record = await adminPb.collection('system_configurations').create(payload);
+      const { data, error } = await supabase
+        .from('system_configurations')
+        .insert({ ...payload, created_at: new Date().toISOString() })
+        .select()
+        .single();
+      if (error) throw error;
+      record = data;
     }
 
     revalidatePath('/admin/system-config');
     return { success: true, data: structuredClone(record) };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to save receipt preset.' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to save receipt preset.';
+    return { success: false, error: message };
   }
 }
 
@@ -1740,12 +3267,14 @@ export async function deleteReceiptPrintPresetAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
-    const adminPb = await getAdminPb();
-    await adminPb.collection('system_configurations').delete(id);
+    const supabase = getAdminSupabase();
+    const { error } = await supabase.from('system_configurations').delete().eq('id', id);
+    if (error) throw error;
     revalidatePath('/admin/system-config');
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to delete receipt preset.' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to delete receipt preset.';
+    return { success: false, error: message };
   }
 }
 
@@ -1754,30 +3283,35 @@ export async function setDefaultReceiptPrintPresetAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
-    const adminPb = await getAdminPb();
-    const all = await adminPb.collection('system_configurations').getFullList({
-      filter: 'category = "receipt_print"',
-    });
-    for (const rec of all) {
-      await adminPb.collection('system_configurations').update(rec.id, {
-        isDefault: rec.id === id,
-      });
-    }
+    const supabase = getAdminSupabase();
+    await supabase
+      .from('system_configurations')
+      .update({ isDefault: false })
+      .eq('category', 'receipt_print');
+
+    const { error } = await supabase
+      .from('system_configurations')
+      .update({ isDefault: true, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) throw error;
+
     revalidatePath('/admin/system-config');
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to set default receipt preset.' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to set default receipt preset.';
+    return { success: false, error: message };
   }
 }
 
 // ─── System Configurations (Sales Invoice & Quotation Presets) ─────────────────
 
 export async function getInvoicePrintPresetsAction() {
+  const posSession = await getVerifiedPosSession();
   const check = await checkPermission('systemConfig', 'read');
-  if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
+  if (!posSession && !check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
 
   try {
-    const adminPb = await getAdminPb();
+    const supabase = getAdminSupabase();
     const [genSettings, persSettings] = await Promise.all([
       pbSiteSettings.get<any>('general').catch(() => null),
       pbSiteSettings.get<any>('personalization').catch(() => null),
@@ -1785,16 +3319,29 @@ export async function getInvoicePrintPresetsAction() {
 
     const logoUrl = persSettings?.logoUrl || persSettings?.darkLogoUrl || '';
     const dbStoreName = genSettings?.siteName || '';
-    const dbAddress = [genSettings?.location?.address, genSettings?.location?.city].filter(Boolean).join(', ');
+    const dbAddress = [genSettings?.contactInfo?.address, genSettings?.contactInfo?.city].filter(Boolean).join(', ');
     const dbPhone = genSettings?.contactInfo?.phone || '';
     const dbEmail = genSettings?.contactInfo?.email || '';
 
-    const records = await adminPb.collection('system_configurations').getFullList({
-      filter: 'category = "invoice_print"',
-      sort: '-isDefault',
-    });
+    const { data: recordsData } = await supabase
+      .from('system_configurations')
+      .select('*')
+      .eq('category', 'invoice_print')
+      .order('isDefault', { ascending: false });
 
-    const list = records.map((r) => {
+    const records = recordsData || [];
+
+    if (records.length === 0) {
+      records.push({
+        id: 'default',
+        category: 'invoice_print',
+        label: 'Default Preset',
+        isDefault: true,
+        config: JSON.stringify(DEFAULT_INVOICE_CONFIG)
+      });
+    }
+
+    const list = records.map((r: any) => {
       let parsedConfig: Record<string, any> = {};
       try {
         parsedConfig = typeof r.config === 'string' ? JSON.parse(r.config) : (r.config || {});
@@ -1808,7 +3355,7 @@ export async function getInvoicePrintPresetsAction() {
         isDefault: Boolean(r.isDefault),
         config: JSON.stringify({
           ...parsedConfig,
-          logoUrl: parsedConfig.logoUrl || logoUrl,
+          logoUrl: logoUrl || parsedConfig.logoUrl,
           storeName: dbStoreName || parsedConfig.storeName || 'FTC Electronics',
           headerAddress: dbAddress || parsedConfig.headerAddress || '',
           headerPhone: dbPhone || parsedConfig.headerPhone || '',
@@ -1831,36 +3378,53 @@ export async function saveInvoicePrintPresetAction(
   if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
-    const adminPb = await getAdminPb();
+    const supabase = getAdminSupabase();
     const payload = {
       category: 'invoice_print',
       label: config.label,
       config: JSON.stringify(config),
       isDefault: config.isDefault,
+      updated_at: new Date().toISOString(),
     };
 
     if (config.isDefault) {
-      const existing = await adminPb.collection('system_configurations').getFullList({
-        filter: 'category = "invoice_print" && isDefault = true',
-      });
-      for (const rec of existing) {
-        if (rec.id !== existingId) {
-          await adminPb.collection('system_configurations').update(rec.id, { isDefault: false });
-        }
+      let unsetQuery = supabase
+        .from('system_configurations')
+        .update({ isDefault: false })
+        .eq('category', 'invoice_print')
+        .eq('isDefault', true);
+
+      if (existingId) {
+        unsetQuery = unsetQuery.neq('id', existingId);
       }
+      await unsetQuery;
     }
 
     let record;
     if (existingId) {
-      record = await adminPb.collection('system_configurations').update(existingId, payload);
+      const { data, error } = await supabase
+        .from('system_configurations')
+        .update(payload)
+        .eq('id', existingId)
+        .select()
+        .single();
+      if (error) throw error;
+      record = data;
     } else {
-      record = await adminPb.collection('system_configurations').create(payload);
+      const { data, error } = await supabase
+        .from('system_configurations')
+        .insert({ ...payload, created_at: new Date().toISOString() })
+        .select()
+        .single();
+      if (error) throw error;
+      record = data;
     }
 
     revalidatePath('/admin/system-config');
     return { success: true, data: structuredClone(record) };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to save invoice preset.' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to save invoice preset.';
+    return { success: false, error: message };
   }
 }
 
@@ -1869,12 +3433,14 @@ export async function deleteInvoicePrintPresetAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
-    const adminPb = await getAdminPb();
-    await adminPb.collection('system_configurations').delete(id);
+    const supabase = getAdminSupabase();
+    const { error } = await supabase.from('system_configurations').delete().eq('id', id);
+    if (error) throw error;
     revalidatePath('/admin/system-config');
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to delete invoice preset.' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to delete invoice preset.';
+    return { success: false, error: message };
   }
 }
 
@@ -1883,19 +3449,23 @@ export async function setDefaultInvoicePrintPresetAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
-    const adminPb = await getAdminPb();
-    const all = await adminPb.collection('system_configurations').getFullList({
-      filter: 'category = "invoice_print"',
-    });
-    for (const rec of all) {
-      await adminPb.collection('system_configurations').update(rec.id, {
-        isDefault: rec.id === id,
-      });
-    }
+    const supabase = getAdminSupabase();
+    await supabase
+      .from('system_configurations')
+      .update({ isDefault: false })
+      .eq('category', 'invoice_print');
+
+    const { error } = await supabase
+      .from('system_configurations')
+      .update({ isDefault: true, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) throw error;
+
     revalidatePath('/admin/system-config');
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to set default invoice preset.' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to set default invoice preset.';
+    return { success: false, error: message };
   }
 }
 // ─── POS — Employees ──────────────────────────────────────────────────────────
@@ -1922,6 +3492,13 @@ export async function getPosEmployeesAdminAction() {
   }
 }
 
+function parseStrictBoolean(val: unknown, fallback: boolean): boolean {
+  if (typeof val === 'boolean') return val;
+  if (val === 'true' || val === '1' || val === 1) return true;
+  if (val === 'false' || val === '0' || val === 0) return false;
+  return fallback;
+}
+
 export async function createPosEmployeeAction(data: {
   name: string;
   pin: string;
@@ -1933,10 +3510,41 @@ export async function createPosEmployeeAction(data: {
     return { success: false, error: 'Unauthorized: Employee write permission required.' };
   }
   try {
-    const emp = await pbEmployees.create(data);
+    const cleanName = (data.name || '').trim();
+    if (!cleanName) {
+      return { success: false, error: 'Employee name is required.' };
+    }
+    const cleanRole = data.role === 'manager' ? 'manager' : 'cashier';
+    let hashedPin = '';
+    if (data.pin && data.pin.trim()) {
+      hashedPin = isBcryptHash(data.pin) ? data.pin : await hashPin(data.pin.trim());
+    } else {
+      return { success: false, error: 'PIN is required for new employee.' };
+    }
+
+    const dbPayload = {
+      name: cleanName,
+      role: cleanRole,
+      pin: hashedPin,
+      is_active: data.isActive !== undefined ? parseStrictBoolean(data.isActive, true) : true,
+    };
+
+    const emp = await pbEmployees.create(dbPayload);
     revalidatePath('/admin/system-config/employees');
-    return { success: true, data: emp };
+    return {
+      success: true,
+      data: {
+        id: emp.id,
+        name: emp.name,
+        role: emp.role,
+        isActive: Boolean(emp.is_active ?? true),
+        pin: '', // Never expose to browser
+        created: emp.created_at || new Date().toISOString(),
+        updated: emp.updated_at || new Date().toISOString(),
+      },
+    };
   } catch (err: any) {
+    console.error('[createPosEmployeeAction] Error:', err);
     return { success: false, error: err.message || 'Failed to create employee.' };
   }
 }
@@ -1950,10 +3558,45 @@ export async function updatePosEmployeeAction(
     return { success: false, error: 'Unauthorized: Employee write permission required.' };
   }
   try {
-    const emp = await pbEmployees.update(id, data);
+    const cleanId = (id || '').trim();
+    if (!cleanId) {
+      return { success: false, error: 'Employee ID is required.' };
+    }
+
+    const dbPayload: Record<string, any> = {};
+    if (data.name !== undefined) {
+      const cleanName = data.name.trim();
+      if (!cleanName) return { success: false, error: 'Employee name cannot be empty.' };
+      dbPayload.name = cleanName;
+    }
+    if (data.role !== undefined) {
+      dbPayload.role = data.role === 'manager' ? 'manager' : 'cashier';
+    }
+    if (data.isActive !== undefined) {
+      dbPayload.is_active = parseStrictBoolean(data.isActive, true);
+    }
+    if (data.pin !== undefined) {
+      if (data.pin && data.pin.trim()) {
+        dbPayload.pin = isBcryptHash(data.pin) ? data.pin : await hashPin(data.pin.trim());
+      }
+    }
+
+    const emp = await pbEmployees.update(cleanId, dbPayload);
     revalidatePath('/admin/system-config/employees');
-    return { success: true, data: emp };
+    return {
+      success: true,
+      data: {
+        id: emp.id,
+        name: emp.name,
+        role: emp.role,
+        isActive: Boolean(emp.is_active ?? true),
+        pin: '', // Never expose to browser
+        created: emp.created_at || new Date().toISOString(),
+        updated: emp.updated_at || new Date().toISOString(),
+      },
+    };
   } catch (err: any) {
+    console.error('[updatePosEmployeeAction] Error:', err);
     return { success: false, error: err.message || 'Failed to update employee.' };
   }
 }
@@ -1972,11 +3615,251 @@ export async function deletePosEmployeeAction(id: string) {
   }
 }
 
+export async function verifyPosEmployeePinAction(
+  employeeId: string,
+  pin: string
+): Promise<{
+  success: boolean;
+  session?: PosEmployeeSession;
+  error?: string;
+}> {
+  try {
+    const cleanId = typeof employeeId === 'string' ? employeeId.trim() : '';
+    const cleanPin = typeof pin === 'string' ? pin.trim() : '';
+
+    if (!cleanId || !cleanPin || cleanPin.length < 4 || cleanPin.length > 8) {
+      return { success: false, error: 'Invalid ID or PIN format.' };
+    }
+
+    let ip = '127.0.0.1';
+    try {
+      const headersList = await headers();
+      ip = getTrustedClientIp(headersList);
+    } catch {
+      // Outside request context
+    }
+
+    const rateLimitKey = `pos_emp_${cleanId}_${ip}`;
+    const rateCheck = checkPinRateLimit(rateLimitKey);
+    if (!rateCheck.allowed) {
+      return {
+        success: false,
+        error: `Too many failed attempts. Please try again in ${rateCheck.retryAfterSeconds || 60} seconds.`,
+      };
+    }
+
+    const supabase = getAdminSupabase();
+    const { data: employee, error: empErr } = await supabase
+      .from('employees')
+      .select('id, name, role, pin, is_active')
+      .eq('id', cleanId)
+      .maybeSingle();
+
+    if (empErr || !employee) {
+      recordFailedPinAttempt(rateLimitKey);
+      return { success: false, error: 'Incorrect PIN or unauthorized staff account.' };
+    }
+
+    const isActive = employee.is_active !== false;
+    if (!isActive) {
+      recordFailedPinAttempt(rateLimitKey);
+      return { success: false, error: 'This employee account is inactive. Please contact your manager.' };
+    }
+
+    const verifyResult = await verifyPinWithLegacyMigration(cleanPin, employee.pin);
+    if (!verifyResult.valid) {
+      recordFailedPinAttempt(rateLimitKey);
+      return { success: false, error: 'Incorrect PIN. Try again.' };
+    }
+
+    // Success - reset rate limit tracker
+    resetPinRateLimit(rateLimitKey);
+
+    // If legacy plaintext, seamlessly upgrade to bcrypt hash in background
+    if (verifyResult.wasLegacyPlaintext) {
+      try {
+        const hashed = await hashPin(cleanPin);
+        await supabase
+          .from('employees')
+          .update({ pin: hashed })
+          .eq('id', cleanId);
+      } catch (upgradeErr) {
+        console.error('[verifyPosEmployeePinAction] Failed to upgrade legacy PIN hash:', upgradeErr);
+      }
+    }
+
+    const session: PosEmployeeSession = {
+      id: employee.id,
+      name: employee.name || 'Staff',
+      role: (employee.role === 'manager' ? 'manager' : 'cashier') as EmployeeRole,
+      loginTime: new Date().toISOString(),
+    };
+
+    // Issue cryptographic HttpOnly session cookie
+    try {
+      await setPosSessionCookie({
+        employeeId: employee.id,
+        role: session.role,
+        issuedAt: Date.now(),
+        expiresAt: Date.now() + POS_SESSION_MAX_AGE * 1000,
+        sessionId: crypto.randomUUID(),
+      });
+    } catch (cookieErr) {
+      console.error('[verifyPosEmployeePinAction] Failed to set POS session cookie:', cookieErr);
+      return { success: false, error: 'Session initialization failed.' };
+    }
+
+    return { success: true, session };
+  } catch (err) {
+    console.error('[verifyPosEmployeePinAction] Unexpected error:', err);
+    return { success: false, error: 'Authentication verification failed.' };
+  }
+}
+
+export async function logoutPosEmployeeAction(): Promise<{ success: boolean }> {
+  try {
+    await clearPosSessionCookie();
+    return { success: true };
+  } catch (err) {
+    console.error('[logoutPosEmployeeAction] Error:', err);
+    return { success: false };
+  }
+}
+
+export async function getPosSessionAction(): Promise<{ success: boolean; session?: PosEmployeeSession }> {
+  try {
+    const verified = await getVerifiedPosSession();
+    if (!verified) {
+      return { success: false };
+    }
+    return {
+      success: true,
+      session: {
+        id: verified.employeeId,
+        name: verified.name,
+        role: verified.role,
+        loginTime: new Date().toISOString(),
+      },
+    };
+  } catch {
+    return { success: false };
+  }
+}
+
 // ─── POS — Sales ──────────────────────────────────────────────────────────────
 
-export async function createSaleAction(payload: SalePayload) {
+export async function createSaleAction(payload: SalePayload, idempotencyKey?: string) {
   try {
-    const result = await pbSales.createSale(payload);
+    const posSession = await getVerifiedPosSession();
+    const adminCheck = await checkPermission('orders', 'write');
+
+    if (!posSession && !adminCheck.allowed) {
+      return { success: false, error: 'Unauthorized: Staff session required to record sales.' };
+    }
+
+    // Authoritative cashier resolution:
+    // If POS session is active, cashier MUST be the verified employee
+    if (posSession) {
+      payload.cashier_id = posSession.employeeId;
+      payload.cashier_name = posSession.name;
+    } else if (adminCheck.allowed) {
+      payload.cashier_id = adminCheck.actorId || payload.cashier_id || '';
+      payload.cashier_name = adminCheck.actorName || payload.cashier_name || 'Admin';
+    }
+
+    // Server-side inventory & financial recalculation & validation
+    if (!Array.isArray(payload.items) || payload.items.length === 0) {
+      return { success: false, error: 'POS sale must contain at least one item.' };
+    }
+
+    const productIds = payload.items.map((i) => i.product_id).filter(Boolean);
+    if (productIds.length !== payload.items.length) {
+      return { success: false, error: 'Every item must have a valid product_id.' };
+    }
+
+    const supabase = getAdminSupabase();
+    const { data: dbProducts, error: prodErr } = await supabase
+      .from('products')
+      .select('id, name, price, discount_price, sku, inventory_tracking_type, status, is_active')
+      .in('id', productIds);
+
+    if (prodErr || !dbProducts || dbProducts.length === 0) {
+      return { success: false, error: 'Failed to verify items against catalog.' };
+    }
+
+    const prodMap = new Map(dbProducts.map((p) => [p.id, p]));
+
+    for (const item of payload.items) {
+      const prod = prodMap.get(item.product_id);
+      if (!prod) {
+        return { success: false, error: `Product with ID ${item.product_id} not found.` };
+      }
+      if (prod.status !== 'published' || prod.is_active === false) {
+        return { success: false, error: `Product "${prod.name}" is not active for sale.` };
+      }
+
+      const qty = Math.floor(Number(item.quantity));
+      if (isNaN(qty) || qty <= 0) {
+        return { success: false, error: `Invalid quantity for product "${prod.name}".` };
+      }
+      item.quantity = qty;
+
+      // Authoritative pricing: never trust client unit_price
+      const authoritativeUnitPrice = Number(prod.discount_price ?? prod.price ?? 0);
+      item.unit_price = authoritativeUnitPrice;
+      item.product_name = prod.name;
+      item.sku = prod.sku || '';
+
+      // Discount cannot exceed unit price
+      const itemDiscount = Math.max(0, Math.min(Number(item.item_discount || 0), authoritativeUnitPrice));
+      item.item_discount = itemDiscount;
+      item.line_total = (authoritativeUnitPrice - itemDiscount) * qty;
+    }
+
+    // Authoritative totals recalculation
+    const calculatedSubtotal = payload.items.reduce(
+      (sum, item) => sum + (item.unit_price * item.quantity),
+      0
+    );
+    const calculatedItemDiscountTotal = payload.items.reduce(
+      (sum, item) => sum + ((item.item_discount || 0) * item.quantity),
+      0
+    );
+
+    const clientDiscount = Math.max(0, Number(payload.discount || 0));
+    const calculatedDiscount = Math.min(
+      clientDiscount > 0 ? clientDiscount : calculatedItemDiscountTotal,
+      calculatedSubtotal
+    );
+
+    const calculatedTax = Math.max(0, Number(payload.tax_amount || 0));
+    const calculatedTotal = Math.max(0, calculatedSubtotal - calculatedDiscount + calculatedTax);
+
+    payload.subtotal = calculatedSubtotal;
+    payload.discount = calculatedDiscount;
+    payload.tax_amount = calculatedTax;
+    payload.total = calculatedTotal;
+    payload.status = 'completed';
+    (payload as any).payment_status = 'paid';
+
+    if (payload.payment_method === 'cash') {
+      const tendered = Number(payload.cash_tendered || 0);
+      if (tendered < calculatedTotal) {
+        return {
+          success: false,
+          error: `Cash tendered (Rs. ${tendered.toLocaleString()}) is less than total amount (Rs. ${calculatedTotal.toLocaleString()}).`,
+        };
+      }
+      payload.change_due = Math.max(0, tendered - calculatedTotal);
+    }
+
+    const finalIdempotencyKey =
+      idempotencyKey ||
+      (payload as any).idempotency_key ||
+      payload.receipt_number ||
+      crypto.randomUUID();
+
+    const result = await pbSales.createSale(payload, finalIdempotencyKey);
     revalidatePath('/pos/history');
     return { success: true, data: result };
   } catch (err: any) {
@@ -1985,8 +3868,9 @@ export async function createSaleAction(payload: SalePayload) {
 }
 
 export async function sendPosSaleEmailAction(saleId: string, emailAddress?: string) {
+  const posSession = await getVerifiedPosSession();
   const check = await checkPermission('orders', 'write');
-  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+  if (!posSession && !check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
     const sale = await pbSales.getById(saleId);
@@ -2032,6 +3916,8 @@ export async function sendPosSaleEmailAction(saleId: string, emailAddress?: stri
       items,
       totalAmount: sale.total,
       paymentMethod: `Paid via ${sale.payment_method?.toUpperCase() || 'POS'}`,
+      paymentStatus: 'Paid',
+      isPaid: true,
       storeName,
       storePhone,
       storeEmail,
@@ -2051,7 +3937,15 @@ export async function sendPosSaleEmailAction(saleId: string, emailAddress?: stri
 
 export async function getRecentSalesAction(limit = 50) {
   try {
-    const sales = await pbSales.getRecent(limit);
+    const posSession = await getVerifiedPosSession();
+    const adminCheck = await checkPermission('orders', 'read');
+
+    if (!posSession && !adminCheck.allowed) {
+      return { success: false, error: 'Unauthorized: Staff session required.' };
+    }
+
+    const safeLimit = Math.max(1, Math.min(limit, 100));
+    const sales = await pbSales.getRecent(safeLimit);
     return { success: true, data: sales };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to load sales.' };
@@ -2062,72 +3956,363 @@ export async function getSaleByIdAction(
   id: string
 ): Promise<{ success: boolean; data?: { sale: PBSale; items: PBSaleItem[] }; error?: string }> {
   try {
+    const posSession = await getVerifiedPosSession();
+    const adminCheck = await checkPermission('orders', 'read');
+
+    if (!posSession && !adminCheck.allowed) {
+      return { success: false, error: 'Unauthorized: Staff session required.' };
+    }
+
     const sale = await pbSales.getById(id);
     if (!sale) return { success: false, error: 'Sale not found.' };
     const items = await pbSales.getItemsBySale(id);
 
+    const supabase = getAdminSupabase();
     if (sale.customer_phone && (!sale.customer_email || sale.customer_email.endsWith('@customer.local') || sale.customer_email === 'customer@ftc.lk')) {
       try {
-        const adminPb = await getAdminPb();
-        const cust = await adminPb
-          .collection('customers')
-          .getFirstListItem(adminPb.filter('phone = {:phone}', { phone: sale.customer_phone }))
-          .catch(() => null);
-        if (cust) {
-          if (cust.email && !cust.email.endsWith('@customer.local') && cust.email !== 'customer@ftc.lk') {
-            sale.customer_email = cust.email;
-          }
+        const { data: cust } = await supabase
+          .from('customers')
+          .select('email')
+          .eq('phone', sale.customer_phone)
+          .limit(1)
+          .maybeSingle();
+
+        if (cust?.email && !cust.email.endsWith('@customer.local') && cust.email !== 'customer@ftc.lk') {
+          sale.customer_email = cust.email;
         }
       } catch (custErr) {
         console.warn('[getSaleByIdAction] Warning: Failed to query customer by phone:', custErr);
       }
     }
 
-    return { success: true, data: { sale, items } };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to load sale.' };
-  }
-}
-
-export async function verifyManagerPinAction(pin: string) {
-  try {
-    const adminPb = await getAdminPb();
-    const cleanPin = pin.trim();
-    if (!cleanPin) return { success: false, error: 'PIN is required.' };
-
-    const users = await adminPb.collection('users').getFullList({
-      filter: adminPb.filter('pin = {:pin}', { pin: cleanPin }),
-    });
-
-    const manager = users.find(
-      (u: any) =>
-        u.role === 'manager' ||
-        u.role === 'admin' ||
-        u.role === 'superuser' ||
-        u.role === 'owner'
-    );
-
-    if (manager) {
-      return { success: true, managerName: manager.name || manager.email };
+    // Enrich commercial items with product inventory tracking and stock
+    const productIds = Array.from(new Set(items.map((i: any) => i.product_id).filter(Boolean)));
+    if (productIds.length > 0) {
+      try {
+        const { data: prods } = await supabase
+          .from('products')
+          .select('id, inventory_tracking_type, count_in_stock')
+          .in('id', productIds);
+        const prodMap = new Map((prods || []).map(p => [p.id, p]));
+        items.forEach((item: any) => {
+          if (item.product_id && prodMap.has(item.product_id)) {
+            const p = prodMap.get(item.product_id);
+            if (p) {
+              item.inventory_tracking_type = p.inventory_tracking_type;
+              item.count_in_stock = p.count_in_stock;
+            }
+          }
+        });
+      } catch (prodErr) {
+        console.warn('[getSaleByIdAction] Warning: Failed to query product tracking info:', prodErr);
+      }
     }
 
-    return { success: false, error: 'Invalid Manager or Admin PIN.' };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Verification failed.' };
+    // Enrich items with fulfillment records (snapshotted serial numbers and accurate fulfilled counts)
+    const saleItemIds = items.map((i: any) => i.id).filter(Boolean);
+    if (saleItemIds.length > 0) {
+      try {
+        const { data: fulfillmentItems, error: fErr } = await supabase
+          .from('sale_fulfillment_items')
+          .select('sale_item_id, serial_number, quantity, created_at')
+          .in('sale_item_id', saleItemIds)
+          .order('created_at', { ascending: true });
+
+        if (!fErr && fulfillmentItems && fulfillmentItems.length > 0) {
+          // Group fulfillment items strictly by exact sale_item_id
+          const fulfillmentsBySaleItem = new Map<string, Array<{ serial_number: string | null; quantity: number }>>();
+          for (const fi of fulfillmentItems) {
+            const list = fulfillmentsBySaleItem.get(fi.sale_item_id) || [];
+            list.push(fi);
+            fulfillmentsBySaleItem.set(fi.sale_item_id, list);
+          }
+
+          items.forEach((item: any) => {
+            const fList = fulfillmentsBySaleItem.get(item.id);
+            if (fList && fList.length > 0) {
+              const serials: string[] = [];
+              let fulfilledSum = 0;
+
+              for (const fi of fList) {
+                fulfilledSum += (typeof fi.quantity === 'number' && fi.quantity > 0) ? fi.quantity : 1;
+                if (fi.serial_number && typeof fi.serial_number === 'string') {
+                  const s = fi.serial_number.trim();
+                  if (s && !serials.includes(s)) {
+                    serials.push(s);
+                  }
+                }
+              }
+
+              item.serial_numbers = serials;
+              if (item.quantity_fulfilled === undefined || item.quantity_fulfilled === null) {
+                item.quantity_fulfilled = fulfilledSum;
+              }
+              if (serials.length > 0) {
+                item.unit_serial = serials.join(' · ');
+              }
+            } else {
+              if (item.quantity_fulfilled === undefined || item.quantity_fulfilled === null) {
+                item.quantity_fulfilled = 0;
+              }
+              if (item.unit_serial && item.unit_serial.trim()) {
+                item.serial_numbers = [item.unit_serial.trim()];
+              } else {
+                item.serial_numbers = [];
+              }
+            }
+          });
+        } else {
+          // No fulfillment items recorded yet for these sale items
+          items.forEach((item: any) => {
+            if (item.quantity_fulfilled === undefined || item.quantity_fulfilled === null) {
+              item.quantity_fulfilled = 0;
+            }
+            if (item.unit_serial && item.unit_serial.trim()) {
+              item.serial_numbers = [item.unit_serial.trim()];
+            } else {
+              item.serial_numbers = [];
+            }
+          });
+        }
+      } catch (fErr) {
+        console.warn('[getSaleByIdAction] Warning: Failed to query sale fulfillment items:', fErr);
+      }
+    }
+
+    return { success: true, data: { sale, items } };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to load sale.';
+    return { success: false, error: message };
   }
 }
 
-export async function voidSaleAction(id: string, managerPin: string) {
+export async function getEligibleManagersAction(): Promise<{
+  success: boolean;
+  data?: Array<{ id: string; name: string; role: string; avatar?: string }>;
+  error?: string;
+}> {
   try {
-    const verify = await verifyManagerPinAction(managerPin);
+    const supabase = getAdminSupabase();
+    const managers: Array<{ id: string; name: string; role: string; avatar?: string }> = [];
+
+    // Query active managers/admins from employees table
+    const { data: employees } = await supabase
+      .from('employees')
+      .select('id, name, role, avatar, is_active')
+      .in('role', ['manager', 'admin'])
+      .neq('is_active', false);
+
+    if (employees && employees.length > 0) {
+      for (const e of employees) {
+        managers.push({
+          id: e.id,
+          name: e.name || 'Manager',
+          role: e.role,
+          avatar: e.avatar,
+        });
+      }
+    }
+
+    // Query admin/super_admin accounts from profiles table
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, name, role, avatar')
+      .in('role', ['manager', 'admin', 'super_admin', 'superuser', 'owner', 'store_manager']);
+
+    if (profiles && profiles.length > 0) {
+      for (const p of profiles) {
+        if (!managers.some((m) => m.id === p.id)) {
+          managers.push({
+            id: p.id,
+            name: p.name || 'Admin',
+            role: p.role,
+            avatar: p.avatar,
+          });
+        }
+      }
+    }
+
+    return { success: true, data: managers };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to load eligible managers.' };
+  }
+}
+
+export async function verifyManagerPinAction(
+  pin: string,
+  managerId?: string
+): Promise<{
+  success: boolean;
+  managerName?: string;
+  error?: string;
+}> {
+  try {
+    const cleanPin = typeof pin === 'string' ? pin.trim() : '';
+    if (!cleanPin || cleanPin.length < 4 || cleanPin.length > 8) {
+      return { success: false, error: 'Valid PIN is required.' };
+    }
+
+    let ip = '127.0.0.1';
+    try {
+      const headersList = await headers();
+      ip = getTrustedClientIp(headersList);
+    } catch {
+      // Outside request context
+    }
+
+    const rateLimitKey = `mgr_pin_${ip}`;
+    const rateCheck = checkPinRateLimit(rateLimitKey);
+    if (!rateCheck.allowed) {
+      return {
+        success: false,
+        error: `Too many failed attempts. Please try again in ${rateCheck.retryAfterSeconds || 60} seconds.`,
+      };
+    }
+
+    const supabase = getAdminSupabase();
+
+    // TARGETED FLOW: If managerId is supplied, verify only that specific manager account (single bcrypt comparison)
+    if (managerId && managerId.trim()) {
+      const cleanManagerId = managerId.trim();
+
+      // Check employee record
+      const { data: emp } = await supabase
+        .from('employees')
+        .select('id, name, pin, role, is_active')
+        .eq('id', cleanManagerId)
+        .maybeSingle();
+
+      if (emp) {
+        if (emp.is_active === false) {
+          return { success: false, error: 'This manager account is inactive.' };
+        }
+        if (!['manager', 'admin'].includes(emp.role)) {
+          return { success: false, error: 'Selected account does not have manager authorization.' };
+        }
+        if (!emp.pin) {
+          return { success: false, error: 'Manager has no PIN configured.' };
+        }
+
+        const verifyRes = await verifyPinWithLegacyMigration(cleanPin, emp.pin);
+        if (verifyRes.valid) {
+          resetPinRateLimit(rateLimitKey);
+          if (verifyRes.wasLegacyPlaintext) {
+            try {
+              const hashed = await hashPin(cleanPin);
+              await supabase.from('employees').update({ pin: hashed }).eq('id', emp.id);
+            } catch (upgradeErr) {
+              console.error('[verifyManagerPinAction] Failed to upgrade employee PIN hash:', upgradeErr);
+            }
+          }
+          return { success: true, managerName: emp.name || 'Manager' };
+        } else {
+          recordFailedPinAttempt(rateLimitKey);
+          return { success: false, error: 'Invalid PIN entered for selected manager.' };
+        }
+      }
+
+      // Check profile record
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('id, name, role, pin')
+        .eq('id', cleanManagerId)
+        .maybeSingle();
+
+      if (profile) {
+        if (!['manager', 'admin', 'super_admin', 'superuser', 'owner', 'store_manager'].includes(profile.role)) {
+          return { success: false, error: 'Selected account does not have manager authorization.' };
+        }
+        if (!profile.pin) {
+          return { success: false, error: 'Account has no PIN configured.' };
+        }
+
+        const verifyRes = await verifyPinWithLegacyMigration(cleanPin, profile.pin);
+        if (verifyRes.valid) {
+          resetPinRateLimit(rateLimitKey);
+          if (verifyRes.wasLegacyPlaintext) {
+            try {
+              const hashed = await hashPin(cleanPin);
+              await supabase.from('profiles').update({ pin: hashed }).eq('id', profile.id);
+            } catch (upgradeErr) {
+              console.error('[verifyManagerPinAction] Failed to upgrade profile PIN hash:', upgradeErr);
+            }
+          }
+          return { success: true, managerName: profile.name || 'Admin' };
+        } else {
+          recordFailedPinAttempt(rateLimitKey);
+          return { success: false, error: 'Invalid PIN entered for selected account.' };
+        }
+      }
+
+      recordFailedPinAttempt(rateLimitKey);
+      return { success: false, error: 'Selected manager account was not found.' };
+    }
+
+    // Direct fallback if managerId omitted (targeted to first matching active account)
+    const { data: employees } = await supabase
+      .from('employees')
+      .select('id, name, pin, role, is_active')
+      .in('role', ['manager', 'admin'])
+      .neq('is_active', false)
+      .limit(10);
+
+    if (employees && employees.length > 0) {
+      for (const e of employees) {
+        if (!e.pin) continue;
+        const verifyRes = await verifyPinWithLegacyMigration(cleanPin, e.pin);
+        if (verifyRes.valid) {
+          resetPinRateLimit(rateLimitKey);
+          if (verifyRes.wasLegacyPlaintext) {
+            try {
+              const hashed = await hashPin(cleanPin);
+              await supabase.from('employees').update({ pin: hashed }).eq('id', e.id);
+            } catch (upgradeErr) {
+              console.error('[verifyManagerPinAction] Failed to upgrade employee PIN hash:', upgradeErr);
+            }
+          }
+          return { success: true, managerName: e.name || 'Manager' };
+        }
+      }
+    }
+
+    recordFailedPinAttempt(rateLimitKey);
+    return { success: false, error: 'Invalid Manager or Admin PIN.' };
+  } catch (err) {
+    console.error('[verifyManagerPinAction] Error:', err);
+    return { success: false, error: 'PIN verification failed.' };
+  }
+}
+
+export async function voidSaleAction(id: string, managerPin: string, managerId?: string, reason?: string) {
+  try {
+    const posSession = await getVerifiedPosSession();
+    const adminCheck = await checkPermission('orders', 'write');
+    if (!posSession && !adminCheck.allowed) {
+      return { success: false, error: 'Unauthorized: Valid POS or admin session required.' };
+    }
+
+    const verify = await verifyManagerPinAction(managerPin, managerId);
     if (!verify.success) {
       return { success: false, error: verify.error || 'Manager PIN required to void sales.' };
     }
-    const sale = await pbSales.voidSale(id);
+
+    const existingSale = await pbSales.getById(id);
+    if (!existingSale) {
+      return { success: false, error: 'Sale record not found.' };
+    }
+    if (existingSale.quotation_id || (existingSale.invoice_number && !existingSale.receipt_number?.startsWith('FTC-POS-'))) {
+      return { success: false, error: 'Commercial wholesale invoices cannot be voided via POS void. Use the invoice revocation workflow.' };
+    }
+
+    const authoritativeManager = verify.managerName || (posSession ? posSession.name : 'Authorized Manager');
+    const voidReason = reason?.trim() || 'Voided via POS with Manager PIN authorization';
+
+    const sale = await pbSales.voidSale(id, authoritativeManager, voidReason);
     revalidatePath('/pos/history');
     return { success: true, data: sale };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to void sale.' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to void sale.';
+    return { success: false, error: message };
   }
 }
 
@@ -2135,58 +4320,98 @@ export async function voidSaleAction(id: string, managerPin: string) {
 
 export async function searchPosCustomersAction(query: string) {
   try {
-    const adminPb = await getAdminPb();
-    const q = query.trim().replace(/"/g, '\\"');
-    const filter = q ? `name ~ "${q}" || phone ~ "${q}" || email ~ "${q}"` : '';
-    const customers = await adminPb.collection('customers').getFullList({
-      filter,
-      sort: 'name',
-    });
-    return { success: true, data: customers };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to search customers.' };
+    const posSession = await getVerifiedPosSession();
+    const adminCheck = await checkPermission('orders', 'read');
+    if (!posSession && !adminCheck.allowed) {
+      return { success: false, error: 'Unauthorized.' };
+    }
+
+    const supabase = getAdminSupabase();
+    const q = query.trim();
+    if (!q) {
+      const { data, error } = await supabase.from('customers').select('*').order('name').limit(50);
+      if (error) throw error;
+      return { success: true, data: data || [] };
+    }
+    const cleanQ = q.replace(/[%_]/g, '\\$&');
+    const { data, error } = await supabase
+      .from('customers')
+      .select('*')
+      .or(`name.ilike.%${cleanQ}%,phone.ilike.%${cleanQ}%,email.ilike.%${cleanQ}%`)
+      .order('name')
+      .limit(50);
+    if (error) throw error;
+    return { success: true, data: data || [] };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to search customers.';
+    return { success: false, error: message };
   }
 }
 
 export async function createPosCustomerAction(data: { name: string; phone?: string; email?: string; notes?: string }) {
   try {
-    const adminPb = await getAdminPb();
-    const customer = await adminPb.collection('customers').create({
-      name: data.name,
-      email: data.email || `${Date.now()}@customer.local`,
-      phone: data.phone || '',
-      ordersCount: 0,
-      totalSpent: 0,
-      status: 'active',
-      notes: data.notes || 'Created via POS',
-    });
+    const posSession = await getVerifiedPosSession();
+    const adminCheck = await checkPermission('orders', 'write');
+    if (!posSession && !adminCheck.allowed) {
+      return { success: false, error: 'Unauthorized.' };
+    }
+
+    const supabase = getAdminSupabase();
+    const { data: customer, error } = await supabase
+      .from('customers')
+      .insert({
+        name: data.name.trim(),
+        email: data.email?.trim() || `${Date.now()}@customer.local`,
+        phone: data.phone?.trim() || '',
+        orders_count: 0,
+        total_spent: 0,
+        status: 'active',
+        notes: data.notes?.trim() || 'Created via POS',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+    if (error) throw error;
     revalidatePath('/admin/customers');
     return { success: true, data: customer };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to create customer.' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to create customer.';
+    return { success: false, error: message };
   }
 }
 
 export async function validatePosCouponAction(code: string, cartTotal: number) {
   try {
-    const adminPb = await getAdminPb();
+    const posSession = await getVerifiedPosSession();
+    const adminCheck = await checkPermission('promotions', 'read');
+    if (!posSession && !adminCheck.allowed) {
+      return { success: false, error: 'Unauthorized.' };
+    }
+
+    const supabase = getAdminSupabase();
     const cleanCode = code.trim();
     if (!cleanCode) return { success: false, error: 'Coupon code is required.' };
 
     const now = new Date().toISOString();
-    const promotions = await adminPb.collection('promotions').getFullList({
-      filter: `couponCode = "${cleanCode}" && isActive = true && startDate <= "${now}" && endDate >= "${now}"`,
-    });
+    const { data: promotions, error } = await supabase
+      .from('promotions')
+      .select('*')
+      .eq('coupon_code', cleanCode)
+      .eq('is_active', true)
+      .lte('start_date', now)
+      .gte('end_date', now);
 
-    if (promotions.length === 0) {
+    if (error || !promotions || promotions.length === 0) {
       return { success: false, error: 'Invalid or expired coupon code.' };
     }
 
     const promo = promotions[0];
-    if (promo.minOrderValue && cartTotal < promo.minOrderValue) {
+    const minOrderValue = promo.min_order_value || 0;
+    if (minOrderValue > 0 && cartTotal < minOrderValue) {
       return {
         success: false,
-        error: `Minimum order value of Rs. ${promo.minOrderValue.toLocaleString()} required for this coupon.`,
+        error: `Minimum order value of Rs. ${minOrderValue.toLocaleString()} required for this coupon.`,
       };
     }
 
@@ -2196,84 +4421,343 @@ export async function validatePosCouponAction(code: string, cartTotal: number) {
         id: promo.id,
         name: promo.name,
         type: promo.type,
-        discountValue: promo.discountValue,
+        discountValue: promo.discount_value,
       },
     };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to validate coupon.' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to validate coupon.';
+    return { success: false, error: message };
   }
 }
 
-export async function getUnifiedSalesTrackerAction() {
+export async function getUnifiedSalesTrackerAction(params?: {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  source?: string;
+  paymentStatus?: string;
+  status?: string;
+  paymentMethod?: string;
+  lifecycle?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  minAmount?: number;
+  maxAmount?: number;
+  sort?: string;
+}) {
+  const perm = await checkPermission('orders', 'read');
+  if (!perm.allowed) {
+    return { success: false, error: 'Unauthorized: Read orders permission required.' };
+  }
+
+  const {
+    page = 1,
+    pageSize = 50,
+    search = '',
+    source = 'All',
+    paymentStatus = 'All',
+    status = 'All',
+    paymentMethod = 'All',
+    lifecycle = 'all',
+    dateFrom,
+    dateTo,
+    minAmount,
+    maxAmount,
+    sort = 'newest'
+  } = params || {};
+
+  // Validate limits server-side
+  const limit = Math.max(1, Math.min(pageSize, 100));
+  const offset = Math.max(0, (page - 1) * limit);
+
   try {
-    const adminPb = await getAdminPb();
-
-    // Fetch POS Sales (sort by -id to bypass created field sorting bug)
-    const sales = await adminPb.collection('sales').getFullList({
-      sort: '-id',
+    const supabase = await getAdminSupabase();
+    const { data, error } = await supabase.rpc('admin_get_unified_sales', {
+      p_search: search,
+      p_source: source,
+      p_payment_status: paymentStatus,
+      p_status: status,
+      p_payment_method: paymentMethod,
+      p_lifecycle: lifecycle.toLowerCase(),
+      p_date_from: dateFrom || null,
+      p_date_to: dateTo || null,
+      p_min_amount: minAmount ?? null,
+      p_max_amount: maxAmount ?? null,
+      p_sort: sort,
+      p_limit: limit,
+      p_offset: offset
     });
 
-    // Fetch Online Orders
-    const ordersRes = await adminPb.collection('orders').getFullList({
-      sort: '-id',
-      expand: 'user',
-    });
+    if (error) throw error;
 
-    // Format both lists uniformly
-    const posSalesFormatted = sales.map((s: any) => ({
-      id: s.id,
-      receiptNumber: s.receipt_number || `FTC-POS-${s.id.slice(-6).toUpperCase()}`,
-      date: s.date || s.created || s.updated,
-      customerName: s.customer_name || 'Walk-in Customer',
-      customerEmail: s.customer_email || '—',
-      itemsCount: s.items_count || 1,
-      total: s.total || 0,
-      discount: s.discount || 0,
-      paymentMethod: s.payment_method || 'cash',
-      status: s.status || 'completed',
-      source: 'POS Terminal',
+    const items = data || [];
+    const mappedItems = items.map((sale: any) => ({
+      id: sale.id,
+      receiptNumber: sale.receipt_number,
+      invoiceNumber: sale.invoice_number,
+      date: sale.date,
+      customerName: sale.customer_name,
+      customerCompany: sale.customer_company || null,
+      customerEmail: sale.customer_email,
+      itemsCount: sale.items_count,
+      total: Number(sale.total) || 0,
+      discount: Number(sale.discount) || 0,
+      paymentMethod: sale.payment_method,
+      status: sale.status,
+      source: sale.source,
+      isPaid: sale.is_paid,
+      isRevenueEligible: sale.is_revenue_eligible,
+      clearedPaid: Number(sale.cleared_paid) || 0,
+      pendingClearance: Number(sale.pending_clearance) || 0,
+      balanceDue: Number(sale.balance_due) || 0,
+      availableToRecord: Number(sale.available_to_record) || 0,
+      paymentStatus: sale.payment_status || (sale.is_paid ? 'PAID' : 'UNPAID'),
+      paymentTerms: sale.payment_terms || 'due_on_receipt',
+      dueDate: sale.due_date,
+      collectionStatus: sale.collection_status || 'NOT DUE',
+      daysOverdue: Number(sale.days_overdue) || 0,
+      isRevoked: Boolean(sale.is_revoked),
+      invoiceRevokedAt: sale.invoice_revoked_at || null,
+      invoiceRevokedBy: sale.invoice_revoked_by || null,
+      invoiceRevokeReason: sale.invoice_revoke_reason || null,
+      invoiceRevokeNotes: sale.invoice_revoke_notes || null,
+      fulfillmentStatus: null as 'NOT HANDED OVER' | 'PARTIALLY HANDED OVER' | 'HANDED OVER' | null,
     }));
 
-    const onlineOrdersFormatted = ordersRes.map((o: any) => {
-      let itemsCount = 1;
-      if (Array.isArray(o.items)) {
-        itemsCount = o.items.reduce((acc: number, item: any) => acc + (item.quantity || 1), 0);
-      } else if (o.items && typeof o.items === 'object') {
-        itemsCount = Object.keys(o.items).length;
+    // Batch-resolve commercial fulfillment status for displayed page without N+1
+    const wholesaleSaleIds = mappedItems
+      .filter((s: any) => s.source === 'Wholesale' || s.invoiceNumber)
+      .map((s: any) => s.id);
+
+    if (wholesaleSaleIds.length > 0) {
+      try {
+        const { data: itemStats } = await supabase
+          .from('sale_items')
+          .select('sale_id, quantity, quantity_fulfilled')
+          .in('sale_id', wholesaleSaleIds);
+
+        const statsMap = new Map<string, { totalQty: number; totalFulfilled: number }>();
+        (itemStats || []).forEach((row: any) => {
+          const curr = statsMap.get(row.sale_id) || { totalQty: 0, totalFulfilled: 0 };
+          curr.totalQty += Number(row.quantity) || 0;
+          curr.totalFulfilled += Number(row.quantity_fulfilled) || 0;
+          statsMap.set(row.sale_id, curr);
+        });
+
+        mappedItems.forEach((s: any) => {
+          if (statsMap.has(s.id)) {
+            const { totalQty, totalFulfilled } = statsMap.get(s.id)!;
+            if (totalFulfilled === 0) {
+              s.fulfillmentStatus = 'NOT HANDED OVER';
+            } else if (totalFulfilled >= totalQty && totalQty > 0) {
+              s.fulfillmentStatus = 'HANDED OVER';
+            } else {
+              s.fulfillmentStatus = 'PARTIALLY HANDED OVER';
+            }
+          }
+        });
+      } catch (fErr) {
+        console.warn('[getUnifiedSalesTrackerAction] Failed to batch load fulfillment stats:', fErr);
       }
-      
-      let customerName = 'Online Customer';
-      if (o.expand?.user?.name) {
-        customerName = o.expand.user.name;
-      } else if (o.shippingAddress?.firstName) {
-        customerName = `${o.shippingAddress.firstName} ${o.shippingAddress.lastName || ''}`.trim();
-      }
+    }
 
-      return {
-        id: o.id,
-        receiptNumber: o.orderId || `FTC-ONL-${o.id.slice(-6).toUpperCase()}`,
-        date: o.created || o.updated,
-        customerName,
-        customerEmail: o.email || o.expand?.user?.email || '—',
-        itemsCount,
-        total: o.total || 0,
-        discount: 0,
-        paymentMethod: o.paymentDetails?.method || 'card',
-        status: o.status === 'cancelled' ? 'voided' : 'completed',
-        source: 'Online Store',
-      };
-    });
+    const totalCount = items.length > 0 ? Number(items[0].total_count) : 0;
+    const totalPages = Math.max(1, Math.ceil(totalCount / limit));
 
-    // Merge and sort by date descending
-    const unified = [...posSalesFormatted, ...onlineOrdersFormatted].sort((a, b) => {
-      const dateA = new Date(a.date).getTime();
-      const dateB = new Date(b.date).getTime();
-      return dateB - dateA;
-    });
-
-    return { success: true, data: unified };
+    return {
+      success: true,
+      data: mappedItems,
+      total: totalCount,
+      page,
+      pageSize: limit,
+      totalPages
+    };
   } catch (err: any) {
+    console.error('Unified sales tracker error:', err);
     return { success: false, error: err.message || 'Failed to fetch unified sales.' };
+  }
+}
+
+export async function getOutstandingReceivablesAction(params?: {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  filter?: string;
+  sort?: string;
+}) {
+  const perm = await checkPermission('orders', 'read');
+  if (!perm.allowed) {
+    return { success: false, error: 'Unauthorized: Read permission required.' };
+  }
+
+  const {
+    page = 1,
+    pageSize = 50,
+    search = '',
+    filter = 'all',
+    sort = 'due_asc',
+  } = params || {};
+
+  const limit = Math.max(1, Math.min(pageSize, 100));
+  const offset = Math.max(0, (page - 1) * limit);
+
+  try {
+    const supabase = await getAdminSupabase();
+    const { data, error } = await supabase.rpc('admin_get_outstanding_receivables', {
+      p_search: search,
+      p_filter: filter,
+      p_sort: sort,
+      p_limit: limit,
+      p_offset: offset,
+    });
+
+    if (error) throw error;
+
+    const items = (data || []).map((row: any) => ({
+      id: row.id,
+      invoice_number: row.invoice_number,
+      receipt_number: row.receipt_number,
+      invoice_date: row.invoice_date,
+      due_date: row.due_date,
+      customer_name: row.customer_name,
+      customer_company: row.customer_company || null,
+      customer_phone: row.customer_phone,
+      customer_email: row.customer_email,
+      items_count: Number(row.items_count) || 1,
+      invoice_total: Number(row.invoice_total) || 0,
+      cleared_paid: Number(row.cleared_paid) || 0,
+      pending_clearance: Number(row.pending_clearance) || 0,
+      balance_due: Number(row.balance_due) || 0,
+      available_to_record: Number(row.available_to_record) || 0,
+      payment_status: row.payment_status,
+      collection_status: row.collection_status,
+      days_overdue: Number(row.days_overdue) || 0,
+      aging_bucket: row.aging_bucket,
+      payment_terms: row.payment_terms,
+      total_count: Number(row.total_count) || 0,
+    }));
+
+    const totalCount = items.length > 0 ? items[0].total_count : 0;
+    const totalPages = Math.max(1, Math.ceil(totalCount / limit));
+
+    return {
+      success: true,
+      data: items,
+      total: totalCount,
+      page,
+      pageSize: limit,
+      totalPages,
+    };
+  } catch (err: any) {
+    console.error('getOutstandingReceivablesAction error:', err);
+    return { success: false, error: err.message || 'Failed to fetch outstanding receivables.' };
+  }
+}
+
+export async function getOutstandingReceivablesMetricsAction(search = '') {
+  const perm = await checkPermission('orders', 'read');
+  if (!perm.allowed) {
+    return { success: false, error: 'Unauthorized: Read permission required.' };
+  }
+
+  try {
+    const supabase = await getAdminSupabase();
+    const { data, error } = await supabase.rpc('admin_get_outstanding_receivables_metrics', {
+      p_search: search,
+    });
+
+    if (error) throw error;
+
+    const row = data && data[0] ? data[0] : null;
+    return {
+      success: true,
+      data: {
+        total_outstanding: Number(row?.total_outstanding) || 0,
+        total_invoices: Number(row?.total_invoices) || 0,
+        unpaid_amount: Number(row?.unpaid_amount) || 0,
+        unpaid_count: Number(row?.unpaid_count) || 0,
+        balance_pending_amount: Number(row?.balance_pending_amount) || 0,
+        balance_pending_count: Number(row?.balance_pending_count) || 0,
+        pending_cheques: Number(row?.pending_cheques) || 0,
+        pending_cheques_count: Number(row?.pending_cheques_count) || 0,
+        due_today_amount: Number(row?.due_today_amount) || 0,
+        due_today_count: Number(row?.due_today_count) || 0,
+        due_next_7_days_amount: Number(row?.due_next_7_days_amount) || 0,
+        due_next_7_days_count: Number(row?.due_next_7_days_count) || 0,
+        overdue_amount: Number(row?.overdue_amount) || 0,
+        overdue_count: Number(row?.overdue_count) || 0,
+        overdue_30_plus_amount: Number(row?.overdue_30_plus_amount) || 0,
+        overdue_30_plus_count: Number(row?.overdue_30_plus_count) || 0,
+      },
+    };
+  } catch (err: any) {
+    console.error('getOutstandingReceivablesMetricsAction error:', err);
+    return { success: false, error: err.message || 'Failed to fetch receivables metrics.' };
+  }
+}
+
+export async function getUnifiedSalesMetricsAction(params?: {
+  search?: string;
+  source?: string;
+  paymentStatus?: string;
+  status?: string;
+  paymentMethod?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  minAmount?: number;
+  maxAmount?: number;
+}) {
+  const perm = await checkPermission('orders', 'read');
+  if (!perm.allowed) {
+    return { success: false, error: 'Unauthorized: Read orders permission required.' };
+  }
+
+  const {
+    search = '',
+    source = 'All',
+    paymentStatus = 'All',
+    status = 'All',
+    paymentMethod = 'All',
+    dateFrom,
+    dateTo,
+    minAmount,
+    maxAmount
+  } = params || {};
+
+  try {
+    const supabase = await getAdminSupabase();
+    const { data, error } = await supabase.rpc('admin_get_unified_sales_metrics', {
+      p_search: search,
+      p_source: source,
+      p_payment_status: paymentStatus,
+      p_status: status,
+      p_payment_method: paymentMethod,
+      p_date_from: dateFrom || null,
+      p_date_to: dateTo || null,
+      p_min_amount: minAmount ?? null,
+      p_max_amount: maxAmount ?? null
+    });
+
+    if (error) throw error;
+
+    const metrics = data?.[0] || {
+      total_revenue: 0,
+      pos_revenue: 0,
+      online_revenue: 0,
+      paid_transactions: 0,
+      paid_pos_transactions: 0,
+      paid_online_transactions: 0,
+      outstanding_amount: 0,
+      outstanding_transactions: 0,
+      returned_refunded_count: 0,
+      average_paid_transaction: 0,
+      total_transactions: 0
+    };
+
+    return { success: true, data: metrics };
+  } catch (err: any) {
+    console.error('Unified sales metrics error:', err);
+    return { success: false, error: err.message || 'Failed to fetch sales metrics.' };
   }
 }
 
@@ -2345,41 +4829,442 @@ export async function getDealerPurchaseHistoryAction(
   if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
 
   try {
-    const adminPb = await getAdminPb();
+    const cleanEmail = email?.trim();
+    const cleanPhone = phone?.trim();
+    const cleanCompany = companyName?.trim();
 
-    // Fetch POS sales matching email, phone or customer name
-    const filters: string[] = [];
-    if (email) filters.push(adminPb.filter('customer_email ~ {:email}', { email }));
-    if (phone) filters.push(adminPb.filter('customer_phone ~ {:phone}', { phone }));
-    if (companyName) filters.push(adminPb.filter('customer_name ~ {:companyName}', { companyName }));
-
-    if (filters.length === 0) {
+    if (!cleanEmail && !cleanPhone && !cleanCompany) {
       return { success: false, error: 'At least one dealer identifier is required.', data: [] };
     }
 
-    const filterStr = filters.join(' || ');
-    const sales = await adminPb.collection('sales').getFullList({
-      filter: filterStr,
-      sort: '-created',
-    });
+    const supabase = getAdminSupabase();
+    let query = supabase.from('sales').select('*').order('created_at', { ascending: false });
 
-    return { success: true, data: structuredClone(sales) };
+    const orClauses: string[] = [];
+    const STRICT_EMAIL_REGEX = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+    if (cleanEmail && STRICT_EMAIL_REGEX.test(cleanEmail) && !/[,()"]/.test(cleanEmail)) {
+      orClauses.push(`customer_email.eq.${cleanEmail}`);
+    }
+    if (cleanPhone) {
+      const sanitizedPhone = cleanPhone.replace(/[^0-9+]/g, '');
+      if (sanitizedPhone) {
+        orClauses.push(`customer_phone.eq.${sanitizedPhone}`);
+      }
+    }
+    if (cleanCompany) {
+      const sanitizedCompany = cleanCompany.replace(/[,()"]/g, '').trim();
+      if (sanitizedCompany) {
+        orClauses.push(`customer_name.ilike.%${sanitizedCompany}%`);
+      }
+    }
+
+    if (orClauses.length === 0) {
+      return { success: false, error: 'Valid dealer identifiers are required.', data: [] };
+    }
+
+    query = query.or(orClauses.join(','));
+    const { data: sales, error: salesErr } = await query;
+    if (salesErr) throw salesErr;
+
+    if (!sales || sales.length === 0) {
+      return { success: true, data: [] };
+    }
+
+    const saleIds = sales.map((s: any) => s.id);
+    const { data: saleItems } = await supabase
+      .from('sale_items')
+      .select('*')
+      .in('sale_id', saleIds);
+
+    const itemsBySaleId = new Map<string, any[]>();
+    for (const item of (saleItems || [])) {
+      if (!itemsBySaleId.has(item.sale_id)) itemsBySaleId.set(item.sale_id, []);
+      itemsBySaleId.get(item.sale_id)!.push(item);
+    }
+
+    const mapped: DealerSaleRecord[] = sales.map((s: any) => ({
+      id: s.id,
+      created: s.created_at || s.created,
+      receipt_number: s.receipt_number,
+      date: s.date || s.created_at,
+      customer_name: s.customer_name,
+      customer_email: s.customer_email,
+      customer_phone: s.customer_phone,
+      payment_method: s.payment_method,
+      subtotal: s.subtotal,
+      tax_amount: s.tax_amount,
+      discount: s.discount,
+      total: s.total,
+      items: (itemsBySaleId.get(s.id) || []).map((it: any) => ({
+        product_name: it.product_name,
+        name: it.product_name,
+        quantity: it.quantity,
+        qty: it.quantity,
+        unit_price: it.unit_price,
+        price: it.unit_price,
+        item_discount: it.item_discount,
+        line_total: it.line_total,
+      })),
+    }));
+
+    return { success: true, data: mapped };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to fetch dealer purchase history.', data: [] };
   }
 }
 
+export interface GetAdminProductsInput {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  categoryId?: string;
+  brandId?: string;
+  status?: string;
+  stockStatus?: 'all' | 'in_stock' | 'low_stock' | 'out_of_stock';
+  sort?: string;
+}
+
+export async function getAdminProductAction(id: string) {
+  const check = await checkPermission('products', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized' };
+
+  try {
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase
+      .from('products')
+      .select('*, categories:category_id(id, name), brands:brand_id(id, name)')
+      .eq('id', id)
+      .single();
+
+    if (error) throw error;
+
+    // Normalize in standard UI format matching the frontend expectation
+    return {
+      success: true,
+      data: {
+        ...data,
+        discountPrice: data.discount_price,
+        wholesalePrice: data.wholesale_price,
+        countInStock: data.count_in_stock,
+        isFeatured: data.is_featured,
+        isPreOrder: data.is_pre_order,
+        numReviews: data.num_reviews,
+        category: data.categories?.name || data.category_id || '',
+        brand: data.brands?.name || data.brand_id || '',
+        categoryId: data.category_id,
+        brandId: data.brand_id,
+        inventoryTrackingType: (data.inventory_tracking_type as 'counter' | 'unit') || 'counter',
+      }
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function getAdminProductsAction(input: GetAdminProductsInput = {}) {
+  const check = await checkPermission('products', 'read');
+  if (!check.allowed) {
+    console.log('[getAdminProductsAction] Unauthorized: missing products:read permission');
+    return { success: false, error: 'Unauthorized.', data: [] };
+  }
+
+  try {
+    const {
+      page = 1,
+      pageSize = 50,
+      search = '',
+      categoryId,
+      brandId,
+      status,
+      stockStatus,
+      sort
+    } = input;
+
+    const supabase = getAdminSupabase();
+
+    // Omit heavy fields: description, specs, badges unless needed in list view
+    let query = supabase
+      .from('products')
+      .select(`
+        id, name, slug, price, discount_price,
+        count_in_stock, status, is_featured, is_pre_order,
+        images, category_id, brand_id, created_at,
+        inventory_tracking_type,
+        categories:category_id(id, name),
+        brands:brand_id(id, name)
+      `, { count: 'exact' });
+
+    if (search) {
+      query = query.ilike('name', `%${search}%`);
+    }
+    if (categoryId) {
+      query = query.eq('category_id', categoryId);
+    }
+    if (brandId) {
+      query = query.eq('brand_id', brandId);
+    }
+    if (status) {
+      query = query.eq('status', status);
+    }
+    if (stockStatus) {
+      if (stockStatus === 'in_stock') {
+        query = query.gt('count_in_stock', 10);
+      } else if (stockStatus === 'low_stock') {
+        query = query.gt('count_in_stock', 0).lte('count_in_stock', 10);
+      } else if (stockStatus === 'out_of_stock') {
+        query = query.eq('count_in_stock', 0);
+      }
+    }
+
+    if (sort === 'price_asc') {
+      query = query.order('price', { ascending: true });
+    } else if (sort === 'price_desc') {
+      query = query.order('price', { ascending: false });
+    } else if (sort === 'stock_asc') {
+      query = query.order('count_in_stock', { ascending: true });
+    } else if (sort === 'stock_desc') {
+      query = query.order('count_in_stock', { ascending: false });
+    } else {
+      query = query.order('created_at', { ascending: false });
+    }
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    const { data, count, error } = await query.range(from, to);
+
+    if (error) {
+      console.error('[getAdminProductsAction] DB Error:', error);
+      throw error;
+    }
+
+    const normalized = (data || []).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      images: Array.isArray(p.images) ? p.images : [],
+      price: p.price || 0,
+      discountPrice: p.discount_price ?? null,
+      countInStock: p.count_in_stock ?? 0,
+      status: p.status,
+      category: p.categories?.name || p.category_id || '',
+      brand: p.brands?.name || p.brand_id || '',
+      categoryId: p.category_id,
+      brandId: p.brand_id,
+      isFeatured: p.is_featured || false,
+      isPreOrder: p.is_pre_order || false,
+      createdAt: p.created_at,
+      inventoryTrackingType: (p.inventory_tracking_type as 'counter' | 'unit') || 'counter',
+    }));
+
+    return {
+      success: true,
+      data: normalized,
+      total: count || 0,
+      page,
+      pageSize,
+      totalPages: Math.ceil((count || 0) / pageSize)
+    };
+  } catch (err: any) {
+    console.error('[getAdminProductsAction] Catch:', err);
+    return { success: false, error: err.message || 'Failed to fetch products.', data: [] };
+  }
+}
+
+export async function getLowStockProductsCountAction(threshold = 5) {
+  const check = await checkPermission('products', 'read');
+  if (!check.allowed) {
+    return { success: false, error: 'Unauthorized.', count: 0 };
+  }
+
+  try {
+    const supabase = getAdminSupabase();
+    const { count, error } = await supabase
+      .from('products')
+      .select('id', { count: 'exact', head: true })
+      .lte('count_in_stock', threshold);
+
+    if (error) {
+      console.error('[getLowStockProductsCountAction] DB Error:', error);
+      throw error;
+    }
+
+    return { success: true, count: count ?? 0 };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to count low stock products.', count: 0 };
+  }
+}
+
+export async function getAdminProductByIdAction(id: string) {
+  const check = await checkPermission('products', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.', data: null };
+
+  try {
+    const supabase = getAdminSupabase();
+    const { data: rawProd, error } = await supabase
+      .from('products')
+      .select(`*, categories:category_id(id, name), brands:brand_id(id, name)`)
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!rawProd) return { success: false, error: 'Product not found.', data: null };
+
+    const normalized = {
+      id: rawProd.id,
+      name: rawProd.name,
+      slug: rawProd.slug,
+      description: rawProd.description || '',
+      images: Array.isArray(rawProd.images) ? rawProd.images : [],
+      price: rawProd.price || 0,
+      discountPrice: rawProd.discount_price ?? null,
+      discount_price: rawProd.discount_price ?? null,
+      specs: rawProd.specs || {},
+      rating: rawProd.rating || 0,
+      numReviews: rawProd.num_reviews || 0,
+      countInStock: rawProd.count_in_stock ?? 0,
+      count_in_stock: rawProd.count_in_stock ?? 0,
+      category: rawProd.categories?.name || '',
+      brand: rawProd.brands?.name || '',
+      category_id: rawProd.category_id,
+      brand_id: rawProd.brand_id,
+      currency: rawProd.currency || 'LKR',
+      badges: rawProd.badges || [],
+      is_featured: rawProd.is_featured || false,
+      createdAt: rawProd.created_at,
+      created_at: rawProd.created_at,
+      updated_at: rawProd.updated_at,
+    };
+
+    return { success: true, data: normalized };
+  } catch (err: any) {
+    console.error('[getAdminProductByIdAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to fetch product.', data: null };
+  }
+}
+
+
+
+export async function getAdminCategoriesAction() {
+  const check = await checkPermission('categories', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
+
+  try {
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase
+      .from('categories')
+      .select('*')
+      .order('sort_order', { ascending: true });
+    if (error) throw error;
+    return { success: true, data: data || [] };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch admin categories.', data: [] };
+  }
+}
+
+export async function getAdminBrandsAction() {
+  const check = await checkPermission('brands', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
+
+  try {
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase
+      .from('brands')
+      .select('*')
+      .order('sort_order', { ascending: true });
+    if (error) throw error;
+    return { success: true, data: data || [] };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch admin brands.', data: [] };
+  }
+}
+
 // ─── Quotations Actions ─────────────────────────────────────────────────────────
 
-export async function getQuotationsAction() {
+export interface GetAdminQuotationsInput {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  status?: string;
+  quoteType?: string;
+  sort?: string;
+}
+
+export async function getQuotationsAction(input: GetAdminQuotationsInput = {}) {
   const check = await checkPermission('orders', 'read');
   if (!check.allowed) return { success: false, error: 'Unauthorized.', data: [] };
 
   try {
-    const list = await pbQuotations.getAll();
-    return { success: true, data: structuredClone(list || []) };
+    const {
+      page = 1,
+      pageSize = 50,
+      search = '',
+      status,
+      quoteType,
+      sort
+    } = input;
+
+    const supabase = getAdminSupabase();
+    const from = (page - 1) * pageSize;
+
+    const { data, error } = await supabase.rpc('admin_get_unified_quotations', {
+      p_search: search || '',
+      p_status: status ? (status === 'all' ? 'All' : status) : 'All',
+      p_quote_type: quoteType || 'all',
+      p_sort: sort || 'newest',
+      p_limit: pageSize,
+      p_offset: from,
+    });
+
+    if (error) throw error;
+
+    const rows = (data || []) as any[];
+    const totalCount = rows.length > 0 ? Number(rows[0].total_count || 0) : 0;
+
+    return {
+      success: true,
+      data: rows,
+      total: totalCount,
+      page,
+      pageSize,
+      totalPages: Math.ceil(totalCount / pageSize) || 1,
+    };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to fetch quotations.', data: [] };
+  }
+}
+
+export async function getQuotationsMetricsAction() {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase.rpc('admin_get_unified_quotations_metrics');
+    if (error) throw error;
+
+    const m = (data && data[0]) || {
+      total_quotations: 0,
+      wholesale_count: 0,
+      direct_count: 0,
+      total_quoted_value: 0,
+      active_pipeline_value: 0,
+      converted_value: 0,
+    };
+
+    return {
+      success: true,
+      data: {
+        totalQuotations: Number(m.total_quotations || 0),
+        wholesaleCount: Number(m.wholesale_count || 0),
+        directCount: Number(m.direct_count || 0),
+        totalQuotedValue: Number(m.total_quoted_value || 0),
+        activePipelineValue: Number(m.active_pipeline_value || 0),
+        convertedValue: Number(m.converted_value || 0),
+      },
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch quotation metrics.' };
   }
 }
 
@@ -2393,13 +5278,23 @@ export async function saveQuotationAction(
     customer_email?: string;
     customer_phone?: string;
     customer_address?: string;
-    items: Array<{ name: string; qty: number; unitPrice: number; discount?: number; total?: number }>;
+    items: Array<{
+      product_id?: string | null;
+      productId?: string | null;
+      name: string;
+      qty: number;
+      unitPrice: number;
+      discount?: number;
+      total?: number;
+    }>;
     subtotal: number;
     tax_amount?: number;
     discount_amount?: number;
+    discount_type?: 'flat' | 'percent';
+    discount_value?: number;
     total_amount: number;
     valid_until: string;
-    status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
+    status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired' | 'voided';
     notes?: string;
     createDealerIfNew?: boolean;
     createCustomerIfNew?: boolean;
@@ -2444,8 +5339,7 @@ export async function saveQuotationAction(
         return { success: false, error: 'A valid customer email is required to auto-create a customer record.' };
       }
       try {
-        const adminPb = await getAdminPb();
-        await adminPb.collection('customers').create({
+        await pbCustomers.create({
           name: data.customer_name,
           email: data.customer_email,
           phone: data.customer_phone || '',
@@ -2457,15 +5351,201 @@ export async function saveQuotationAction(
       }
     }
 
-    const { createDealerIfNew, createCustomerIfNew, ...payload } = data;
+    if (!Array.isArray(data.items) || data.items.length === 0) {
+      return { success: false, error: 'Quotation must have at least one line item.' };
+    }
 
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const catalogProductIdsToVerify = new Set<string>();
+
+    for (const item of data.items) {
+      if (!item.name?.trim()) {
+        return { success: false, error: 'Every item in the quotation must have a name.' };
+      }
+      const qty = Number(item.qty);
+      if (!Number.isInteger(qty) || qty <= 0 || !Number.isFinite(qty)) {
+        return {
+          success: false,
+          error: `Invalid quantity "${item.qty}" for item "${item.name}". Quantity must be a positive finite integer.`,
+        };
+      }
+      const unitPrice = Number(item.unitPrice);
+      if (isNaN(unitPrice) || !Number.isFinite(unitPrice) || unitPrice < 0) {
+        return { success: false, error: `Invalid unit price for item "${item.name}".` };
+      }
+
+      const rawPid = item.product_id ?? (item as any).productId;
+      if (rawPid !== undefined && rawPid !== null && rawPid !== '') {
+        if (typeof rawPid !== 'string' || !uuidRegex.test(rawPid.trim())) {
+          return {
+            success: false,
+            error: `Invalid catalog product ID for item "${item.name}". Must be a valid UUID.`,
+          };
+        }
+        catalogProductIdsToVerify.add(rawPid.trim());
+      }
+    }
+
+    const supabase = getAdminSupabase();
+
+    if (catalogProductIdsToVerify.size > 0) {
+      const { data: existingProducts, error: prodErr } = await supabase
+        .from('products')
+        .select('id')
+        .in('id', Array.from(catalogProductIdsToVerify));
+
+      if (prodErr) {
+        return { success: false, error: 'Failed to verify catalog product references.' };
+      }
+
+      const foundIdSet = new Set((existingProducts || []).map((p) => p.id));
+      for (const pId of catalogProductIdsToVerify) {
+        if (!foundIdSet.has(pId)) {
+          return {
+            success: false,
+            error: `Catalog product (${pId}) does not exist in the product catalog.`,
+          };
+        }
+      }
+    }
+
+    const validatedItems = data.items.map((item) => {
+      const safeQty = Math.floor(Number(item.qty));
+      const safePrice = Math.max(0, Number(item.unitPrice) || 0);
+      const rawPid = item.product_id ?? (item as any).productId;
+      const cleanPid = rawPid && typeof rawPid === 'string' && uuidRegex.test(rawPid.trim()) ? rawPid.trim() : null;
+      return {
+        ...item,
+        product_id: cleanPid,
+        name: item.name.trim(),
+        qty: safeQty,
+        unitPrice: safePrice,
+        total: safeQty * safePrice,
+      };
+    });
+
+    const rawTax = Number(data.tax_amount || 0);
+    const safeTax = Number.isFinite(rawTax) ? Math.max(0, Math.round(rawTax)) : 0;
+
+    const subtotal = Math.round(
+      validatedItems.reduce((acc, item) => acc + item.qty * item.unitPrice, 0)
+    );
+    const discType = data.discount_type || 'flat';
+    const rawDiscVal = Number(data.discount_value !== undefined ? data.discount_value : (data.discount_amount || 0));
+    const safeDiscVal = isNaN(rawDiscVal) || !isFinite(rawDiscVal) ? 0 : Math.max(0, rawDiscVal);
+
+    let calculatedDiscount = 0;
+    let clampedDiscountValue = safeDiscVal;
+    if (discType === 'percent') {
+      clampedDiscountValue = Math.min(safeDiscVal, 100);
+      calculatedDiscount = Math.round((subtotal * clampedDiscountValue) / 100);
+    } else {
+      clampedDiscountValue = Math.min(safeDiscVal, subtotal);
+      calculatedDiscount = Math.round(clampedDiscountValue);
+    }
+    calculatedDiscount = Math.min(Math.max(calculatedDiscount, 0), subtotal);
+    const totalAmount = Math.max(0, Math.round(subtotal - calculatedDiscount + safeTax));
+
+    const { createDealerIfNew, createCustomerIfNew, quote_type, dealer_id, ...payloadData } = data;
+    const payload = {
+      ...payloadData,
+      items: validatedItems,
+      subtotal,
+      tax_amount: safeTax,
+      discount_amount: calculatedDiscount,
+      discount_type: discType,
+      discount_value: clampedDiscountValue,
+      total_amount: totalAmount,
+    };
     let record;
     if (existingId) {
+      const { data: existingQuote, error: exErr } = await supabase
+        .from('quotations')
+        .select('*')
+        .eq('id', existingId)
+        .single();
+
+      if (exErr || !existingQuote) {
+        return { success: false, error: 'Quotation not found.' };
+      }
+
+      // Check if already converted
+      const { data: linkedSale } = await supabase
+        .from('sales')
+        .select('id, invoice_number')
+        .or(`quotation_id.eq.${existingId},notes.eq.Converted from Quotation #${existingQuote.quote_number}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (linkedSale) {
+        return {
+          success: false,
+          error: `Converted quotations are immutable and cannot be edited. Commercial invoice #${linkedSale.invoice_number || linkedSale.id} has already been issued.`,
+        };
+      }
+
+      // Check terminal states
+      if (existingQuote.status === 'voided' || existingQuote.voided_at) {
+        return { success: false, error: 'Voided quotations cannot be edited.' };
+      }
+      if (existingQuote.status === 'rejected') {
+        return { success: false, error: 'Rejected quotations cannot be edited.' };
+      }
+      if (existingQuote.status === 'expired' || (existingQuote.valid_until && new Date(existingQuote.valid_until).getTime() < Date.now())) {
+        return { success: false, error: 'Expired quotations cannot be edited. Please create a new quotation.' };
+      }
+      if (existingQuote.status === 'accepted') {
+        return {
+          success: false,
+          error: 'Accepted quotations cannot be edited. Commercial terms are locked awaiting invoice issuance.',
+        };
+      }
+
+      // Protect quote_number: never allow client to change historical quote number
+      payload.quote_number = existingQuote.quote_number;
+
       record = await pbQuotations.update(existingId, payload);
+
+      await writeAuditLog(
+        check.actorEmail || 'Admin User',
+        'update',
+        'quotations',
+        existingId,
+        {
+          subtotal: existingQuote.subtotal,
+          total_amount: existingQuote.total_amount,
+          customer_name: existingQuote.customer_name,
+          customer_company: existingQuote.customer_company,
+        },
+        {
+          subtotal: payload.subtotal,
+          total_amount: payload.total_amount,
+          customer_name: payload.customer_name,
+          customer_company: payload.customer_company,
+        },
+        { ip: check.ip, userAgent: check.userAgent }
+      );
     } else {
       record = await pbQuotations.create(payload);
+
+      await writeAuditLog(
+        check.actorEmail || 'Admin User',
+        'create',
+        'quotations',
+        record.id,
+        undefined,
+        {
+          quote_number: payload.quote_number,
+          customer_name: payload.customer_name,
+          customer_company: payload.customer_company,
+          total_amount: payload.total_amount,
+          status: payload.status,
+        },
+        { ip: check.ip, userAgent: check.userAgent }
+      );
     }
     revalidatePath('/admin/quotations');
+    revalidatePath('/admin/sales');
     return { success: true, data: structuredClone(record) };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to save quotation.' };
@@ -2477,15 +5557,74 @@ export async function deleteQuotationAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
+    const supabase = getAdminSupabase();
+    // 1. Fetch quotation to verify status
+    const { data: quote, error: fetchErr } = await supabase
+      .from('quotations')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchErr || !quote) {
+      return { success: false, error: 'Quotation not found.' };
+    }
+
+    // 2. Strict status check: Only unissued draft quotations can be deleted
+    if (quote.status !== 'draft') {
+      return {
+        success: false,
+        error: `Only unissued draft quotations can be deleted. This quotation is "${quote.status}". Issued quotations must be voided to preserve commercial audit history.`,
+      };
+    }
+
+    // 3. Double-check no linked sale exists
+    const { data: linkedSale } = await supabase
+      .from('sales')
+      .select('id, invoice_number')
+      .or(`quotation_id.eq.${id},notes.eq.Converted from Quotation #${quote.quote_number}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (linkedSale) {
+      return {
+        success: false,
+        error: `Cannot delete quotation: an invoice (${linkedSale.invoice_number || linkedSale.id}) has already been issued from it.`,
+      };
+    }
+
     await pbQuotations.delete(id);
+
+    await writeAuditLog(
+      check.actorEmail || 'Admin User',
+      'delete',
+      'quotations',
+      id,
+      { quote_number: quote.quote_number, customer_name: quote.customer_name, total_amount: quote.total_amount },
+      undefined,
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
     revalidatePath('/admin/quotations');
+    revalidatePath('/admin/sales');
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to delete quotation.' };
   }
 }
 
-export async function convertQuotationToSaleAction(quoteId: string, paymentMethod: PaymentMethod = 'cash') {
+export async function convertQuotationToSaleAction(
+  quoteId: string,
+  paymentMethod?: PaymentMethod | null,
+  amountPaid?: number,
+  chequeDetails?: {
+    chequeNumber?: string;
+    chequeDate?: string;
+    bankName?: string;
+    notes?: string;
+  },
+  terms: PaymentTerms = 'due_on_receipt',
+  dueDate?: string
+) {
   const check = await checkPermission('orders', 'write');
   if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
@@ -2493,42 +5632,1204 @@ export async function convertQuotationToSaleAction(quoteId: string, paymentMetho
     const quote = await pbQuotations.getById(quoteId);
     if (!quote) return { success: false, error: 'Quotation not found.' };
 
-    const items = quote.items.map((item) => ({
-      product_id: '',
-      product_name: item.name,
-      sku: 'QUOTE-ITEM',
-      unit_price: item.unitPrice,
-      item_discount: item.discount || 0,
-      quantity: item.qty,
-      line_total: item.total || (item.unitPrice * item.qty - (item.discount || 0)),
-    }));
+    const supabase = getAdminSupabase();
 
-    const salePayload: SalePayload = {
-      cashier_name: check.actorEmail || 'Admin User',
-      cashier_id: check.actorId || 'admin',
-      customer_name: quote.customer_name,
-      customer_phone: quote.customer_phone || '',
-      customer_email: quote.customer_email,
-      subtotal: quote.subtotal,
-      discount: quote.discount_amount || 0,
-      tax_amount: quote.tax_amount || 0,
-      total: quote.total_amount,
-      payment_method: paymentMethod,
-      cash_tendered: quote.total_amount,
-      change_due: 0,
-      items_count: items.reduce((acc, i) => acc + i.quantity, 0),
-      notes: `Converted from Quotation #${quote.quote_number}`,
-      items,
-    };
+    // Check if already converted via durable FK or legacy fallback
+    const { data: existingSale } = await supabase
+      .from('sales')
+      .select('id, invoice_number')
+      .or(`quotation_id.eq.${quoteId},notes.eq.Converted from Quotation #${quote.quote_number}`)
+      .limit(1)
+      .maybeSingle();
 
-    const saleResult = await pbSales.createSale(salePayload);
-    await pbQuotations.update(quoteId, { status: 'accepted' });
+    if (existingSale) {
+      return {
+        success: false,
+        error: `This quotation has already been converted to invoice #${existingSale.invoice_number || existingSale.id}.`,
+      };
+    }
+
+    if (quote.status === 'draft') {
+      return {
+        success: false,
+        error: 'Draft quotations cannot be converted directly to an invoice. The quotation must first be formally issued to become Active.',
+      };
+    }
+    if (quote.status === 'voided' || (quote as any).voided_at) {
+      return { success: false, error: 'Cannot convert a voided quotation.' };
+    }
+    if (quote.status === 'rejected') {
+      return { success: false, error: 'Cannot convert a rejected quotation.' };
+    }
+    if (quote.status === 'expired' || (quote.valid_until && new Date(quote.valid_until).getTime() < Date.now())) {
+      return { success: false, error: 'Cannot convert an expired quotation. Please create a new quotation.' };
+    }
+
+    // Verify that all catalog-backed products referenced in the quotation still exist
+    const quoteItems: any[] = Array.isArray(quote.items) ? quote.items : [];
+    const catalogProductIds = quoteItems
+      .map((it: any) => it.product_id || it.productId)
+      .filter((pid: any) => pid && typeof pid === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pid.trim()))
+      .map((pid: any) => pid.trim());
+
+    if (catalogProductIds.length > 0) {
+      const { data: existingProds, error: epErr } = await supabase
+        .from('products')
+        .select('id')
+        .in('id', catalogProductIds);
+
+      if (epErr) {
+        return { success: false, error: 'Failed to verify quotation catalog products.' };
+      }
+
+      const existingSet = new Set((existingProds || []).map((p) => p.id));
+      for (const pid of catalogProductIds) {
+        if (!existingSet.has(pid)) {
+          return {
+            success: false,
+            error: 'Quotation contains a catalog product that is no longer available. Please update the quotation before issuing the invoice.',
+          };
+        }
+      }
+    }
+
+    const authTotal = Number(quote.total_amount) || 0;
+    const effectiveAmountPaid = amountPaid !== undefined ? Number(amountPaid) : 0;
+
+    if (isNaN(effectiveAmountPaid) || !Number.isFinite(effectiveAmountPaid) || effectiveAmountPaid < 0) {
+      return { success: false, error: 'Valid non-negative amount paid is required.' };
+    }
+
+    if (effectiveAmountPaid > authTotal) {
+      return {
+        success: false,
+        error: `Amount paid cannot exceed quotation total of LKR ${authTotal.toLocaleString()}.`,
+      };
+    }
+
+    if (effectiveAmountPaid > 0) {
+      if (!paymentMethod) {
+        return { success: false, error: 'Payment method is required when recording an initial payment.' };
+      }
+      if (paymentMethod === 'cheque') {
+        if (!chequeDetails?.chequeNumber?.trim()) {
+          return { success: false, error: 'Cheque number is required for cheque payments.' };
+        }
+        if (!chequeDetails?.chequeDate) {
+          return { success: false, error: 'Cheque date is required for cheque payments.' };
+        }
+        if (!chequeDetails?.bankName?.trim()) {
+          return { success: false, error: 'Bank name is required for cheque payments.' };
+        }
+      }
+    }
+
+    // Resolve authenticated staff profile display name according to authoritative 5-tier fallback:
+    // 1. non-empty profiles.name
+    // 2. authenticated user_metadata.full_name
+    // 3. authenticated user_metadata.name
+    // 4. authenticated email
+    // 5. safe generic fallback such as "Admin Staff"
+    let staffDisplayName = 'Admin Staff';
+    if (check.actorId) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('name')
+        .eq('id', check.actorId)
+        .maybeSingle();
+
+      const profileName = profile?.name?.trim();
+      let metaFullName: string | undefined;
+      let metaName: string | undefined;
+
+      try {
+        const { data: authUser } = await supabase.auth.admin.getUserById(check.actorId);
+        metaFullName = authUser?.user?.user_metadata?.full_name?.trim();
+        metaName = authUser?.user?.user_metadata?.name?.trim();
+      } catch {
+        // Fallback gracefully if admin auth call is restricted
+      }
+
+      staffDisplayName =
+        (profileName && profileName.length > 0 ? profileName : undefined) ||
+        (metaFullName && metaFullName.length > 0 ? metaFullName : undefined) ||
+        (metaName && metaName.length > 0 ? metaName : undefined) ||
+        (check.actorEmail && check.actorEmail.trim().length > 0 ? check.actorEmail.trim() : undefined) ||
+        'Admin Staff';
+    }
+
+    const { data, error } = await supabase.rpc('convert_quotation_to_sale_atomic', {
+      p_quote_id: quoteId,
+      p_actor_id: check.actorId || null,
+      p_actor_name: staffDisplayName,
+      p_payment_method: effectiveAmountPaid > 0 ? (paymentMethod || null) : null,
+      p_amount: effectiveAmountPaid,
+      p_cheque_number: (effectiveAmountPaid > 0 && paymentMethod === 'cheque') ? (chequeDetails?.chequeNumber?.trim() || null) : null,
+      p_cheque_date: (effectiveAmountPaid > 0 && paymentMethod === 'cheque') ? (chequeDetails?.chequeDate || null) : null,
+      p_bank_name: (effectiveAmountPaid > 0 && paymentMethod === 'cheque') ? (chequeDetails?.bankName?.trim() || null) : null,
+      p_cheque_notes: (effectiveAmountPaid > 0 && paymentMethod === 'cheque') ? (chequeDetails?.notes || null) : null,
+      p_payment_terms: terms || 'due_on_receipt',
+      p_due_date: dueDate || null,
+    });
+
+    if (error || !data?.success) {
+      return {
+        success: false,
+        error: error?.message || data?.error || 'Failed to issue invoice from quotation.',
+      };
+    }
+
+    await writeAuditLog(
+      staffDisplayName || check.actorEmail || 'Admin User',
+      'convert',
+      'quotations',
+      quoteId,
+      { status: quote.status },
+      { status: 'converted', saleId: data.sale_id, invoiceNumber: data.invoice_number },
+      { ip: check.ip, userAgent: check.userAgent }
+    );
 
     revalidatePath('/admin/quotations');
     revalidatePath('/admin/sales');
-    return { success: true, saleId: saleResult.sale.id, receiptNumber: saleResult.sale.receipt_number };
+    revalidatePath('/admin/finance/outstanding');
+    return {
+      success: true,
+      saleId: data.sale_id,
+      receiptNumber: data.receipt_number,
+      invoiceNumber: data.invoice_number,
+      paymentId: data.payment_id,
+      summary: data.summary,
+    };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to convert quotation to sale.' };
+    return { success: false, error: err.message || 'Failed to issue invoice from quotation.' };
+  }
+}
+
+export async function voidQuotationAction(payload: {
+  quoteId?: string;
+  quotationId?: string;
+  reason: QuotationVoidReason | string;
+  notes?: string;
+}) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const targetId = payload.quoteId || payload.quotationId;
+    if (!targetId) {
+      return { success: false, error: 'Quotation ID is required.' };
+    }
+    const cleanReason = (payload.reason || '').trim().toUpperCase();
+    if (!cleanReason) {
+      return { success: false, error: 'A valid reason is required to void a quotation.' };
+    }
+    if (cleanReason === 'OTHER' && (!payload.notes || !payload.notes.trim())) {
+      return { success: false, error: 'Notes are required when selecting reason "Other".' };
+    }
+
+    const supabase = getAdminSupabase();
+    const actor = check.actorEmail || 'Admin User';
+
+    const { data, error } = await supabase.rpc('void_quotation_atomic', {
+      p_quote_id: targetId,
+      p_reason: cleanReason,
+      p_notes: payload.notes?.trim() || null,
+      p_voided_by: actor,
+    });
+
+    if (error || !data?.success) {
+      return {
+        success: false,
+        error: error?.message || data?.error || 'Failed to void quotation.',
+      };
+    }
+
+    revalidatePath('/admin/quotations');
+    revalidatePath('/admin/sales');
+
+    await writeAuditLog(
+      actor,
+      'void',
+      'quotations',
+      targetId,
+      { status: 'active' },
+      { status: 'voided', reason: cleanReason, notes: payload.notes },
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    return { success: true, data };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to void quotation.' };
+  }
+}
+
+export async function issueQuotationAction(quotationId: string) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const supabase = getAdminSupabase();
+
+    // 1. Fetch quotation to verify current persisted status
+    const { data: quote, error: fetchErr } = await supabase
+      .from('quotations')
+      .select('*')
+      .eq('id', quotationId)
+      .single();
+
+    if (fetchErr || !quote) {
+      return { success: false, error: 'Quotation not found.' };
+    }
+
+    // 2. Strict status check: Only draft quotations can be issued
+    if (quote.status !== 'draft') {
+      return {
+        success: false,
+        error: 'Only draft quotations can be issued.',
+      };
+    }
+
+    // 3. Verify quotation is NOT converted
+    const { data: linkedSale } = await supabase
+      .from('sales')
+      .select('id, invoice_number')
+      .or(`quotation_id.eq.${quotationId},notes.eq.Converted from Quotation #${quote.quote_number}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (linkedSale) {
+      return {
+        success: false,
+        error: `This quotation has already been converted to invoice #${linkedSale.invoice_number || linkedSale.id}.`,
+      };
+    }
+
+    // 4. Verify quotation is NOT voided
+    if (quote.status === 'voided' || quote.voided_at) {
+      return { success: false, error: 'Cannot issue a voided quotation.' };
+    }
+
+    // 5. Update status to 'sent' (Active)
+    const { data: updated, error: updateErr } = await supabase
+      .from('quotations')
+      .update({
+        status: 'sent',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', quotationId)
+      .select()
+      .single();
+
+    if (updateErr) {
+      throw updateErr;
+    }
+
+    // 6. Record authoritative audit event
+    await writeAuditLog(
+      check.actorEmail || 'Admin User',
+      'issue',
+      'quotations',
+      quotationId,
+      { status: 'draft' },
+      {
+        status: 'sent',
+        quote_number: quote.quote_number,
+        total_amount: quote.total_amount,
+        customer_name: quote.customer_name,
+        customer_company: quote.customer_company,
+      },
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/admin/quotations');
+    revalidatePath('/admin/sales');
+    return { success: true, data: updated };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to issue quotation.' };
+  }
+}
+
+export async function acceptQuotationAction(quotationId: string) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const supabase = getAdminSupabase();
+
+    // 1. Fetch quotation
+    const { data: quote, error: fetchErr } = await supabase
+      .from('quotations')
+      .select('*')
+      .eq('id', quotationId)
+      .single();
+
+    if (fetchErr || !quote) {
+      return { success: false, error: 'Quotation not found.' };
+    }
+
+    // 2. Reject if draft (must be issued first)
+    if (quote.status === 'draft') {
+      return {
+        success: false,
+        error: 'Draft quotations must be issued before they can be marked as accepted.',
+      };
+    }
+
+    // 3. Reject if already accepted
+    if (quote.status === 'accepted') {
+      return {
+        success: false,
+        error: 'Quotation is already marked as accepted.',
+      };
+    }
+
+    // 4. Reject if terminal or invalid
+    if (quote.status === 'voided' || quote.voided_at) {
+      return { success: false, error: 'Cannot accept a voided quotation.' };
+    }
+    if (quote.status === 'rejected') {
+      return { success: false, error: 'Cannot accept a rejected quotation.' };
+    }
+    if (quote.status === 'expired' || (quote.valid_until && new Date(quote.valid_until).getTime() < Date.now())) {
+      return { success: false, error: 'Cannot accept an expired quotation. Please create a new quotation.' };
+    }
+
+    // 5. Verify no linked sale exists
+    const { data: linkedSale } = await supabase
+      .from('sales')
+      .select('id, invoice_number')
+      .or(`quotation_id.eq.${quotationId},notes.eq.Converted from Quotation #${quote.quote_number}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (linkedSale) {
+      return {
+        success: false,
+        error: `This quotation has already been converted to invoice #${linkedSale.invoice_number || linkedSale.id}.`,
+      };
+    }
+
+    // 6. Update status to 'accepted'
+    const { data: updated, error: updateErr } = await supabase
+      .from('quotations')
+      .update({
+        status: 'accepted',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', quotationId)
+      .select()
+      .single();
+
+    if (updateErr) {
+      throw updateErr;
+    }
+
+    // 7. Record authoritative audit event
+    await writeAuditLog(
+      check.actorEmail || 'Admin User',
+      'accept',
+      'quotations',
+      quotationId,
+      { status: quote.status },
+      {
+        status: 'accepted',
+        quote_number: quote.quote_number,
+        total_amount: quote.total_amount,
+        customer_name: quote.customer_name,
+      },
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/admin/quotations');
+    revalidatePath('/admin/sales');
+    return { success: true, data: updated };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to mark quotation as accepted.' };
+  }
+}
+
+export async function rejectQuotationAction(quotationId: string, reason?: string) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const supabase = getAdminSupabase();
+
+    // 1. Fetch quotation
+    const { data: quote, error: fetchErr } = await supabase
+      .from('quotations')
+      .select('*')
+      .eq('id', quotationId)
+      .single();
+
+    if (fetchErr || !quote) {
+      return { success: false, error: 'Quotation not found.' };
+    }
+
+    // 2. Reject if terminal or already rejected/voided
+    if (quote.status === 'rejected') {
+      return { success: false, error: 'Quotation is already marked as rejected.' };
+    }
+    if (quote.status === 'voided' || quote.voided_at) {
+      return { success: false, error: 'Cannot reject a voided quotation.' };
+    }
+    if (quote.status === 'expired' || (quote.valid_until && new Date(quote.valid_until).getTime() < Date.now())) {
+      return { success: false, error: 'Cannot reject an already expired quotation.' };
+    }
+
+    // 3. Verify no linked sale exists
+    const { data: linkedSale } = await supabase
+      .from('sales')
+      .select('id, invoice_number')
+      .or(`quotation_id.eq.${quotationId},notes.eq.Converted from Quotation #${quote.quote_number}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (linkedSale) {
+      return {
+        success: false,
+        error: `Cannot reject quotation: an invoice (#${linkedSale.invoice_number || linkedSale.id}) has already been issued from it.`,
+      };
+    }
+
+    // 4. Only active ('sent') or accepted quotations can be rejected
+    if (quote.status !== 'sent' && quote.status !== 'accepted') {
+      return {
+        success: false,
+        error: `Only active or accepted quotations can be marked as rejected. Current status is "${quote.status}".`,
+      };
+    }
+
+    // 5. Update status to 'rejected'
+    const { data: updated, error: updateErr } = await supabase
+      .from('quotations')
+      .update({
+        status: 'rejected',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', quotationId)
+      .select()
+      .single();
+
+    if (updateErr) {
+      throw updateErr;
+    }
+
+    // 6. Record authoritative audit event
+    await writeAuditLog(
+      check.actorEmail || 'Admin User',
+      'reject',
+      'quotations',
+      quotationId,
+      { status: quote.status },
+      {
+        status: 'rejected',
+        quote_number: quote.quote_number,
+        total_amount: quote.total_amount,
+        reason: reason?.trim() || null,
+      },
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    revalidatePath('/admin/quotations');
+    revalidatePath('/admin/sales');
+    return { success: true, data: updated };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to mark quotation as rejected.' };
+  }
+}
+
+export async function getQuotationHistoryAction(quotationId: string) {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const supabase = getAdminSupabase();
+
+    // 1. Fetch Quotation
+    const { data: quotation, error: qErr } = await supabase
+      .from('quotations')
+      .select('*')
+      .eq('id', quotationId)
+      .single();
+
+    if (qErr || !quotation) {
+      return { success: false, error: 'Quotation not found.' };
+    }
+
+    // 2. Fetch Audit Logs for this quotation
+    const { data: auditLogs } = await supabase
+      .from('audit_log')
+      .select('*')
+      .eq('collection', 'quotations')
+      .eq('record_id', quotationId)
+      .order('created_at', { ascending: true });
+
+    // 3. Fetch Linked Invoice in sales (durable FK or legacy snapshot/notes fallback)
+    const { data: linkedSale } = await supabase
+      .from('sales')
+      .select('*')
+      .or(`quotation_id.eq.${quotationId},notes.eq.Converted from Quotation #${quotation.quote_number}`)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    // 4. If linked sale exists, fetch its payments and reversals
+    let payments: any[] = [];
+    let reversals: any[] = [];
+    if (linkedSale) {
+      const { data: pData } = await supabase
+        .from('sale_payments')
+        .select('*')
+        .eq('sale_id', linkedSale.id)
+        .order('payment_date', { ascending: true });
+      payments = pData || [];
+
+      const { data: rData } = await supabase
+        .from('sale_payment_reversals')
+        .select('*')
+        .eq('sale_id', linkedSale.id)
+        .order('created_at', { ascending: true });
+      reversals = rData || [];
+    }
+
+    // 5. Build authoritative timeline events
+    type HistoryTimelineEvent = {
+      id: string;
+      eventType: string;
+      title: string;
+      timestamp: string;
+      actor?: string;
+      details?: Record<string, any>;
+      badgeVariant?: 'default' | 'success' | 'warning' | 'destructive' | 'info';
+    };
+
+    const timeline: HistoryTimelineEvent[] = [];
+
+    // Quotation Created Event
+    timeline.push({
+      id: `created-${quotation.id}`,
+      eventType: 'QUOTATION_CREATED',
+      title: `Quotation #${quotation.quote_number} Created`,
+      timestamp: quotation.created_at,
+      actor: auditLogs?.find((a: any) => a.action === 'create')?.actor || 'Staff',
+      details: {
+        total: quotation.total_amount,
+        itemsCount: Array.isArray(quotation.items) ? quotation.items.length : 0,
+        customer: quotation.customer_name,
+        company: quotation.customer_company,
+      },
+      badgeVariant: 'default',
+    });
+
+    // Quotation Issued Event (action === 'issue')
+    const issueAudit = auditLogs?.find((a: any) => a.action === 'issue');
+    if (issueAudit) {
+      timeline.push({
+        id: `issued-${issueAudit.id}`,
+        eventType: 'QUOTATION_ISSUED',
+        title: 'Quotation Formally Issued',
+        timestamp: issueAudit.created_at,
+        actor: issueAudit.actor,
+        details: { status: 'sent' },
+        badgeVariant: 'info',
+      });
+    }
+
+    // Quotation Accepted Event (action === 'accept')
+    const acceptAudit = auditLogs?.find((a: any) => a.action === 'accept');
+    if (acceptAudit) {
+      timeline.push({
+        id: `accepted-${acceptAudit.id}`,
+        eventType: 'QUOTATION_ACCEPTED',
+        title: 'Quotation Accepted by Customer',
+        timestamp: acceptAudit.created_at,
+        actor: acceptAudit.actor,
+        details: { status: 'accepted' },
+        badgeVariant: 'success',
+      });
+    }
+
+    // Quotation Rejected Event (action === 'reject')
+    const rejectAudit = auditLogs?.find((a: any) => a.action === 'reject');
+    if (rejectAudit) {
+      timeline.push({
+        id: `rejected-${rejectAudit.id}`,
+        eventType: 'QUOTATION_REJECTED',
+        title: `Quotation Rejected${rejectAudit.new_value?.reason ? ` (${rejectAudit.new_value.reason})` : ''}`,
+        timestamp: rejectAudit.created_at,
+        actor: rejectAudit.actor,
+        details: rejectAudit.new_value,
+        badgeVariant: 'destructive',
+      });
+    }
+
+    // Quotation Updates from audit_log (generic)
+    auditLogs
+      ?.filter(
+        (a: any) =>
+          a.action === 'update' &&
+          !a.new_value?.recipient &&
+          a.new_value?.status !== 'sent' &&
+          a.new_value?.status !== 'accepted' &&
+          a.new_value?.status !== 'rejected'
+      )
+      .forEach((a: any) => {
+        timeline.push({
+          id: `update-${a.id}`,
+          eventType: 'QUOTATION_UPDATED',
+          title: 'Quotation Updated',
+          timestamp: a.created_at,
+          actor: a.actor,
+          details: a.new_value,
+          badgeVariant: 'info',
+        });
+      });
+
+    // Quotation Emailed Event
+    const emailAudit = auditLogs?.find(
+      (a: any) => a.action === 'email' || (a.action === 'update' && a.new_value?.recipient)
+    );
+    if (emailAudit) {
+      timeline.push({
+        id: `email-${emailAudit.id}`,
+        eventType: 'QUOTATION_EMAILED',
+        title: 'Quotation Sent via Email',
+        timestamp: emailAudit.created_at,
+        actor: emailAudit.actor,
+        details: { recipient: emailAudit.new_value?.recipient || quotation.customer_email },
+        badgeVariant: 'info',
+      });
+    }
+
+    // Quotation Voided Event
+    if (quotation.status === 'voided' || quotation.voided_at) {
+      timeline.push({
+        id: `voided-${quotation.id}`,
+        eventType: 'QUOTATION_VOIDED',
+        title: `Quotation Voided (${quotation.void_reason?.replace(/_/g, ' ') || 'Cancelled'})`,
+        timestamp: quotation.voided_at || quotation.updated_at,
+        actor: quotation.voided_by || 'Staff',
+        details: {
+          reason: quotation.void_reason,
+          notes: quotation.void_notes,
+        },
+        badgeVariant: 'destructive',
+      });
+    }
+
+    // Quotation Converted Event
+    if (linkedSale) {
+      timeline.push({
+        id: `converted-${linkedSale.id}`,
+        eventType: 'QUOTATION_CONVERTED',
+        title: `Converted to Commercial Invoice #${linkedSale.invoice_number}`,
+        timestamp: linkedSale.invoiced_at || linkedSale.created_at,
+        actor: linkedSale.issued_by_name || linkedSale.cashier_name || 'Admin Staff',
+        details: {
+          invoiceNumber: linkedSale.invoice_number,
+          receiptNumber: linkedSale.receipt_number,
+          total: linkedSale.total,
+          paymentTerms: linkedSale.payment_terms,
+          dueDate: linkedSale.due_date,
+        },
+        badgeVariant: 'success',
+      });
+
+      // Payments Events
+      payments.forEach((p: any) => {
+        const isCheque = p.payment_method === 'cheque';
+        let eventType = 'PAYMENT_RECEIVED';
+        let title = `Payment Received — LKR ${Number(p.amount).toLocaleString()} (${p.payment_method.toUpperCase()})`;
+        let variant: 'success' | 'warning' | 'destructive' = 'success';
+
+        if (isCheque) {
+          if (p.status === 'pending') {
+            eventType = 'CHEQUE_RECEIVED';
+            title = `Cheque Received — LKR ${Number(p.amount).toLocaleString()} (Cheque #${p.cheque_number})`;
+            variant = 'warning';
+          } else if (p.status === 'cleared') {
+            eventType = 'CHEQUE_CLEARED';
+            title = `Cheque Cleared — LKR ${Number(p.amount).toLocaleString()} (Cheque #${p.cheque_number})`;
+            variant = 'success';
+          } else if (p.status === 'bounced') {
+            eventType = 'CHEQUE_BOUNCED';
+            title = `Cheque Bounced — LKR ${Number(p.amount).toLocaleString()} (Cheque #${p.cheque_number})`;
+            variant = 'destructive';
+          } else if (p.status === 'cancelled') {
+            eventType = 'CHEQUE_CANCELLED';
+            title = `Cheque Cancelled — LKR ${Number(p.amount).toLocaleString()} (Cheque #${p.cheque_number})`;
+            variant = 'destructive';
+          }
+        }
+
+        timeline.push({
+          id: `payment-${p.id}`,
+          eventType,
+          title,
+          timestamp: p.cleared_at || p.payment_date || p.created_at,
+          actor: p.cleared_by || p.created_by,
+          details: {
+            amount: p.amount,
+            method: p.payment_method,
+            status: p.status,
+            chequeNumber: p.cheque_number,
+            bank: p.bank_name,
+            chequeDate: p.cheque_date,
+            reference: p.reference,
+          },
+          badgeVariant: variant,
+        });
+      });
+
+      // Reversals Events
+      reversals.forEach((r: any) => {
+        timeline.push({
+          id: `reversal-${r.id}`,
+          eventType: 'PAYMENT_RETURNED',
+          title: `Payment Return / Reversal #${r.reversal_number} — LKR ${Number(r.amount).toLocaleString()}`,
+          timestamp: r.created_at,
+          actor: r.reversed_by,
+          details: {
+            amount: r.amount,
+            reason: r.reason,
+            notes: r.notes,
+            reference: r.reference,
+          },
+          badgeVariant: 'warning',
+        });
+      });
+
+      // Invoice Revocation Event
+      if (linkedSale.invoice_revoked_at) {
+        timeline.push({
+          id: `revocation-${linkedSale.id}`,
+          eventType: 'INVOICE_REVOKED',
+          title: `Invoice #${linkedSale.invoice_number} Revoked (${linkedSale.invoice_revoke_reason || 'Document Voided'})`,
+          timestamp: linkedSale.invoice_revoked_at,
+          actor: linkedSale.invoice_revoked_by,
+          details: {
+            reason: linkedSale.invoice_revoke_reason,
+            notes: linkedSale.invoice_revoke_notes,
+          },
+          badgeVariant: 'destructive',
+        });
+      }
+    }
+
+    // Sort timeline chronologically (newest first for drawer display)
+    timeline.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    // Compute linked invoice financial metrics
+    let linkedInvoiceSummary: any = null;
+    if (linkedSale) {
+      const grossCleared = payments
+        .filter((p: any) => p.status === 'cleared')
+        .reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+      const returnedAmount = reversals
+        .reduce((sum: number, r: any) => sum + Number(r.amount || 0), 0);
+      const effectiveCleared = Math.max(0, grossCleared - returnedAmount);
+      const pendingClearance = payments
+        .filter((p: any) => p.payment_method === 'cheque' && p.status === 'pending')
+        .reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+      const invoiceTotal = Number(linkedSale.total || 0);
+      const balanceDue = Math.max(0, invoiceTotal - effectiveCleared);
+
+      let pStatus = 'UNPAID';
+      if (linkedSale.invoice_revoked_at) pStatus = 'REVOKED';
+      else if (linkedSale.status === 'voided') pStatus = 'VOIDED';
+      else if (effectiveCleared >= invoiceTotal) pStatus = 'PAID';
+      else if (effectiveCleared > 0) pStatus = 'BALANCE PENDING';
+
+      linkedInvoiceSummary = {
+        id: linkedSale.id,
+        invoiceNumber: linkedSale.invoice_number,
+        receiptNumber: linkedSale.receipt_number,
+        invoicedAt: linkedSale.invoiced_at || linkedSale.created_at,
+        total: invoiceTotal,
+        paymentTerms: linkedSale.payment_terms || 'due_on_receipt',
+        dueDate: linkedSale.due_date,
+        paymentStatus: pStatus,
+        isRevoked: Boolean(linkedSale.invoice_revoked_at),
+        invoiceRevokedAt: linkedSale.invoice_revoked_at,
+        invoiceRevokedBy: linkedSale.invoice_revoked_by,
+        invoiceRevokeReason: linkedSale.invoice_revoke_reason,
+        effectiveClearedPaid: effectiveCleared,
+        pendingClearance,
+        balanceDue,
+        issuedByName: linkedSale.issued_by_name || linkedSale.cashier_name || 'Admin Staff',
+        issuedByProfileId: linkedSale.issued_by_profile_id || null,
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        quotation,
+        linkedInvoice: linkedInvoiceSummary,
+        payments,
+        reversals,
+        timeline,
+      },
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch quotation history.' };
+  }
+}
+
+export async function recordSalePaymentAction(payload: {
+  saleId: string;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  reference?: string;
+  chequeNumber?: string;
+  chequeDate?: string;
+  bankName?: string;
+  notes?: string;
+}) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    if (!payload.saleId) {
+      return { success: false, error: 'Sale ID is required.' };
+    }
+    const numAmount = Number(payload.amount);
+    if (isNaN(numAmount) || !Number.isFinite(numAmount) || numAmount <= 0) {
+      return { success: false, error: 'Valid positive payment amount is required.' };
+    }
+
+    if (payload.paymentMethod === 'cheque') {
+      if (!payload.chequeNumber?.trim()) {
+        return { success: false, error: 'Cheque number is required for cheque payments.' };
+      }
+      if (!payload.chequeDate) {
+        return { success: false, error: 'Cheque date is required for cheque payments.' };
+      }
+      if (!payload.bankName?.trim()) {
+        return { success: false, error: 'Bank name is required for cheque payments.' };
+      }
+    }
+
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase.rpc('record_sale_payment_atomic', {
+      p_sale_id: payload.saleId,
+      p_amount: numAmount,
+      p_payment_method: payload.paymentMethod,
+      p_created_by: check.actorEmail || 'Admin User',
+      p_reference: payload.reference || null,
+      p_cheque_number: payload.chequeNumber?.trim() || null,
+      p_cheque_date: payload.chequeDate || null,
+      p_bank_name: payload.bankName?.trim() || null,
+      p_notes: payload.notes || null,
+    });
+
+    if (error || !data?.success) {
+      return {
+        success: false,
+        error: error?.message || data?.error || 'Failed to record payment.',
+      };
+    }
+
+    revalidatePath('/admin/sales');
+    return { success: true, paymentId: data.payment_id, summary: data.summary };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to record payment.' };
+  }
+}
+
+export async function updateChequeStatusAction(payload: {
+  paymentId: string;
+  newStatus: 'cleared' | 'bounced' | 'cancelled';
+  notes?: string;
+}) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    if (!payload.paymentId) {
+      return { success: false, error: 'Payment ID is required.' };
+    }
+    if (!['cleared', 'bounced', 'cancelled'].includes(payload.newStatus)) {
+      return { success: false, error: 'Invalid target status for cheque.' };
+    }
+
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase.rpc('update_cheque_status_atomic', {
+      p_payment_id: payload.paymentId,
+      p_new_status: payload.newStatus,
+      p_actor_name: check.actorEmail || 'Admin User',
+      p_notes: payload.notes || null,
+    });
+
+    if (error || !data?.success) {
+      return {
+        success: false,
+        error: error?.message || data?.error || 'Failed to update cheque status.',
+      };
+    }
+
+    revalidatePath('/admin/sales');
+    revalidatePath('/admin/finance/outstanding');
+    revalidatePath('/admin/finance/cheques');
+    return { success: true, summary: data.summary };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to update cheque status.' };
+  }
+}
+
+export async function getSalePaymentsAction(saleId: string): Promise<{
+  success: boolean;
+  data?: {
+    payments: SalePayment[];
+    reversals: SalePaymentReversal[];
+    summary: SalePaymentSummary;
+  };
+  error?: string;
+}> {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const supabase = getAdminSupabase();
+
+    // Fetch parent sale
+    const { data: sale, error: saleErr } = await supabase
+      .from('sales')
+      .select('id, total, status, invoice_revoked_at, invoice_revoked_by, invoice_revoke_reason, invoice_revoke_notes')
+      .eq('id', saleId)
+      .single();
+
+    if (saleErr || !sale) {
+      return { success: false, error: 'Sale record not found.' };
+    }
+
+    // Fetch payments
+    const { data: payments, error: payErr } = await supabase
+      .from('sale_payments')
+      .select('*')
+      .eq('sale_id', saleId)
+      .order('payment_date', { ascending: true });
+
+    if (payErr) {
+      return { success: false, error: payErr.message };
+    }
+
+    // Fetch reversals
+    const { data: reversals, error: revErr } = await supabase
+      .from('sale_payment_reversals')
+      .select('*')
+      .eq('sale_id', saleId)
+      .order('created_at', { ascending: true });
+
+    if (revErr) {
+      return { success: false, error: revErr.message };
+    }
+
+    const revList: SalePaymentReversal[] = (reversals || []).map((r: any) => ({
+      id: r.id,
+      reversal_number: r.reversal_number,
+      payment_id: r.payment_id,
+      sale_id: r.sale_id,
+      amount: Number(r.amount) || 0,
+      reason: r.reason,
+      reference: r.reference,
+      notes: r.notes,
+      reversed_by: r.reversed_by,
+      created_at: r.created_at,
+    }));
+
+    const payList: SalePayment[] = (payments || []).map((p: any) => {
+      const pAmount = Number(p.amount) || 0;
+      const pReversals = revList.filter((r) => r.payment_id === p.id);
+      const returnedAmount = pReversals.reduce((sum, r) => sum + r.amount, 0);
+      const netAmount = Math.max(0, pAmount - returnedAmount);
+      const remainingReversible = p.status === 'cleared' ? Math.max(0, pAmount - returnedAmount) : 0;
+
+      return {
+        id: p.id,
+        sale_id: p.sale_id,
+        quotation_id: p.quotation_id,
+        amount: pAmount,
+        payment_method: p.payment_method,
+        status: p.status,
+        payment_date: p.payment_date,
+        reference: p.reference,
+        cheque_number: p.cheque_number,
+        cheque_date: p.cheque_date,
+        bank_name: p.bank_name,
+        notes: p.notes,
+        created_by: p.created_by,
+        cleared_by: p.cleared_by,
+        created_at: p.created_at,
+        updated_at: p.updated_at,
+        returned_amount: returnedAmount,
+        net_amount: netAmount,
+        remaining_reversible: remainingReversible,
+      };
+    });
+
+    const invoiceTotal = Number(sale.total) || 0;
+    const grossClearedPaid = payList
+      .filter((p) => p.status === 'cleared')
+      .reduce((sum, p) => sum + p.amount, 0);
+
+    const totalReturned = revList.reduce((sum, r) => sum + r.amount, 0);
+    const effectiveClearedPaid = Math.max(0, grossClearedPaid - totalReturned);
+
+    const pendingClearance = payList
+      .filter((p) => p.payment_method === 'cheque' && p.status === 'pending')
+      .reduce((sum, p) => sum + p.amount, 0);
+
+    const balanceDue = Math.max(0, invoiceTotal - effectiveClearedPaid);
+    const availableToRecord = Math.max(0, invoiceTotal - effectiveClearedPaid - pendingClearance);
+
+    const isRevoked = Boolean(sale.invoice_revoked_at);
+    let paymentStatus: 'UNPAID' | 'BALANCE PENDING' | 'PAID' | 'REVOKED';
+    if (isRevoked) {
+      paymentStatus = 'REVOKED';
+    } else if (effectiveClearedPaid <= 0) {
+      paymentStatus = 'UNPAID';
+    } else if (effectiveClearedPaid < invoiceTotal) {
+      paymentStatus = 'BALANCE PENDING';
+    } else {
+      paymentStatus = 'PAID';
+    }
+
+    return {
+      success: true,
+      data: {
+        payments: payList,
+        reversals: revList,
+        summary: {
+          invoice_total: invoiceTotal,
+          cleared_paid: effectiveClearedPaid,
+          gross_cleared_paid: grossClearedPaid,
+          returned_amount: totalReturned,
+          effective_cleared_paid: effectiveClearedPaid,
+          pending_clearance: pendingClearance,
+          balance_due: balanceDue,
+          available_to_record: availableToRecord,
+          payment_status: paymentStatus,
+          is_revoked: isRevoked,
+          invoice_revoked_at: sale.invoice_revoked_at || null,
+          invoice_revoked_by: sale.invoice_revoked_by || null,
+          invoice_revoke_reason: sale.invoice_revoke_reason || null,
+          invoice_revoke_notes: sale.invoice_revoke_notes || null,
+        },
+      },
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch payment history.' };
+  }
+}
+
+export async function revokeInvoiceAction(payload: {
+  saleId: string;
+  reason: string;
+  notes?: string;
+}) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized: Permission required to revoke invoices.' };
+
+  try {
+    if (!payload.saleId) {
+      return { success: false, error: 'Sale ID is required.' };
+    }
+    const cleanReason = (payload.reason || '').trim();
+    if (!cleanReason) {
+      return { success: false, error: 'A valid reason is required to revoke an invoice.' };
+    }
+    if (cleanReason.toLowerCase() === 'other' && (!payload.notes || !payload.notes.trim())) {
+      return { success: false, error: 'Notes/details are required when selecting reason "Other".' };
+    }
+
+    const supabase = getAdminSupabase();
+    const actor = check.actorEmail || 'Admin User';
+
+    const { data, error } = await supabase.rpc('revoke_invoice_atomic', {
+      p_sale_id: payload.saleId,
+      p_reason: cleanReason,
+      p_notes: payload.notes?.trim() || null,
+      p_revoked_by: actor,
+    });
+
+    if (error || !data?.success) {
+      return {
+        success: false,
+        error: error?.message || data?.error || 'Failed to revoke invoice.',
+      };
+    }
+
+    revalidatePath('/admin/sales');
+    revalidatePath('/admin/finance/outstanding');
+    revalidatePath('/admin/finance/cheques');
+
+    await writeAuditLog(
+      actor,
+      'update',
+      'sales',
+      payload.saleId,
+      { invoice_revoked: false },
+      { invoice_revoked: true, reason: cleanReason, notes: payload.notes },
+      { ip: check.ip, userAgent: check.userAgent }
+    );
+
+    return { success: true, data };
+  } catch (err: any) {
+    console.error('[revokeInvoiceAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to revoke invoice.' };
+  }
+}
+
+export async function recordPaymentReversalAction(payload: {
+  paymentId: string;
+  amount: number;
+  reason: string;
+  reference?: string;
+  notes?: string;
+}) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    if (!payload.paymentId) {
+      return { success: false, error: 'Payment ID is required.' };
+    }
+    const numAmount = Number(payload.amount);
+    if (isNaN(numAmount) || !Number.isFinite(numAmount) || numAmount <= 0) {
+      return { success: false, error: 'Valid positive return amount is required.' };
+    }
+    if (!payload.reason || !payload.reason.trim()) {
+      return { success: false, error: 'Reason is required for payment return.' };
+    }
+    if (payload.reason === 'Other' && (!payload.notes || !payload.notes.trim())) {
+      return { success: false, error: 'Notes are required when selecting reason "Other".' };
+    }
+
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase.rpc('record_payment_reversal_atomic', {
+      p_payment_id: payload.paymentId,
+      p_amount: numAmount,
+      p_reason: payload.reason.trim(),
+      p_reference: payload.reference?.trim() || null,
+      p_notes: payload.notes?.trim() || null,
+      p_reversed_by: check.actorEmail || 'Admin User',
+    });
+
+    if (error || !data?.success) {
+      return {
+        success: false,
+        error: error?.message || data?.error || 'Failed to record payment return.',
+      };
+    }
+
+    revalidatePath('/admin/sales');
+    revalidatePath('/admin/finance/outstanding');
+    revalidatePath('/admin/finance/cheques');
+    return { success: true, data };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to record payment return.' };
   }
 }
 
@@ -2593,17 +6894,21 @@ export async function sendQuotationEmailAction(id: string) {
       return { success: false, error: emailResult.error || 'Failed to send email.' };
     }
 
-    await pbQuotations.update(id, { status: 'sent' });
+    // If quotation was in draft state, emailing it also formally marks it sent
+    if (quote.status === 'draft') {
+      await pbQuotations.update(id, { status: 'sent', updated_at: new Date().toISOString() });
+    }
 
     revalidatePath('/admin/quotations');
+    revalidatePath('/admin/sales');
 
     await writeAuditLog(
       check.actorEmail || 'admin',
-      'update',
+      'email',
       'quotations',
       id,
       { status: quote.status },
-      { status: 'sent' },
+      { status: quote.status === 'draft' ? 'sent' : quote.status, recipient: quote.customer_email },
       { ip: check.ip, userAgent: check.userAgent }
     );
 
@@ -2619,59 +6924,7 @@ export async function sendOrderInvoiceEmailAction(id: string) {
   if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
-    const order = await pbOrders.getById(id);
-    if (!order) return { success: false, error: 'Order not found.' };
-
-    const customerEmail = order.customer?.email || (order as any).customerEmail || (order as any).email;
-    if (!customerEmail) {
-      return { success: false, error: 'Order does not have a customer email address.' };
-    }
-
-    const customerName = order.customer?.name || (order as any).customerName || 'Customer';
-
-    let storeName = 'FTC Electronics';
-    let storePhone = '';
-    let storeEmail = '';
-    let storeAddress = '';
-
-    try {
-      const presetsRes = await getInvoicePrintPresetsAction();
-      if (presetsRes.success && presetsRes.data && presetsRes.data.length > 0) {
-        const defaultPreset = presetsRes.data.find((p) => p.isDefault) || presetsRes.data[0];
-        const config = JSON.parse(defaultPreset.config);
-        storeName = config.storeName || storeName;
-        storePhone = config.headerPhone || storePhone;
-        storeEmail = config.headerEmail || storeEmail;
-        storeAddress = config.headerAddress || storeAddress;
-      }
-    } catch (presetErr) {
-      console.warn('[sendOrderInvoiceEmailAction] Warning: Failed to load invoice config:', presetErr);
-    }
-
-    let items: Array<{ name: string; qty: number; unitPrice: number; discount?: number }> = [];
-    if (Array.isArray(order.items)) {
-      items = order.items.map((item: any) => ({
-        name: item.name || `Order Item`,
-        qty: item.quantity || 1,
-        unitPrice: item.price || 0,
-      }));
-    } else {
-      items = [{ name: `Order ${order.orderId || order.id}`, qty: 1, unitPrice: order.total }];
-    }
-
-    const emailResult = await sendOrderInvoiceEmail({
-      to: customerEmail,
-      orderNumber: order.orderId || order.id,
-      customerName,
-      shippingAddress: order.shippingAddress || '',
-      items,
-      totalAmount: order.total,
-      paymentMethod: order.paymentDetails?.method ? `${order.paymentDetails.method.toUpperCase()} (${order.paymentDetails.status || 'paid'})` : 'Paid',
-      storeName,
-      storePhone,
-      storeEmail,
-      storeAddress,
-    });
+    const emailResult = await sendInvoiceEmailForOrder(id);
 
     if (!emailResult.success) {
       return { success: false, error: emailResult.error || 'Failed to send email.' };
@@ -2706,8 +6959,8 @@ export async function sendInvoiceViaWorkflowAction(params: SendInvoiceWorkflowPa
   if (!check.allowed) return { success: false, error: 'Unauthorized.' };
 
   try {
-    const adminPb = await getAdminPb();
-    
+    const supabase = getAdminSupabase();
+
     const sale = await pbSales.getById(params.saleId);
     if (!sale) return { success: false, error: 'Sale record not found.' };
 
@@ -2722,13 +6975,17 @@ export async function sendInvoiceViaWorkflowAction(params: SendInvoiceWorkflowPa
       resolvedEmail = '';
     }
 
-    let customerRecord: any = null;
+    let customerRecord: { id: string; email?: string; name?: string; phone?: string } | null = null;
 
     if (resolvedPhone) {
-      customerRecord = await adminPb
-        .collection('customers')
-        .getFirstListItem(adminPb.filter('phone = {:phone}', { phone: resolvedPhone }))
-        .catch(() => null);
+      const { data: cust } = await supabase
+        .from('customers')
+        .select('id, name, email, phone')
+        .eq('phone', resolvedPhone)
+        .limit(1)
+        .maybeSingle();
+
+      customerRecord = cust || null;
     }
 
     if (!resolvedEmail) {
@@ -2738,7 +6995,7 @@ export async function sendInvoiceViaWorkflowAction(params: SendInvoiceWorkflowPa
           resolvedEmail = custEmail;
         }
       }
-      
+
       if (!resolvedEmail) {
         return {
           success: true,
@@ -2784,7 +7041,9 @@ export async function sendInvoiceViaWorkflowAction(params: SendInvoiceWorkflowPa
       shippingAddress: '',
       items,
       totalAmount: sale.total,
-      paymentMethod: `Paid via ${sale.payment_method?.toUpperCase() || 'POS'}`,
+      paymentMethod: sale.payment_method || 'cash',
+      paymentStatus: 'Paid',
+      isPaid: true,
       storeName,
       storePhone,
       storeEmail,
@@ -2799,20 +7058,29 @@ export async function sendInvoiceViaWorkflowAction(params: SendInvoiceWorkflowPa
     if (customerRecord) {
       const currentEmail = customerRecord.email;
       if (!currentEmail || currentEmail.endsWith('@customer.local') || currentEmail === 'customer@ftc.lk' || currentEmail !== resolvedEmail) {
-        await adminPb.collection('customers').update(customerRecord.id, {
-          email: resolvedEmail
-        });
+        await supabase
+          .from('customers')
+          .update({ email: resolvedEmail, updated_at: new Date().toISOString() })
+          .eq('id', customerRecord.id);
       }
     } else {
-      customerRecord = await adminPb.collection('customers').create({
-        name: resolvedName,
-        email: resolvedEmail,
-        phone: resolvedPhone,
-        ordersCount: 1,
-        totalSpent: sale.total,
-        status: 'active',
-        notes: `Created via Send Invoice Workflow for Sale #${sale.receipt_number || sale.id}`,
-      });
+      const { data: newCust } = await supabase
+        .from('customers')
+        .insert({
+          name: resolvedName,
+          email: resolvedEmail,
+          phone: resolvedPhone,
+          orders_count: 1,
+          total_spent: sale.total,
+          status: 'active',
+          notes: `Created via Send Invoice Workflow for Sale #${sale.receipt_number || sale.id}`,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select('id, name, email, phone')
+        .single();
+
+      customerRecord = newCust || null;
     }
 
     const saleUpdate: Record<string, any> = {
@@ -2820,8 +7088,8 @@ export async function sendInvoiceViaWorkflowAction(params: SendInvoiceWorkflowPa
     };
     if (resolvedName !== sale.customer_name) saleUpdate.customer_name = resolvedName;
     if (resolvedPhone !== sale.customer_phone) saleUpdate.customer_phone = resolvedPhone;
-    
-    await adminPb.collection('sales').update(sale.id, saleUpdate);
+
+    await pbSales.update(sale.id, saleUpdate);
 
     await writeAuditLog(
       check.actorEmail || 'admin',
@@ -2845,7 +7113,7 @@ export async function sendInvoiceViaWorkflowAction(params: SendInvoiceWorkflowPa
 
 export interface AdminNotification {
   id: string;
-  type: 'inquiry' | 'order' | 'quotation' | 'stock';
+  type: 'inquiry' | 'order' | 'quotation' | 'stock' | 'receivable' | 'cheque';
   title: string;
   description: string;
   timestamp: string;
@@ -2859,102 +7127,241 @@ export async function getAdminNotificationsAction(): Promise<{
   unreadCount?: number;
   error?: string;
 }> {
+  const perm = await checkPermission('inquiries', 'read');
+  if (!perm.allowed) {
+    return { success: false, notifications: [], unreadCount: 0, error: 'Unauthorized.' };
+  }
+
   try {
+    const supabase = getAdminSupabase();
+
+    // Parallelize the queries
+    const [inquiriesRes, ordersRes, quotationsRes, productsRes, receivablesRes, chequesRes] = await Promise.allSettled([
+      // 1. Inquiries
+      supabase
+        .from('contact_inquiries')
+        .select('id, name, message, status, created_at')
+        .eq('status', 'new')
+        .order('created_at', { ascending: false })
+        .limit(10),
+
+      // 2. Orders
+      supabase
+        .from('orders')
+        .select('id, order_id, customer, total, status, is_paid, payment_details, created_at')
+        .not('status', 'in', '("cancelled","refunded","returned")')
+        .or('status.eq.pending,status.eq.processing,is_paid.is.false')
+        .order('created_at', { ascending: false })
+        .limit(10),
+
+      // 3. Quotations
+      supabase
+        .from('quotations')
+        .select('id, customer_name, items, status, created_at')
+        .in('status', ['pending', 'sent'])
+        .order('created_at', { ascending: false })
+        .limit(10),
+
+      // 4. Low stock products
+      supabase
+        .from('products')
+        .select('id, name, count_in_stock, updated_at, created_at')
+        .gte('count_in_stock', 0)
+        .lte('count_in_stock', 3)
+        .order('count_in_stock', { ascending: true })
+        .limit(5),
+
+      // 5. Outstanding Receivables (due soon, due today, or overdue)
+      supabase.rpc('admin_get_outstanding_receivables', {
+        p_search: '',
+        p_filter: 'all',
+        p_sort: 'due_asc',
+        p_limit: 10,
+        p_offset: 0,
+      }),
+
+      // 6. Actionable Cheques (due today, due tomorrow, overdue for review, recently bounced)
+      supabase
+        .from('sale_payments')
+        .select('id, cheque_number, bank_name, amount, cheque_date, status, updated_at, created_at, sales!inner(invoice_number, receipt_number, customer_name, customer_email, wholesale_dealers(company_name, contact_name))')
+        .eq('payment_method', 'cheque')
+        .in('status', ['pending', 'bounced'])
+        .order('cheque_date', { ascending: true })
+        .limit(10),
+    ]);
+
     const notifications: AdminNotification[] = [];
 
-    // Helper for safe array extraction
-    const toArray = (res: any): any[] => {
-      if (!res) return [];
-      if (Array.isArray(res)) return res;
-      if (Array.isArray(res.items)) return res.items;
-      return [];
-    };
-
-    // 1. Inquiries Notifications (New / Unread)
-    try {
-      const inquiriesRaw = await pbContactInquiries.getAll().catch(() => []);
-      const inquiries = toArray(inquiriesRaw);
-      inquiries
-        .filter((i: any) => i.status === 'new' || !i.read)
-        .slice(0, 10)
-        .forEach((i: any) => {
-          notifications.push({
-            id: `inquiry-${i.id}`,
-            type: 'inquiry',
-            title: `New Inquiry from ${i.name || 'Customer'}`,
-            description: i.message ? `${i.message.slice(0, 70)}${i.message.length > 70 ? '...' : ''}` : 'Customer submitted contact message',
-            timestamp: i.created || new Date().toISOString(),
-            link: '/admin/inquiries',
-            read: Boolean(i.read),
-          });
+    if (inquiriesRes.status === 'fulfilled' && !inquiriesRes.value.error && inquiriesRes.value.data) {
+      inquiriesRes.value.data.forEach((i: any) => {
+        notifications.push({
+          id: `inquiry-${i.id}`,
+          type: 'inquiry',
+          title: `New Inquiry from ${i.name || 'Customer'}`,
+          description: i.message ? `${i.message.slice(0, 70)}${i.message.length > 70 ? '...' : ''}` : 'Customer submitted contact message',
+          timestamp: i.created_at || new Date().toISOString(),
+          link: '/admin/inquiries',
+          read: false,
         });
-    } catch {}
-
-    // 2. Orders Notifications (New / Pending / Processing)
-    try {
-      const pb = await getAdminPb();
-      const ordersRes = await pb.collection('orders').getList(1, 20, { sort: '-created' });
-      ordersRes.items
-        .filter((o: any) => o.status === 'pending' || o.status === 'processing' || !o.isPaid)
-        .slice(0, 10)
-        .forEach((o: any) => {
-          const orderNum = o.orderId || o.id;
-          const custName = o.customer?.name || o.customerName || 'Customer';
-          const amt = (o.total || o.totalAmount || 0).toLocaleString();
-          const pMethod = o.paymentDetails?.method ? ` (${o.paymentDetails.method})` : '';
-          notifications.push({
-            id: `order-${o.id}`,
-            type: 'order',
-            title: `New Order #${orderNum}`,
-            description: `Total LKR ${amt} — ${custName}${pMethod}`,
-            timestamp: o.created || new Date().toISOString(),
-            link: '/admin/orders',
-            read: false,
-          });
-        });
-    } catch (orderErr) {
-      console.warn('[getAdminNotificationsAction] Order notifications error:', orderErr);
+      });
     }
 
-    // 3. Due Quotations Notifications
-    try {
-      const quotationsRaw = await pbQuotations.getAll().catch(() => []);
-      const quotations = toArray(quotationsRaw);
-      quotations
-        .filter((q: any) => q.status === 'pending' || q.status === 'sent')
-        .slice(0, 10)
-        .forEach((q: any) => {
-          notifications.push({
-            id: `quotation-${q.id}`,
-            type: 'quotation',
-            title: `Pending Quotation Follow-up`,
-            description: `Quotation for ${q.customerName || 'Customer'} (${q.items?.length || 1} items)`,
-            timestamp: q.created || new Date().toISOString(),
-            link: '/admin/quotations',
-            read: false,
-          });
+    if (ordersRes.status === 'fulfilled' && !ordersRes.value.error && ordersRes.value.data) {
+      ordersRes.value.data.forEach((o: any) => {
+        const orderNum = o.order_id || o.id;
+        const custName = o.customer?.name || o.customerEmail || o.email || 'Customer';
+        const amt = (o.total || o.totalAmount || 0).toLocaleString();
+        const pMethod = o.payment_details?.method ? ` (${o.payment_details.method})` : '';
+        notifications.push({
+          id: `order-${o.id}`,
+          type: 'order',
+          title: `New Order #${orderNum}`,
+          description: `Total LKR ${amt} — ${custName}${pMethod}`,
+          timestamp: o.created_at || new Date().toISOString(),
+          link: '/admin/orders',
+          read: false,
         });
-    } catch {}
+      });
+    }
 
-    // 4. Low Stock Alerts
-    try {
-      const productsRaw = await pbProducts.getAll().catch(() => []);
-      const products = toArray(productsRaw);
-      products
-        .filter((p: any) => p.stock !== undefined && p.stock >= 0 && p.stock <= 3)
-        .slice(0, 5)
-        .forEach((p: any) => {
+    if (quotationsRes.status === 'fulfilled' && !quotationsRes.value.error && quotationsRes.value.data) {
+      quotationsRes.value.data.forEach((q: any) => {
+        notifications.push({
+          id: `quotation-${q.id}`,
+          type: 'quotation',
+          title: `Pending Quotation Follow-up`,
+          description: `Quotation for ${q.customer_name || 'Customer'} (${q.items?.length || 1} items)`,
+          timestamp: q.created_at || new Date().toISOString(),
+          link: '/admin/sales?view=quotations',
+          read: false,
+        });
+      });
+    }
+
+    if (productsRes.status === 'fulfilled' && !productsRes.value.error && productsRes.value.data) {
+      productsRes.value.data.forEach((p: any) => {
+        notifications.push({
+          id: `stock-${p.id}`,
+          type: 'stock',
+          title: `Low Stock Warning`,
+          description: `${p.name} has only ${p.count_in_stock} unit${p.count_in_stock === 1 ? '' : 's'} remaining!`,
+          timestamp: p.updated_at || p.created_at || new Date().toISOString(),
+          link: '/admin/inventory',
+          read: false,
+        });
+      });
+    }
+
+    if (receivablesRes.status === 'fulfilled' && !receivablesRes.value.error && receivablesRes.value.data) {
+      receivablesRes.value.data.forEach((r: any) => {
+        const balanceFmt = (Number(r.balance_due) || 0).toLocaleString('en-LK', { maximumFractionDigits: 0 });
+        const invNum = r.invoice_number || r.receipt_number || 'INV';
+        const cust = r.customer_name || 'Customer';
+        const dueStr = r.due_date ? new Date(r.due_date).toLocaleDateString('en-LK', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+
+        if (r.collection_status === 'OVERDUE') {
           notifications.push({
-            id: `stock-${p.id}`,
-            type: 'stock',
-            title: `Low Stock Warning`,
-            description: `${p.name} has only ${p.stock} unit${p.stock === 1 ? '' : 's'} remaining!`,
-            timestamp: p.updated || p.created || new Date().toISOString(),
-            link: '/admin/inventory',
+            id: `invoice-overdue-${r.id}-${r.due_date}`,
+            type: 'receivable',
+            title: `Overdue Invoice #${invNum}`,
+            description: `LKR ${balanceFmt} outstanding (${r.days_overdue} day${r.days_overdue === 1 ? '' : 's'} overdue) — ${cust}`,
+            timestamp: r.invoice_date || new Date().toISOString(),
+            link: '/admin/sales?view=receivables',
             read: false,
           });
-        });
-    } catch {}
+        } else if (r.collection_status === 'DUE TODAY') {
+          notifications.push({
+            id: `invoice-due-today-${r.id}-${r.due_date}`,
+            type: 'receivable',
+            title: `Invoice Due Today #${invNum}`,
+            description: `LKR ${balanceFmt} outstanding due today — ${cust}`,
+            timestamp: r.invoice_date || new Date().toISOString(),
+            link: '/admin/sales?view=receivables',
+            read: false,
+          });
+        } else if (r.collection_status === 'DUE SOON') {
+          notifications.push({
+            id: `invoice-due-soon-${r.id}-${r.due_date}`,
+            type: 'receivable',
+            title: `Invoice Due Soon #${invNum}`,
+            description: `LKR ${balanceFmt} outstanding due on ${dueStr} — ${cust}`,
+            timestamp: r.invoice_date || new Date().toISOString(),
+            link: '/admin/sales?view=receivables',
+            read: false,
+          });
+        }
+      });
+    }
+
+    if (chequesRes.status === 'fulfilled' && !chequesRes.value.error && chequesRes.value.data) {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      chequesRes.value.data.forEach((c: any) => {
+        const amtFmt = (Number(c.amount) || 0).toLocaleString('en-LK', { maximumFractionDigits: 0 });
+        const chqNum = c.cheque_number || 'N/A';
+        const bank = c.bank_name || 'Bank';
+        const s = c.sales || {};
+        const dealer = s.wholesale_dealers?.company_name || s.wholesale_dealers?.contact_name;
+        const cust = dealer || s.customer_name || s.customer_email || 'Customer';
+        const chqDate = c.cheque_date ? c.cheque_date.slice(0, 10) : '';
+
+        if (c.status === 'pending' && chqDate) {
+          if (chqDate === todayStr) {
+            notifications.push({
+              id: `cheque-due-today-${c.id}-${chqDate}`,
+              type: 'cheque',
+              title: `Cheque #${chqNum} DUE TODAY`,
+              description: `LKR ${amtFmt} (${bank}) — ${cust}`,
+              timestamp: c.created_at || new Date().toISOString(),
+              link: '/admin/sales?view=cheques',
+              read: false,
+            });
+          } else if (chqDate < todayStr) {
+            const diffMs = new Date(todayStr).getTime() - new Date(chqDate).getTime();
+            const daysOverdue = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)));
+            notifications.push({
+              id: `cheque-overdue-${c.id}-${chqDate}`,
+              type: 'cheque',
+              title: `Cheque #${chqNum} OVERDUE FOR REVIEW`,
+              description: `LKR ${amtFmt} (${daysOverdue} day${daysOverdue === 1 ? '' : 's'} overdue) — ${cust}`,
+              timestamp: c.created_at || new Date().toISOString(),
+              link: '/admin/sales?view=cheques',
+              read: false,
+            });
+          } else {
+            // Check if due tomorrow
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+            if (chqDate === tomorrowStr) {
+              notifications.push({
+                id: `cheque-due-tomorrow-${c.id}-${chqDate}`,
+                type: 'cheque',
+                title: `Cheque #${chqNum} Due Tomorrow`,
+                description: `LKR ${amtFmt} (${bank}) — ${cust}`,
+                timestamp: c.created_at || new Date().toISOString(),
+                link: '/admin/sales?view=cheques',
+                read: false,
+              });
+            }
+          }
+        } else if (c.status === 'bounced') {
+          // Check if within last 2 days
+          const updatedDate = new Date(c.updated_at || c.created_at);
+          const now = new Date();
+          if ((now.getTime() - updatedDate.getTime()) <= 2 * 24 * 60 * 60 * 1000) {
+            notifications.push({
+              id: `cheque-bounced-${c.id}-${chqDate || c.id}`,
+              type: 'cheque',
+              title: `Cheque #${chqNum} Bounced`,
+              description: `LKR ${amtFmt} marked bounced — ${cust}`,
+              timestamp: c.updated_at || c.created_at || new Date().toISOString(),
+              link: '/admin/sales?view=cheques',
+              read: false,
+            });
+          }
+        }
+      });
+    }
 
     // Sort by most recent timestamp
     notifications.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -2976,86 +7383,112 @@ export async function getAdminNotificationsAction(): Promise<{
  * Clears all orders and sales logs, resets all stock_management units back to 'available',
  * restores product stock levels, and resets system state for a fresh start.
  */
-export async function resetAllOrdersAndRestoreStockAction(): Promise<{
+export async function resetAllOrdersAndRestoreStockAction(
+  confirmationToken?: string,
+  managerPin?: string
+): Promise<{
   success: boolean;
   message?: string;
   error?: string;
 }> {
-  const check = await checkPermission('settings', 'write');
+  const check = await checkPermission('settings', 'delete');
   if (!check.allowed) return { success: false, error: 'Unauthorized permission.' };
 
-  try {
-    const adminPb = await getAdminPb();
+  if (confirmationToken !== 'RESET_ALL_ORDERS_AND_RESTORE_STOCK') {
+    return {
+      success: false,
+      error: 'Destructive operation rejected: Invalid or missing confirmation token.',
+    };
+  }
 
-    // 1. Delete all orders from orders collection
+  if (!managerPin) {
+    return {
+      success: false,
+      error: 'Manager or Admin PIN confirmation is required for system reset.',
+    };
+  }
+
+  const pinVerify = await verifyManagerPinAction(managerPin);
+  if (!pinVerify.success) {
+    return {
+      success: false,
+      error: pinVerify.error || 'Invalid Manager or Admin PIN.',
+    };
+  }
+
+  try {
+    const supabase = getAdminSupabase();
+
+    // 1. Delete all sale_items and sales
+    let deletedSalesLogsCount = 0;
+    try {
+      await supabase.from('sale_items').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      const { data: deletedSales } = await supabase.from('sales').delete().neq('id', '00000000-0000-0000-0000-000000000000').select('id');
+      deletedSalesLogsCount = deletedSales?.length || 0;
+    } catch (err) {
+      console.warn('[resetAllOrdersAndRestoreStockAction] Error clearing sales:', err);
+    }
+
+    // 2. Delete all orders
     let deletedOrdersCount = 0;
     try {
-      const orders = await adminPb.collection('orders').getFullList();
-      for (const order of orders) {
-        await adminPb.collection('orders').delete(order.id);
-        deletedOrdersCount++;
-      }
+      const { data: deletedOrders } = await supabase.from('orders').delete().neq('id', '00000000-0000-0000-0000-000000000000').select('id');
+      deletedOrdersCount = deletedOrders?.length || 0;
     } catch (err) {
       console.warn('[resetAllOrdersAndRestoreStockAction] Error clearing orders:', err);
     }
 
-    // 2. Delete outbound sales logs from stock_purchases collection (quantity < 0 or sale batch)
-    let deletedSalesLogsCount = 0;
-    try {
-      const purchases = await adminPb.collection('stock_purchases').getFullList();
-      for (const p of purchases) {
-        if (p.quantity < 0 || p.batchNumber?.startsWith('SALE-') || p.batchNumber?.startsWith('POS-')) {
-          await adminPb.collection('stock_purchases').delete(p.id);
-          deletedSalesLogsCount++;
-        }
-      }
-    } catch (err) {
-      console.warn('[resetAllOrdersAndRestoreStockAction] Error clearing sales logs:', err);
-    }
-
-    // 3. Reset all stock_management units back to 'available' and clear orderId
+    // 3. Reset all stock_management units back to 'available' and clear order_id
     let resetUnitsCount = 0;
     try {
-      const units = await adminPb.collection('stock_management').getFullList();
-      for (const unit of units) {
-        await adminPb.collection('stock_management').update(unit.id, {
+      const { data: units } = await supabase
+        .from('stock_management')
+        .update({
           status: 'available',
-          orderId: '',
-          notes: 'Restored to available inventory upon system reset',
-        });
-        resetUnitsCount++;
-      }
+          order_id: null,
+          notes: null,
+          updated_at: new Date().toISOString(),
+        })
+        .neq('id', '00000000-0000-0000-0000-000000000000')
+        .select('id');
+      resetUnitsCount = units?.length || 0;
     } catch (err) {
       console.warn('[resetAllOrdersAndRestoreStockAction] Error resetting stock units:', err);
     }
 
-    // 4. Update product countInStock based on available stock_management units or positive purchase quantities
+    // 4. Update product count_in_stock using bulk query aggregation to avoid N+1
     try {
-      const products = await adminPb.collection('products').getFullList();
-      for (const prod of products) {
-        let availableCount = 0;
-        try {
-          const availUnits = await adminPb.collection('stock_management').getFullList({
-            filter: `product = "${prod.id}" && status = "available"`,
-          });
-          availableCount = availUnits.length;
-        } catch {}
+      const { data: allAvailableUnits } = await supabase
+        .from('stock_management')
+        .select('product_id')
+        .eq('status', 'available');
+      const { data: allPurchases } = await supabase
+        .from('stock_purchases')
+        .select('product_id, quantity');
 
-        if (availableCount > 0) {
-          await adminPb.collection('products').update(prod.id, { countInStock: availableCount });
+      const unitsCountMap = new Map<string, number>();
+      for (const u of (allAvailableUnits || [])) {
+        if (u.product_id) unitsCountMap.set(u.product_id, (unitsCountMap.get(u.product_id) || 0) + 1);
+      }
+      const purchasesSumMap = new Map<string, number>();
+      for (const p of (allPurchases || [])) {
+        if (p.product_id) purchasesSumMap.set(p.product_id, (purchasesSumMap.get(p.product_id) || 0) + (p.quantity || 0));
+      }
+
+      const { data: products } = await supabase.from('products').select('id, name');
+      for (const prod of (products || [])) {
+        let newStock = 10;
+        const unitCount = unitsCountMap.get(prod.id);
+        if (typeof unitCount === 'number' && unitCount > 0) {
+          newStock = unitCount;
         } else {
-          // If no units exist in stock_management, calculate total from positive stock_purchases
-          let purchaseSum = 0;
-          try {
-            const purchases = await adminPb.collection('stock_purchases').getFullList({
-              filter: `product = "${prod.id}" && quantity > 0`,
-            });
-            purchaseSum = purchases.reduce((acc: number, item: any) => acc + (item.quantity || 0), 0);
-          } catch {}
-
-          const restoredStock = purchaseSum > 0 ? purchaseSum : Math.max(10, prod.countInStock || 10);
-          await adminPb.collection('products').update(prod.id, { countInStock: restoredStock });
+          const purchaseSum = purchasesSumMap.get(prod.id);
+          if (typeof purchaseSum === 'number' && purchaseSum > 0) {
+            newStock = purchaseSum;
+          }
         }
+
+        await supabase.from('products').update({ count_in_stock: newStock }).eq('id', prod.id);
       }
     } catch (err) {
       console.warn('[resetAllOrdersAndRestoreStockAction] Error restoring product stock levels:', err);
@@ -3084,9 +7517,10 @@ export async function resetAllOrdersAndRestoreStockAction(): Promise<{
       success: true,
       message: `System reset complete! Deleted ${deletedOrdersCount} orders, reset ${resetUnitsCount} inventory serial units back to available, and restored product stock levels.`,
     };
-  } catch (err: any) {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to reset system orders and stock.';
     console.error('[resetAllOrdersAndRestoreStockAction] Error:', err);
-    return { success: false, error: err.message || 'Failed to reset system orders and stock.' };
+    return { success: false, error: message };
   }
 }
 
@@ -3097,6 +7531,7 @@ export interface ProductSaleRecord {
   customerName: string;
   customerEmail: string;
   date: string;
+  sortAt?: number;
   quantity: number;
   unitPrice: number;
   totalAmount: number;
@@ -3116,19 +7551,82 @@ export async function getProductSalesHistoryAction(productId: string): Promise<{
   if (!check.allowed) return { success: false, sales: [] };
 
   try {
-    const adminPb = await getAdminPb();
+    const supabase = getAdminSupabase();
     const sales: ProductSaleRecord[] = [];
 
-    // 1. Query orders containing this product ID in items array
-    try {
-      const orders = await adminPb.collection('orders').getFullList({
-        sort: '-created',
-      });
+    // 1. Fetch product slug and old IDs to match across migrations
+    const { data: prod } = await supabase
+      .from('products')
+      .select('id, slug, name')
+      .eq('id', productId)
+      .maybeSingle();
+    const productSlug = prod?.slug || '';
+    const productName = prod?.name || '';
 
-      for (const order of orders) {
+    // 2. Query POS sale_items for this product joined with sales
+    try {
+      let query = supabase
+        .from('sale_items')
+        .select(`
+          *,
+          sale:sales(*)
+        `);
+
+      const cleanProductId = productId.replace(/[^a-zA-Z0-9-]/g, '');
+      const cleanProductSlug = productSlug ? productSlug.replace(/[^a-zA-Z0-9-]/g, '') : '';
+
+      if (cleanProductSlug) {
+        query = query.or(`product_id.eq.${cleanProductId},sku.eq.${cleanProductSlug}`);
+      } else {
+        query = query.eq('product_id', cleanProductId);
+      }
+
+      const { data: saleItems, error: siErr } = await query;
+      if (siErr) console.warn('[getProductSalesHistoryAction] POS items error:', siErr);
+
+      for (const item of (saleItems || [])) {
+        const sale = item.sale;
+        if (!sale) continue;
+        const serials = [item.unit_serial, item.unit_barcode].filter(Boolean);
+        const saleDateStr = sale.date || sale.created_at;
+        const sortAt = saleDateStr ? new Date(saleDateStr).getTime() : 0;
+        sales.push({
+          id: sale.id,
+          orderNumber: sale.receipt_number || `FTC-POS-${sale.id.slice(-6).toUpperCase()}`,
+          channel: 'POS',
+          customerName: sale.customer_name || 'Walk-in Customer',
+          customerEmail: sale.customer_email || '—',
+          date: saleDateStr ? new Date(saleDateStr).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A',
+          sortAt,
+          quantity: item.quantity || 1,
+          unitPrice: item.unit_price || 0,
+          totalAmount: item.line_total || (item.quantity || 1) * (item.unit_price || 0),
+          status: sale.status === 'completed' ? 'Completed' : sale.status === 'voided' ? 'Voided' : sale.status || 'Completed',
+          serials,
+        });
+      }
+    } catch (posErr) {
+      console.warn('[getProductSalesHistoryAction] POS query error:', posErr);
+    }
+
+    // 3. Query Online orders containing this product
+    try {
+      const { data: orders, error: ordErr } = await supabase
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (ordErr) console.warn('[getProductSalesHistoryAction] Orders query error:', ordErr);
+
+      for (const order of (orders || [])) {
         const items = Array.isArray(order.items) ? order.items : [];
         const matchedItem = items.find(
-          (i: any) => i.productId === productId || i.product === productId || i.id === productId
+          (i: any) =>
+            i.productId === productId ||
+            i.product === productId ||
+            i.id === productId ||
+            (productSlug && i.slug === productSlug) ||
+            (productName && i.name === productName)
         );
 
         if (matchedItem) {
@@ -3140,60 +7638,36 @@ export async function getProductSalesHistoryAction(productId: string): Promise<{
               ? matchedItem.assignedUnits.map((u: any) => u.serialNumber || u.barcode).filter(Boolean)
               : [];
 
+          const orderDateStr = order.created_at || order.created;
+          const sortAt = orderDateStr ? new Date(orderDateStr).getTime() : 0;
+          const shippingFullName = `${order.shipping_address?.firstName || ''} ${order.shipping_address?.lastName || ''}`.trim();
+          const customerName = order.customer?.name?.trim() || shippingFullName || 'Online Customer';
+
           sales.push({
             id: order.id,
-            orderNumber: order.orderId || order.id,
+            orderNumber: order.order_id || order.id,
             channel: order.channel === 'pos' ? 'POS' : 'Online',
-            customerName: order.customer?.name || order.customerName || order.shippingAddress?.firstName || 'Customer',
-            customerEmail: order.customer?.email || order.customerEmail || order.email || '',
-            date: order.created ? new Date(order.created).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A',
+            customerName,
+            customerEmail: order.customer?.email || '—',
+            date: orderDateStr ? new Date(orderDateStr).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A',
+            sortAt,
             quantity: qty,
             unitPrice: price,
             totalAmount: qty * price,
-            status: order.status || 'pending',
+            status: order.status === 'delivered' ? 'Delivered' : order.status === 'shipped' ? 'Shipped' : order.status === 'completed' ? 'Completed' : order.status || 'Pending',
             serials,
           });
         }
       }
     } catch (orderErr) {
-      console.warn('[getProductSalesHistoryAction] Order query error:', orderErr);
+      console.warn('[getProductSalesHistoryAction] Orders query error:', orderErr);
     }
 
-    // 2. Query stock_purchases for outbound sales (quantity < 0) not captured above
-    try {
-      const purchases = await adminPb.collection('stock_purchases').getFullList({
-        filter: `product = "${productId}" && quantity < 0`,
-        sort: '-created',
-      });
-
-      for (const pur of purchases) {
-        const batchNum = pur.batchNumber || '';
-        const orderIdFromBatch = batchNum.replace(/^(SALE|POS)-/, '');
-        const exists = sales.some((s) => s.orderNumber === orderIdFromBatch || s.id === orderIdFromBatch);
-
-        if (!exists) {
-          const qty = Math.abs(pur.quantity || 0);
-          const price = pur.unitCost || 0;
-          sales.push({
-            id: pur.id,
-            orderNumber: pur.batchNumber || pur.id,
-            channel: pur.batchNumber?.startsWith('POS-') ? 'POS' : 'Online',
-            customerName: pur.supplier || 'Customer Sale',
-            customerEmail: '',
-            date: pur.purchaseDate || new Date(pur.created).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
-            quantity: qty,
-            unitPrice: price,
-            totalAmount: qty * price,
-            status: 'completed',
-            serials: [],
-          });
-        }
-      }
-    } catch (purErr) {
-      console.warn('[getProductSalesHistoryAction] Purchases query error:', purErr);
-    }
-
-    sales.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    sales.sort((a, b) => {
+      const timeA = a.sortAt ?? 0;
+      const timeB = b.sortAt ?? 0;
+      return timeB - timeA;
+    });
 
     return { success: true, sales };
   } catch (err: any) {
@@ -3202,7 +7676,974 @@ export async function getProductSalesHistoryAction(productId: string): Promise<{
   }
 }
 
+// ─── Audit Log Action ───────────────────────────────────────────────────────
 
+/**
+ * Server action to securely retrieve audit log entries with permission verification.
+ * Only authenticated administrators with 'auditLog' read permissions can access this.
+ */
+export async function getAdminAuditLogsAction(limit: number = 50): Promise<{
+  success: boolean;
+  data?: any[];
+  error?: string;
+}> {
+  const perm = await checkPermission('auditLog', 'read');
+  if (!perm.allowed) {
+    return { success: false, data: [], error: 'Unauthorized: Access to audit log is restricted.' };
+  }
 
+  try {
+    const supabase = getAdminSupabase();
+    const safeLimit = Math.min(Math.max(1, limit), 200);
+    const { data, error } = await supabase
+      .from('audit_log')
+      .select('id, actor, action, collection, record_id, old_value, new_value, ip, user_agent, created_at, updated_at')
+      .order('created_at', { ascending: false })
+      .limit(safeLimit);
 
+    if (error) {
+      console.error('[getAdminAuditLogsAction] Query error:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
+      return { success: false, data: [], error: 'Failed to retrieve audit log records.' };
+    }
 
+    const items = (data || []).map((row) => ({
+      id: row.id,
+      actor: row.actor || 'System',
+      action: row.action || 'update',
+      collection: row.collection || 'system',
+      recordId: row.record_id || '',
+      oldValue: row.old_value || '',
+      newValue: row.new_value || '',
+      ip: row.ip || '',
+      userAgent: row.user_agent || '',
+      created: row.created_at,
+      updated: row.updated_at,
+      collectionId: 'audit_log',
+      collectionName: 'audit_log',
+    }));
+
+    return { success: true, data: items };
+  } catch (err) {
+    console.error('[getAdminAuditLogsAction] Unexpected error:', err);
+    return { success: false, data: [], error: 'Internal server error loading audit logs.' };
+  }
+}
+
+/**
+ * Admin action to download authoritative Invoice PDF for a paid order.
+ */
+export async function downloadOrderInvoicePdfAction(orderId: string): Promise<{
+  success: boolean;
+  filename?: string;
+  pdfBase64?: string;
+  error?: string;
+}> {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const invoiceResult = await ensureInvoiceForPaidOrder(orderId);
+    if (!invoiceResult.success || !invoiceResult.data) {
+      return { success: false, error: invoiceResult.error || 'Invoice not available for this order.' };
+    }
+
+    const pdfBuffer = await generateInvoicePdf(invoiceResult.data);
+    return {
+      success: true,
+      filename: `FTC-Invoice-${invoiceResult.data.invoiceNumber}.pdf`,
+      pdfBase64: pdfBuffer.toString('base64'),
+    };
+  } catch (err: any) {
+    console.error('[downloadOrderInvoicePdfAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to generate invoice PDF.' };
+  }
+}
+
+/**
+ * Admin action to preview/download sample Invoice PDF for Printer Presets testing.
+ * Uses completely mock data without creating orders or consuming invoice sequence numbers.
+ */
+export async function getSampleInvoicePdfAction(customPreset?: InvoicePrintConfig): Promise<{
+  success: boolean;
+  filename?: string;
+  pdfBase64?: string;
+  error?: string;
+}> {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    const sampleData = generateSampleInvoiceData('Invoice');
+    if (customPreset) {
+      if (customPreset.storeName) sampleData.business.storeName = customPreset.storeName;
+      if (customPreset.headerAddress) sampleData.business.address = customPreset.headerAddress;
+      if (customPreset.headerPhone) sampleData.business.phone = customPreset.headerPhone;
+      if (customPreset.headerEmail) sampleData.business.email = customPreset.headerEmail;
+      if (customPreset.termsAndConditions) sampleData.termsAndConditions = customPreset.termsAndConditions;
+    }
+    const pdfBuffer = await generateInvoicePdf(sampleData);
+    return {
+      success: true,
+      filename: 'FTC-Sample-Invoice.pdf',
+      pdfBase64: pdfBuffer.toString('base64'),
+    };
+  } catch (err: any) {
+    console.error('[getSampleInvoicePdfAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to generate sample PDF.' };
+  }
+}
+
+export async function getQuotationByIdAction(id: string) {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+  try {
+    const data = await pbQuotations.getById(id);
+    return { success: true, data };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function searchQuotationProductsAction(query: string) {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+  try {
+    const supabase = getAdminSupabase();
+    const q = query.trim();
+    if (q.length < 2) return { success: true, data: [] };
+    const cleanQ = q.replace(/[%_\\]/g, '\\$&');
+    const { data, error } = await supabase
+      .from('products')
+      .select('id, name, slug, price, discount_price, images')
+      .eq('status', 'published')
+      .or(`name.ilike."%${cleanQ}%",slug.ilike."%${cleanQ}%"`)
+      .order('name')
+      .limit(20);
+    if (error) throw error;
+    const formatted = (data || []).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      price: p.price,
+      discount_price: p.discount_price,
+      discountPrice: p.discount_price,
+      images: Array.isArray(p.images) ? p.images : [],
+    }));
+    return { success: true, data: formatted };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function searchQuotationCustomersAction(query: string) {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+  try {
+    const supabase = getAdminSupabase();
+    const q = query.trim();
+    if (q.length < 2) return { success: true, data: [] };
+    const cleanQ = q.replace(/[%_\\]/g, '\\$&');
+    const { data, error } = await supabase
+      .from('customers')
+      .select('id, name, email, phone, profile_id, profiles(address)')
+      .or(`name.ilike."%${cleanQ}%",email.ilike."%${cleanQ}%",phone.ilike."%${cleanQ}%"`)
+      .order('name')
+      .limit(20);
+    if (error) throw error;
+
+    const formatAddress = (raw: any): string => {
+      if (!raw) return '';
+      if (typeof raw === 'object') {
+        const parts = [raw.addressLine1, raw.addressLine2, raw.city, raw.state, raw.postalCode, raw.country].filter(Boolean);
+        return parts.join(', ');
+      }
+      if (typeof raw === 'string') {
+        try {
+          const parsed = JSON.parse(raw);
+          if (typeof parsed === 'object' && parsed !== null) {
+            const parts = [parsed.addressLine1, parsed.addressLine2, parsed.city, parsed.state, parsed.postalCode, parsed.country].filter(Boolean);
+            if (parts.length > 0) return parts.join(', ');
+          }
+        } catch {
+          // ignore json parse error, return raw string
+        }
+        return raw;
+      }
+      return '';
+    };
+
+    const formatted = (data || []).map((c: any) => ({
+      id: c.id,
+      name: c.name || '',
+      email: c.email || '',
+      phone: c.phone || '',
+      address: formatAddress(c.profiles?.address),
+    }));
+
+    return { success: true, data: formatted };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function searchQuotationDealersAction(query: string) {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+  try {
+    const supabase = getAdminSupabase();
+    const q = query.trim();
+    if (q.length < 2) return { success: true, data: [] };
+    const cleanQ = q.replace(/[%_\\]/g, '\\$&');
+    const { data, error } = await supabase
+      .from('wholesale_dealers')
+      .select('id, company_name, contact_name, email, phone, address')
+      .or(`company_name.ilike."%${cleanQ}%",contact_name.ilike."%${cleanQ}%",email.ilike."%${cleanQ}%"`)
+      .order('company_name')
+      .limit(20);
+    if (error) throw error;
+    return { success: true, data: data || [] };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function getWholesaleDealerByIdAction(id: string) {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+  try {
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase
+      .from('wholesale_dealers')
+      .select('id, discount_rate')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    return { success: true, data };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function getChequeRegisterAction(params?: {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  filter?: string;
+  sort?: string;
+}): Promise<{
+  success: boolean;
+  data?: ChequeRegisterItem[];
+  total?: number;
+  page?: number;
+  pageSize?: number;
+  totalPages?: number;
+  error?: string;
+}> {
+  const perm = await checkPermission('orders', 'read');
+  if (!perm.allowed) {
+    return { success: false, error: 'Unauthorized: Read permission required.' };
+  }
+
+  const {
+    page = 1,
+    pageSize = 20,
+    search = '',
+    filter = 'all',
+    sort = 'priority',
+  } = params || {};
+
+  const limit = Math.max(1, Math.min(pageSize, 100));
+  const offset = Math.max(0, (page - 1) * limit);
+
+  try {
+    const supabase = await getAdminSupabase();
+    const { data, error } = await supabase.rpc('admin_get_cheque_register', {
+      p_search: search,
+      p_filter: filter,
+      p_sort: sort,
+      p_limit: limit,
+      p_offset: offset,
+    });
+
+    if (error) throw error;
+
+    const items: ChequeRegisterItem[] = (data || []).map((row: any) => ({
+      id: row.id,
+      payment_id: row.id,
+      sale_id: row.sale_id,
+      invoice_number: row.invoice_number,
+      receipt_number: row.receipt_number,
+      customer_name: row.customer_name,
+      customer_email: row.customer_email,
+      customer_phone: row.customer_phone,
+      dealer_company: row.dealer_company,
+      dealer_contact: row.dealer_contact,
+      cheque_number: row.cheque_number,
+      bank_name: row.bank_name,
+      amount: Number(row.amount) || 0,
+      payment_date: row.payment_date,
+      cheque_date: row.cheque_date,
+      status: row.status,
+      operational_state: row.operational_state,
+      days_diff: Number(row.days_diff) || 0,
+      days_overdue: Number(row.days_overdue) || 0,
+      notes: row.notes,
+      created_by: row.created_by,
+      created_at: row.created_at,
+      cleared_by: row.cleared_by,
+      cleared_at: row.cleared_at,
+      invoice_total: Number(row.invoice_total) || 0,
+      invoice_cleared_paid: Number(row.invoice_cleared_paid) || 0,
+      invoice_pending_clearance: Number(row.invoice_pending_clearance) || 0,
+      invoice_balance_due: Number(row.invoice_balance_due) || 0,
+      available_to_record: Number(row.available_to_record ?? (Math.max(0, Number(row.invoice_total || 0) - Number(row.invoice_cleared_paid || 0) - Number(row.invoice_pending_clearance || 0)))) || 0,
+      invoice_payment_status: row.invoice_payment_status,
+      total_count: Number(row.total_count) || 0,
+    }));
+
+    const totalCount = items.length > 0 ? items[0].total_count : 0;
+    const totalPages = Math.max(1, Math.ceil(totalCount / limit));
+
+    return {
+      success: true,
+      data: items,
+      total: totalCount,
+      page,
+      pageSize: limit,
+      totalPages,
+    };
+  } catch (err: any) {
+    console.error('getChequeRegisterAction error:', err);
+    return { success: false, error: err.message || 'Failed to fetch cheque register.' };
+  }
+}
+
+export async function getChequeRegisterMetricsAction(search = ''): Promise<{
+  success: boolean;
+  data?: ChequeRegisterMetrics;
+  error?: string;
+}> {
+  const perm = await checkPermission('orders', 'read');
+  if (!perm.allowed) {
+    return { success: false, error: 'Unauthorized: Read permission required.' };
+  }
+
+  try {
+    const supabase = await getAdminSupabase();
+    const { data, error } = await supabase.rpc('admin_get_cheque_register_metrics', {
+      p_search: search,
+    });
+
+    if (error) throw error;
+
+    const row = data && data[0] ? data[0] : null;
+    return {
+      success: true,
+      data: {
+        pending_amount: Number(row?.pending_amount) || 0,
+        pending_count: Number(row?.pending_count) || 0,
+        due_today_amount: Number(row?.due_today_amount) || 0,
+        due_today_count: Number(row?.due_today_count) || 0,
+        upcoming_amount: Number(row?.upcoming_amount) || 0,
+        upcoming_count: Number(row?.upcoming_count) || 0,
+        overdue_amount: Number(row?.overdue_amount) || 0,
+        overdue_count: Number(row?.overdue_count) || 0,
+        cleared_this_month_amount: Number(row?.cleared_this_month_amount ?? row?.cleared_month_amount) || 0,
+        cleared_this_month_count: Number(row?.cleared_this_month_count ?? row?.cleared_month_count) || 0,
+        bounced_this_month_amount: Number(row?.bounced_this_month_amount ?? row?.bounced_month_amount) || 0,
+        bounced_this_month_count: Number(row?.bounced_this_month_count ?? row?.bounced_month_count) || 0,
+      },
+    };
+  } catch (err: any) {
+    console.error('getChequeRegisterMetricsAction error:', err);
+    return { success: false, error: err.message || 'Failed to fetch cheque register metrics.' };
+  }
+}
+
+// ─── Admin Profile & User Management Actions ────────────────────────────────
+
+export async function getAdminCurrentSessionAction(): Promise<{
+  success: boolean;
+  user?: {
+    id: string;
+    email: string;
+    name: string;
+    role: AdminRole | 'admin';
+    formattedRole: string;
+    avatar?: string | null;
+  };
+  error?: string;
+}> {
+  try {
+    const supabase = await createServerSupabase();
+    const { data: { user }, error: authErr } = await supabase.auth.getUser();
+    if (authErr || !user) {
+      return { success: false, error: 'Not authenticated.' };
+    }
+
+    const adminSb = getAdminSupabase();
+    const { data: profile } = await adminSb
+      .from('profiles')
+      .select('id, name, role, avatar')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    const role = (profile?.role as AdminRole) || 'admin';
+    const name = profile?.name?.trim() || '';
+    const email = user.email || '';
+
+    const roleMap: Record<string, string> = {
+      super_admin: 'Super Administrator',
+      admin: 'Administrator',
+      store_manager: 'Store Manager',
+      content_editor: 'Content Editor',
+      support_staff: 'Support Staff',
+      read_only: 'Read Only Staff',
+    };
+
+    return {
+      success: true,
+      user: {
+        id: user.id,
+        email,
+        name,
+        role,
+        formattedRole: roleMap[role] || 'Administrator',
+        avatar: profile?.avatar || null,
+      },
+    };
+  } catch (err: any) {
+    console.error('[getAdminCurrentSessionAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to retrieve admin session.' };
+  }
+}
+
+export async function updateMyProfileAction(payload: { name: string }): Promise<{
+  success: boolean;
+  name?: string;
+  error?: string;
+}> {
+  try {
+    const supabase = await createServerSupabase();
+    const { data: { user }, error: authErr } = await supabase.auth.getUser();
+    if (authErr || !user) {
+      return { success: false, error: 'Unauthorized: Not authenticated.' };
+    }
+
+    if (!payload || typeof payload.name !== 'string') {
+      return { success: false, error: 'Full Name is required.' };
+    }
+
+    const cleanName = payload.name.trim();
+
+    if (!cleanName) {
+      return { success: false, error: 'Full Name cannot be empty or whitespace only.' };
+    }
+
+    if (cleanName.length > 100) {
+      return { success: false, error: 'Full Name cannot exceed 100 characters.' };
+    }
+
+    // Reject control characters / invalid unicode sequences
+    if (/[\u0000-\u001F\u007F-\u009F]/.test(cleanName)) {
+      return { success: false, error: 'Full Name contains invalid characters.' };
+    }
+
+    const adminSb = getAdminSupabase();
+
+    // Fetch existing profile to log diff in audit
+    const { data: oldProfile } = await adminSb
+      .from('profiles')
+      .select('id, name, role')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    // STRICT UPDATE: ONLY name and updated_at. Never role, is_active, pin, or permissions.
+    const { error: updateErr } = await adminSb
+      .from('profiles')
+      .update({
+        name: cleanName,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', user.id);
+
+    if (updateErr) {
+      console.error('[updateMyProfileAction] Profile update failed:', updateErr);
+      return { success: false, error: 'Failed to update profile name.' };
+    }
+
+    // Best-effort sync to auth.users user_metadata.full_name
+    try {
+      await adminSb.auth.admin.updateUserById(user.id, {
+        user_metadata: {
+          ...user.user_metadata,
+          full_name: cleanName,
+          name: cleanName,
+        },
+      });
+    } catch (metaErr) {
+      console.warn('[updateMyProfileAction] Auth metadata sync warning:', metaErr);
+    }
+
+    let ip = '127.0.0.1';
+    let userAgent = 'unknown';
+    try {
+      const headersList = await headers();
+      ip = getTrustedClientIp(headersList);
+      userAgent = headersList.get('user-agent') || 'unknown';
+    } catch { /* ignored outside request context */ }
+
+    await writeAuditLog(
+      cleanName || user.email || 'Admin Staff',
+      'update',
+      'profiles',
+      user.id,
+      { name: oldProfile?.name || '' },
+      { name: cleanName },
+      { ip, userAgent }
+    );
+
+    revalidatePath('/admin/profile');
+    revalidatePath('/admin/system-config');
+    revalidatePath('/admin');
+    return { success: true, name: cleanName };
+  } catch (err: any) {
+    console.error('[updateMyProfileAction] Unexpected error:', err);
+    return { success: false, error: err.message || 'An unexpected error occurred.' };
+  }
+}
+
+export async function getAdminStaffProfilesAction(): Promise<{
+  success: boolean;
+  data?: Array<{
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    formattedRole: string;
+    isActive: boolean;
+    createdAt: string;
+  }>;
+  error?: string;
+}> {
+  const check = await checkPermission('users', 'read');
+  if (!check.allowed) {
+    const sysCheck = await checkPermission('systemConfig', 'read');
+    if (!sysCheck.allowed) {
+      return { success: false, error: 'Unauthorized: Permission required to view staff profiles.' };
+    }
+  }
+
+  try {
+    const adminSb = getAdminSupabase();
+
+    // Query non-customer profiles
+    const { data: profiles, error: pErr } = await adminSb
+      .from('profiles')
+      .select('id, name, role, is_active, created_at')
+      .neq('role', 'customer')
+      .order('created_at', { ascending: true });
+
+    if (pErr) throw pErr;
+
+    // Fetch auth users to correlate email
+    const { data: authData } = await adminSb.auth.admin.listUsers();
+    const userEmailMap = new Map<string, string>();
+    authData?.users?.forEach((u) => {
+      userEmailMap.set(u.id, u.email || '');
+    });
+
+    const roleMap: Record<string, string> = {
+      super_admin: 'Super Administrator',
+      admin: 'Administrator',
+      store_manager: 'Store Manager',
+      content_editor: 'Content Editor',
+      support_staff: 'Support Staff',
+      read_only: 'Read Only Staff',
+    };
+
+    const staff = (profiles || []).map((p: any) => ({
+      id: p.id,
+      name: p.name?.trim() || '',
+      email: userEmailMap.get(p.id) || '—',
+      role: p.role,
+      formattedRole: roleMap[p.role] || p.role,
+      isActive: p.is_active ?? true,
+      createdAt: p.created_at,
+    }));
+
+    return { success: true, data: staff };
+  } catch (err: any) {
+    console.error('[getAdminStaffProfilesAction] Error:', err);
+    return { success: false, error: err.message || 'Failed to fetch staff profiles.' };
+  }
+}
+
+export async function updateStaffProfileNameByAdminAction(payload: {
+  userId: string;
+  name: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const check = await checkPermission('users', 'write');
+  if (!check.allowed) {
+    const sysCheck = await checkPermission('systemConfig', 'write');
+    if (!sysCheck.allowed) {
+      return { success: false, error: 'Unauthorized: Admin permission required to edit staff profiles.' };
+    }
+  }
+
+  // Only admin or super_admin roles can edit other profiles
+  if (check.role !== 'admin' && check.role !== 'super_admin') {
+    return { success: false, error: 'Forbidden: Only administrators can update staff profiles.' };
+  }
+
+  try {
+    if (!payload?.userId || typeof payload.userId !== 'string') {
+      return { success: false, error: 'User ID is required.' };
+    }
+    const cleanId = payload.userId.trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanId)) {
+      return { success: false, error: 'Invalid User ID format.' };
+    }
+
+    if (!payload.name || typeof payload.name !== 'string') {
+      return { success: false, error: 'Full Name is required.' };
+    }
+
+    const cleanName = payload.name.trim();
+    if (!cleanName) {
+      return { success: false, error: 'Full Name cannot be empty.' };
+    }
+
+    if (cleanName.length > 100) {
+      return { success: false, error: 'Full Name cannot exceed 100 characters.' };
+    }
+
+    if (/[\u0000-\u001F\u007F-\u009F]/.test(cleanName)) {
+      return { success: false, error: 'Full Name contains invalid characters.' };
+    }
+
+    const adminSb = getAdminSupabase();
+
+    const { data: targetProfile, error: getErr } = await adminSb
+      .from('profiles')
+      .select('id, name, role')
+      .eq('id', cleanId)
+      .maybeSingle();
+
+    if (getErr || !targetProfile) {
+      return { success: false, error: 'Staff profile not found.' };
+    }
+
+    // Strictly update name and updated_at
+    const { error: updateErr } = await adminSb
+      .from('profiles')
+      .update({
+        name: cleanName,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', cleanId);
+
+    if (updateErr) {
+      console.error('[updateStaffProfileNameByAdminAction] Update error:', updateErr);
+      return { success: false, error: 'Failed to update staff profile.' };
+    }
+
+    // Best-effort sync to auth.users user_metadata
+    try {
+      const { data: authTarget } = await adminSb.auth.admin.getUserById(cleanId);
+      if (authTarget?.user) {
+        await adminSb.auth.admin.updateUserById(cleanId, {
+          user_metadata: {
+            ...authTarget.user.user_metadata,
+            full_name: cleanName,
+            name: cleanName,
+          },
+        });
+      }
+    } catch (metaErr) {
+      console.warn('[updateStaffProfileNameByAdminAction] Auth metadata sync warning:', metaErr);
+    }
+
+    let ip = '127.0.0.1';
+    let userAgent = 'unknown';
+    try {
+      const headersList = await headers();
+      ip = getTrustedClientIp(headersList);
+      userAgent = headersList.get('user-agent') || 'unknown';
+    } catch { /* ignored */ }
+
+    await writeAuditLog(
+      check.actorName || check.actorEmail || 'Admin Staff',
+      'update',
+      'profiles',
+      cleanId,
+      { name: targetProfile.name },
+      { name: cleanName },
+      { ip, userAgent }
+    );
+
+    revalidatePath('/admin/profile');
+    revalidatePath('/admin/system-config');
+    return { success: true };
+  } catch (err: any) {
+    console.error('[updateStaffProfileNameByAdminAction] Unexpected error:', err);
+    return { success: false, error: err.message || 'An unexpected error occurred.' };
+  }
+}
+
+export interface FulfillCommercialSaleItemsInput {
+  saleId: string;
+  idempotencyKey?: string;
+  recipientName?: string;
+  recipientPhone?: string;
+  notes?: string;
+  items: Array<{
+    saleItemId: string;
+    quantity: number;
+    nonInventoryLine?: boolean;
+    unitIds?: string[];
+  }>;
+}
+
+export async function fulfillCommercialSaleItemsAction(input: FulfillCommercialSaleItemsInput) {
+  const check = await checkPermission('orders', 'write');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  try {
+    if (!input.saleId?.trim()) {
+      return { success: false, error: 'Sale ID is required.' };
+    }
+
+    if (!Array.isArray(input.items) || input.items.length === 0) {
+      return { success: false, error: 'At least one item must be specified for fulfillment.' };
+    }
+
+    const supabase = getAdminSupabase();
+
+    // Resolve authoritative staff display name
+    let staffDisplayName = 'Admin Staff';
+    if (check.actorId) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('name')
+        .eq('id', check.actorId)
+        .maybeSingle();
+
+      const profileName = profile?.name?.trim();
+      let metaFullName: string | undefined;
+      let metaName: string | undefined;
+
+      try {
+        const { data: authUser } = await supabase.auth.admin.getUserById(check.actorId);
+        metaFullName = authUser?.user?.user_metadata?.full_name?.trim();
+        metaName = authUser?.user?.user_metadata?.name?.trim();
+      } catch {
+        // Fallback gracefully if admin auth call is restricted
+      }
+
+      staffDisplayName =
+        (profileName && profileName.length > 0 ? profileName : undefined) ||
+        (metaFullName && metaFullName.length > 0 ? metaFullName : undefined) ||
+        (metaName && metaName.length > 0 ? metaName : undefined) ||
+        (check.actorEmail && check.actorEmail.trim().length > 0 ? check.actorEmail.trim() : undefined) ||
+        'Admin Staff';
+    }
+
+    const idempotencyKey = input.idempotencyKey || crypto.randomUUID();
+
+    const p_items = input.items.map((it) => ({
+      sale_item_id: it.saleItemId,
+      quantity: it.quantity,
+      non_inventory_line: Boolean(it.nonInventoryLine),
+      unit_ids: Array.isArray(it.unitIds) ? it.unitIds : [],
+    }));
+
+    const { data, error } = await supabase.rpc('fulfill_commercial_sale_items_atomic', {
+      p_sale_id: input.saleId,
+      p_idempotency_key: idempotencyKey,
+      p_actor_profile_id: check.actorId || null,
+      p_actor_name: staffDisplayName,
+      p_recipient_name: input.recipientName?.trim() || null,
+      p_recipient_phone: input.recipientPhone?.trim() || null,
+      p_notes: input.notes?.trim() || null,
+      p_items,
+    });
+
+    if (error) {
+      console.error('[fulfillCommercialSaleItemsAction] RPC Error:', error);
+      return { success: false, error: error.message };
+    }
+
+    if (!data?.success) {
+      return { success: false, error: data?.error || 'Failed to fulfill commercial sale items.' };
+    }
+
+    // Best-effort audit logging
+    try {
+      await supabase.from('audit_log').insert({
+        actor: staffDisplayName,
+        action: 'COMMERCIAL_GOODS_HANDED_OVER',
+        collection: 'sales',
+        record_id: input.saleId,
+        new_value: JSON.stringify({
+          fulfillment_id: data.fulfillment_id,
+          fulfillment_number: data.fulfillment_number,
+          sale_id: input.saleId,
+          items_count: input.items.length,
+        }),
+      });
+    } catch (logErr) {
+      console.warn('[fulfillCommercialSaleItemsAction] Audit log warning:', logErr);
+    }
+
+    revalidatePath('/admin/sales');
+    revalidatePath('/admin/inventory');
+    return { success: true, data };
+  } catch (err: any) {
+    console.error('[fulfillCommercialSaleItemsAction] Catch Error:', err);
+    return { success: false, error: err.message || 'An unexpected error occurred.' };
+  }
+}
+
+export interface AvailableStockUnit {
+  id: string;
+  barcode: string | null;
+  serial_number: string | null;
+  created_at: string;
+}
+
+export async function getAvailableUnitsForCommercialHandoverAction(
+  productId: string
+): Promise<{ success: boolean; data?: AvailableStockUnit[]; error?: string }> {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  if (!productId || !/^[0-9a-f-]{36}$/i.test(productId)) {
+    return { success: false, error: 'Valid product ID is required.' };
+  }
+
+  try {
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase
+      .from('stock_management')
+      .select('id, barcode, serial_number, created_at')
+      .eq('product_id', productId)
+      .eq('status', 'available')
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, data: data || [] };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch available units.' };
+  }
+}
+
+export interface CommercialSaleFulfillmentItem {
+  id: string;
+  fulfillment_id: string;
+  sale_item_id: string;
+  product_id: string | null;
+  quantity: number;
+  unit_id: string | null;
+  serial_number: string | null;
+  barcode: string | null;
+  created_at: string;
+  product_name?: string;
+}
+
+export interface CommercialSaleFulfillmentRecord {
+  id: string;
+  sale_id: string;
+  fulfillment_number: string;
+  idempotency_key: string;
+  handed_over_by_profile_id: string | null;
+  handed_over_by_name: string;
+  recipient_name: string | null;
+  recipient_phone: string | null;
+  notes: string | null;
+  created_at: string;
+  items: CommercialSaleFulfillmentItem[];
+}
+
+export async function getCommercialSaleFulfillmentsAction(
+  saleId: string
+): Promise<{ success: boolean; data?: CommercialSaleFulfillmentRecord[]; error?: string }> {
+  const check = await checkPermission('orders', 'read');
+  if (!check.allowed) return { success: false, error: 'Unauthorized.' };
+
+  if (!saleId || !/^[0-9a-f-]{36}$/i.test(saleId)) {
+    return { success: false, error: 'Valid sale ID is required.' };
+  }
+
+  try {
+    const supabase = getAdminSupabase();
+    const { data: fulfillments, error: fErr } = await supabase
+      .from('sale_fulfillments')
+      .select('*')
+      .eq('sale_id', saleId)
+      .order('created_at', { ascending: false });
+
+    if (fErr) {
+      return { success: false, error: fErr.message };
+    }
+
+    if (!fulfillments || fulfillments.length === 0) {
+      return { success: true, data: [] };
+    }
+
+    const fIds = fulfillments.map((f: any) => f.id);
+    const { data: items, error: iErr } = await supabase
+      .from('sale_fulfillment_items')
+      .select('*, sale_items(product_name)')
+      .in('fulfillment_id', fIds)
+      .order('created_at', { ascending: true });
+
+    if (iErr) {
+      return { success: false, error: iErr.message };
+    }
+
+    const itemsByFulfillment = new Map<string, CommercialSaleFulfillmentItem[]>();
+    (items || []).forEach((it: any) => {
+      const list = itemsByFulfillment.get(it.fulfillment_id) || [];
+      list.push({
+        id: it.id,
+        fulfillment_id: it.fulfillment_id,
+        sale_item_id: it.sale_item_id,
+        product_id: it.product_id,
+        quantity: it.quantity,
+        unit_id: it.unit_id,
+        serial_number: it.serial_number,
+        barcode: it.barcode,
+        created_at: it.created_at,
+        product_name: it.sale_items?.product_name || 'Line Item',
+      });
+      itemsByFulfillment.set(it.fulfillment_id, list);
+    });
+
+    const result: CommercialSaleFulfillmentRecord[] = fulfillments.map((f: any) => ({
+      id: f.id,
+      sale_id: f.sale_id,
+      fulfillment_number: f.fulfillment_number,
+      idempotency_key: f.idempotency_key,
+      handed_over_by_profile_id: f.handed_over_by_profile_id,
+      handed_over_by_name: f.handed_over_by_name,
+      recipient_name: f.recipient_name,
+      recipient_phone: f.recipient_phone,
+      notes: f.notes,
+      created_at: f.created_at,
+      items: itemsByFulfillment.get(f.id) || [],
+    }));
+
+    return { success: true, data: result };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to fetch fulfillment history.' };
+  }
+}

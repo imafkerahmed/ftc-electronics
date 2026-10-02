@@ -4,11 +4,15 @@
  */
 
 export interface InvoiceItem {
+  product_id?: string | null;
+  productId?: string | null;
   name: string;
   qty: number;
   unitPrice: number;
   discount?: number;
   serialNumber?: string;
+  serialNumbers?: string[];
+  quantityFulfilled?: number;
   total?: number;
 }
 
@@ -22,7 +26,6 @@ export interface InvoicePrintConfig {
   headerPhone: string;         // Contact phone
   headerEmail: string;         // Business email
   taxNumber: string;           // Tax ID / VAT Registration number
-  bankDetailsText: string;     // Payment / Bank Transfer info
   termsAndConditions: string;  // Payment terms, warranty note & validity
   showTaxBreakdown: boolean;   // Show Subtotal, Tax (VAT/NBT), Discount lines
   showDueDate: boolean;        // Show Due Date / Quotation Expiry Date
@@ -30,6 +33,7 @@ export interface InvoicePrintConfig {
   showQrCode: boolean;         // Render E-invoice / Order verify QR code
   isDefault: boolean;          // Default invoice preset flag
   logoUrl?: string;            // Custom Store Logo URL from Personalization settings
+  dynamicBankHtml?: string;    // Added at runtime from general settings
 }
 
 export interface InvoicePrintPreset {
@@ -53,10 +57,9 @@ export const DEFAULT_INVOICE_CONFIG: InvoicePrintConfig = {
   headerAddress: 'Main Street, Colombo, Sri Lanka',
   headerPhone: '+94 77 123 4567',
   headerEmail: 'info@ftc.lk',
-  taxNumber: 'VAT Reg: 123456789-0000',
-  bankDetailsText: 'Bank: Commercial Bank of Ceylon | Account: 1000293847 | Branch: Colombo Main',
+  taxNumber: '',
   termsAndConditions: '1. Quotations are valid for 14 days from issue date.\n2. Warranty claims require original invoice copy.\n3. Goods sold are subject to FTC store return policy.',
-  showTaxBreakdown: true,
+  showTaxBreakdown: false,
   showDueDate: true,
   showSignatureBlock: true,
   showQrCode: true,

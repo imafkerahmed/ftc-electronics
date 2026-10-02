@@ -4,8 +4,9 @@ import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { ShoppingBag, Check } from 'lucide-react';
 import { Product } from '@/types/product';
-import { formatPrice } from '@/lib/utils';
+import { formatPrice, getProductThumbnail } from '@/lib/utils';
 import { useCart } from '@/hooks/use-cart';
+import { Package } from 'lucide-react';
 
 import { useUiStore } from '@/store/use-ui-store';
 
@@ -39,6 +40,7 @@ export default function StickyBuyBar({ product }: StickyBuyBarProps) {
   const activePrice = product.discountPrice || product.price;
   const currency = product.currency || 'LKR';
   const isOutOfStock = product.countInStock === 0;
+  const barImage = getProductThumbnail(product.images);
 
   const handleAddToCart = () => {
     addItem(product);
@@ -51,13 +53,17 @@ export default function StickyBuyBar({ product }: StickyBuyBarProps) {
       <div className="mx-auto max-w-7xl px-4 flex items-center justify-between gap-4">
         {/* Left: Thumbnail & Title */}
         <div className="flex items-center gap-3 min-w-0">
-          <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg bg-neutral-900 border border-border">
-            <Image
-              src={product.images[0]}
-              alt={product.name}
-              fill
-              className="object-cover"
-            />
+          <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg bg-neutral-900 border border-border flex items-center justify-center">
+            {barImage ? (
+              <Image
+                src={barImage}
+                alt={product.name}
+                fill
+                className="object-cover"
+              />
+            ) : (
+              <Package className="h-5 w-5 stroke-1 text-muted-foreground opacity-50" />
+            )}
           </div>
           <div className="min-w-0">
             <h4 className="text-xs sm:text-sm font-bold text-foreground truncate max-w-[180px] sm:max-w-sm">

@@ -15,7 +15,8 @@ export interface PaymentDetails {
   method: 'stripe' | 'paypal' | 'payhere' | 'bank_transfer' | 'cash_pickup' | 'cash_delivery' | 'cod';
   paymentId?: string;
   status: 'pending' | 'paid' | 'failed';
-  paymentSlipUrl?: string; // Bank transfer slip uploaded by customer
+  paymentSlipPath?: string; // Private storage object path (ftc-payment-slips/...)
+  paymentSlipUrl?: string; // Historical public slip URL fallback
 }
 
 export interface OrderItem {

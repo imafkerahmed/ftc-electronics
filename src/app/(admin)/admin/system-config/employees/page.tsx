@@ -59,7 +59,8 @@ export default function EmployeesConfigPage() {
 
   const handleSave = () => {
     if (!form.name.trim()) return showToast('Name is required.', 'error');
-    if (!validatePin(form.pin)) return showToast('PIN must be 4–6 digits.', 'error');
+    if (!editing && !validatePin(form.pin)) return showToast('PIN must be 4–6 digits.', 'error');
+    if (editing && form.pin && !validatePin(form.pin)) return showToast('New PIN must be 4–6 digits.', 'error');
 
     startTransition(async () => {
       if (editing) {
@@ -145,12 +146,14 @@ export default function EmployeesConfigPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground/80">PIN (4–6 digits)</label>
+              <label className="text-xs font-semibold text-foreground/80">
+                {editing ? 'New PIN (leave blank to keep current)' : 'PIN (4–6 digits)'}
+              </label>
               <Input
                 type="password"
                 value={form.pin}
                 onChange={(e) => setForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
-                placeholder="e.g. 1234"
+                placeholder={editing ? '••••' : 'e.g. 1234'}
                 className="h-8.5 text-xs font-mono"
                 maxLength={6}
               />

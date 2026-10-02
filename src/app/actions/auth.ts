@@ -1,60 +1,11 @@
 'use server';
 
 import { cookies, headers } from 'next/headers';
-import crypto from 'crypto';
-import PocketBase from 'pocketbase';
-import { getAdminPb, writeAuditLog } from '@/lib/pb-admin';
+import { createClient as createServerSupabase } from '@/lib/supabase/server';
+import { getAdminSupabase, writeAuditLog } from '@/lib/supabase-admin';
 import { getTrustedClientIp } from '@/lib/get-client-ip';
-import { sendPasswordResetEmail, sendOtpEmail } from '@/lib/email';
 import { type AdminRole, ADMIN_ROLES } from '@/types/admin';
-
-function scryptAsync(password: string, salt: string, keylen: number, options: crypto.ScryptOptions): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    crypto.scrypt(password, salt, keylen, options, (err, derivedKey) => {
-      if (err) reject(err);
-      else resolve(derivedKey);
-    });
-  });
-}
-
-// Derived key for GCM encryption of OTP database password fields.
-// Requires a dedicated OTP_ENCRYPTION_KEY — never share this with other secrets.
-// Fails fast in production if the env var is missing so misconfiguration is caught at deploy time.
-const otpKeyMaterial = process.env.OTP_ENCRYPTION_KEY;
-if (!otpKeyMaterial && process.env.NODE_ENV === 'production') {
-  throw new Error('OTP_ENCRYPTION_KEY is required to encrypt pending signup credentials.');
-}
-const OTP_ENCRYPTION_SECRET = crypto.createHash('sha256')
-  .update(otpKeyMaterial || 'dev-only-insecure-otp-key')
-  .digest();
-
-function encryptPassword(plainText: string): string {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', OTP_ENCRYPTION_SECRET, iv);
-  let encrypted = cipher.update(plainText, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  const authTag = cipher.getAuthTag().toString('hex');
-  return `${iv.toString('hex')}:${encrypted}:${authTag}`;
-}
-
-/**
- * Decrypts an AES-256-GCM ciphertext produced by encryptPassword.
- * Returns null if the format is invalid or the GCM auth-tag check fails
- * (tampered / key-mismatched record) so callers can handle it explicitly.
- */
-function decryptPassword(cipherText: string): string | null {
-  const parts = cipherText.split(':');
-  if (parts.length !== 3) return null;
-  try {
-    const iv = Buffer.from(parts[0], 'hex');
-    const authTag = Buffer.from(parts[2], 'hex');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', OTP_ENCRYPTION_SECRET, iv);
-    decipher.setAuthTag(authTag);
-    return decipher.update(parts[1], 'hex', 'utf8') + decipher.final('utf8');
-  } catch {
-    return null;
-  }
-}
+import type { User } from '@supabase/supabase-js';
 
 // ─── Rate Limiting & Protection ──────────────────────────────────────────────
 // In-memory sliding-window rate limiter per IP & action.
@@ -69,18 +20,15 @@ const ACTION_RATE_LIMITS: Record<string, RateLimitConfig> = {
   signup: { maxAttempts: 5, windowMs: 15 * 60 * 1000 },         // 5 attempts per 15 mins
   forgotPassword: { maxAttempts: 3, windowMs: 15 * 60 * 1000 }, // 3 attempts per 15 mins
   resetPassword: { maxAttempts: 5, windowMs: 15 * 60 * 1000 },  // 5 attempts per 15 mins
-  verifyOtp: { maxAttempts: 5, windowMs: 15 * 60 * 1000 },      // 5 attempts per 15 mins
 };
 
 const DEFAULT_RATE_LIMIT: RateLimitConfig = { maxAttempts: 5, windowMs: 15 * 60 * 1000 };
 
 const globalForAuthStores = globalThis as unknown as {
   __rateLimitStore?: Map<string, { count: number; lastAttempt: number; action: string }>;
-  __memoryTokenStore?: Map<string, ResetTokenRecord>;
 };
 
 const rateLimitStore = globalForAuthStores.__rateLimitStore ??= new Map<string, { count: number; lastAttempt: number; action: string }>();
-const memoryTokenStore = globalForAuthStores.__memoryTokenStore ??= new Map<string, ResetTokenRecord>();
 
 function cleanupExpiredRateLimits(): void {
   const now = Date.now();
@@ -91,7 +39,6 @@ function cleanupExpiredRateLimits(): void {
     }
   }
 
-  // Evict oldest entries if map exceeds safety limit
   if (rateLimitStore.size > 5000) {
     const oldestKeys = Array.from(rateLimitStore.keys()).slice(0, 1000);
     for (const k of oldestKeys) {
@@ -141,184 +88,6 @@ function clearAuthAttempts(ip: string, action: string): void {
   rateLimitStore.delete(key);
 }
 
-/**
- * Consolidates setting authentication cookies securely in the client browser.
- */
-async function setSessionCookies(params: {
-  token: string;
-  role: AdminRole | 'customer';
-  name: string;
-  avatarUrl?: string;
-}): Promise<void> {
-  const cookieStore = await cookies();
-  const secure = process.env.NODE_ENV === 'production';
-
-  // Shared base keeps all security attributes in one place — change once, applies everywhere.
-  const base = {
-    secure,
-    sameSite: 'strict' as const,
-    path: '/',
-    maxAge: 60 * 60 * 24 * 7,
-  };
-
-  cookieStore.set('pb_auth_token', params.token, { ...base, httpOnly: true });
-  cookieStore.set('pb_auth_role', params.role, { ...base, httpOnly: true });
-  cookieStore.set('pb_auth_indicator', '1', { ...base, httpOnly: false });
-  cookieStore.set('pb_auth_name', encodeURIComponent(params.name), { ...base, httpOnly: false });
-  cookieStore.set(
-    'pb_auth_avatar',
-    params.avatarUrl ? encodeURIComponent(params.avatarUrl) : '',
-    { ...base, httpOnly: false, maxAge: params.avatarUrl ? base.maxAge : 0 }
-  );
-}
-
-// ─── OWASP Timing Equalization KDF Helper ────────────────────────────────────
-
-/**
- * Asynchronously executes a dummy KDF operation off the main thread (using libuv threadpool)
- * to equalize execution time when an account does not exist or auth fails,
- * neutralizing timing side-channel attacks for user enumeration prevention
- * without blocking the Node.js main event loop thread.
- */
-async function executeDummyKdf(): Promise<void> {
-  try {
-    await scryptAsync('dummy_password_timing_equalizer', 'owasp_static_salt_constant', 64, {
-      N: 16384,
-      r: 8,
-      p: 1,
-      maxmem: 32 * 1024 * 1024,
-    });
-  } catch {
-    // Ignore timing dummy errors
-  }
-}
-
-// ─── Secure Reset Token Lifecycle Store ────────────────────────────────────────
-
-interface ResetTokenRecord {
-  id?: string;
-  email: string;
-  tokenHash: string;
-  expiresAt: number;
-  used: boolean;
-}
-
-function cleanupExpiredTokens(): void {
-  const now = Date.now();
-  for (const [hash, rec] of memoryTokenStore.entries()) {
-    if (rec.expiresAt < now || rec.used) {
-      memoryTokenStore.delete(hash);
-    }
-  }
-
-  if (memoryTokenStore.size > 2000) {
-    const oldestKeys = Array.from(memoryTokenStore.entries())
-      .sort((a, b) => a[1].expiresAt - b[1].expiresAt)
-      .slice(0, 500)
-      .map(([k]) => k);
-    for (const k of oldestKeys) {
-      memoryTokenStore.delete(k);
-    }
-  }
-}
-
-async function saveResetTokenRecord(record: ResetTokenRecord): Promise<void> {
-  cleanupExpiredTokens();
-  const hashKey = record.tokenHash;
-  memoryTokenStore.set(hashKey, record);
-
-  try {
-    const pb = await getAdminPb();
-    const created = await pb.collection('password_reset_tokens').create({
-      email: record.email,
-      token_hash: record.tokenHash,
-      expires_at: record.expiresAt,
-      used: record.used,
-    });
-    record.id = created.id;
-    memoryTokenStore.set(hashKey, record);
-  } catch (err) {
-    console.error('[RESET TOKEN STORE ERROR] Failed to save reset token record to database:', err);
-  }
-}
-
-async function findResetTokenRecord(tokenHash: string): Promise<ResetTokenRecord | null> {
-  cleanupExpiredTokens();
-
-  // 1. Query persistent PocketBase database first for multi-replica/distributed node consistency
-  try {
-    const pb = await getAdminPb();
-    const record = await pb.collection('password_reset_tokens').getFirstListItem(
-      pb.filter('token_hash = {:tokenHash}', { tokenHash })
-    );
-    if (record) {
-      const result: ResetTokenRecord = {
-        id: record.id,
-        email: record.email as string,
-        tokenHash: record.token_hash as string,
-        expiresAt: Number(record.expires_at),
-        used: Boolean(record.used),
-      };
-      memoryTokenStore.set(tokenHash, result);
-      return result;
-    }
-  } catch (err) {
-    console.error('[RESET TOKEN STORE ERROR] Failed to fetch reset token record from database:', err);
-  }
-
-  // 2. Process-memory fallback
-  const memoryRecord = memoryTokenStore.get(tokenHash);
-  if (memoryRecord && memoryRecord.expiresAt >= Date.now()) {
-    return memoryRecord;
-  }
-
-  return null;
-}
-
-async function markTokenUsed(tokenHash: string, record: ResetTokenRecord): Promise<void> {
-  record.used = true;
-  memoryTokenStore.set(tokenHash, record);
-
-  try {
-    const pb = await getAdminPb();
-    let targetId = record.id;
-    if (!targetId) {
-      const dbRec = await pb.collection('password_reset_tokens').getFirstListItem(
-        pb.filter('token_hash = {:tokenHash}', { tokenHash })
-      );
-      if (dbRec) targetId = dbRec.id;
-    }
-    if (targetId) {
-      await pb.collection('password_reset_tokens').update(targetId, { used: true });
-      record.id = targetId;
-    }
-  } catch (err) {
-    console.error('[RESET TOKEN STORE ERROR] Failed to mark reset token as used in database:', err);
-  }
-}
-
-async function revokeUserTokens(email: string): Promise<void> {
-  const now = Date.now();
-  for (const [hash, rec] of memoryTokenStore.entries()) {
-    if (rec.email.toLowerCase() === email.toLowerCase()) {
-      rec.used = true;
-      memoryTokenStore.set(hash, rec);
-    }
-  }
-
-  try {
-    const pb = await getAdminPb();
-    const records = await pb.collection('password_reset_tokens').getFullList({
-      filter: pb.filter('email = {:email} && used = false && expires_at >= {:now}', { email, now }),
-    });
-    if (records.length > 0) {
-      await Promise.all(records.map((rec) => pb.collection('password_reset_tokens').update(rec.id, { used: true })));
-    }
-  } catch (err) {
-    console.error('[RESET TOKEN STORE ERROR] Failed to revoke active reset tokens in database:', err);
-  }
-}
-
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
 export interface AuthActionResult {
@@ -326,15 +95,33 @@ export interface AuthActionResult {
   error?: string;
   message?: string;
   role?: AdminRole | 'customer';
-  requiresOtp?: boolean;
-  otpId?: string;
+  requiresConfirmation?: boolean;
+}
+
+export interface CustomerProfileData {
+  id: string;
+  email: string;
+  name: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  address?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
+  role: string;
+  created: string;
+  avatar?: string;
 }
 
 // ─── Login Action ─────────────────────────────────────────────────────────────
 
 /**
- * Server action to log in a user/admin.
- * Follows OWASP Anti-User-Enumeration and Rate Limiting standards.
+ * Server action to log in a user/admin using Supabase SSR Auth.
+ * Verified role is derived exclusively from public.profiles on the server.
  */
 export async function loginAction(formData: FormData): Promise<AuthActionResult> {
   const email = (formData.get('email') as string || '').trim().toLowerCase();
@@ -358,184 +145,81 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
     };
   }
 
-  const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
-  if (!pbUrl) {
-    return { success: false, error: 'Server configuration error.' };
-  }
-
-  const pb = new PocketBase(pbUrl);
-  pb.autoCancellation(false);
-
-  let success = false;
-  let userRole: AdminRole | 'customer' = 'customer';
-  let userId = '';
-
   try {
-    const authData = await pb.collection('users').authWithPassword(email, password);
-    const record = authData.record;
-    userId = record.id;
+    const supabase = await createServerSupabase();
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-    let role = record.role as string | undefined;
-    if (role === 'admin') {
-      role = 'super_admin';
+    if (authError || !authData?.user) {
+      recordAuthAttempt(ip, 'login');
+      writeAuditLog(email, 'login', 'auth', undefined, undefined, { success: false, ip }, { ip, userAgent });
+      return { success: false, error: 'Invalid email or password.' };
     }
 
-    if (role && (ADMIN_ROLES as readonly string[]).includes(role)) {
-      success = true;
-      userRole = role as AdminRole;
-    } else if (record.isAdmin === true || record.is_admin === true) {
-      success = true;
-      userRole = 'super_admin';
-    } else {
-      success = true;
-      userRole = 'customer';
-    }
-  } catch {
-    // Execute dummy KDF to preserve constant-time execution and prevent user enumeration
-    await executeDummyKdf();
-  }
-
-  if (success) {
     clearAuthAttempts(ip, 'login');
 
-    const model = pb.authStore.record;
-    const displayName = model?.name || email.split('@')[0];
-    const avatarUrl = model?.avatar
-      ? `${pbUrl}/api/files/_pb_users_auth_/${model.id}/${model.avatar}`
-      : undefined;
+    const user = authData.user;
+    const adminSb = getAdminSupabase();
 
-    await setSessionCookies({
-      token: pb.authStore.token,
-      role: userRole,
-      name: displayName,
-      avatarUrl,
-    });
+    // 2. Fetch role & application identity strictly from public.profiles
+    const { data: profile } = await adminSb
+      .from('profiles')
+      .select('id, role, name')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    let userRole: AdminRole | 'customer' = 'customer';
+    const profileRole = profile?.role;
+    if (profileRole && (ADMIN_ROLES as readonly string[]).includes(profileRole)) {
+      userRole = profileRole as AdminRole;
+    }
+
+    // 3. If profile row is missing, provision it now as customer
+    if (!profile) {
+      const displayName = user.user_metadata?.name || email.split('@')[0] || 'Customer';
+      await adminSb.from('profiles').insert({
+        id: user.id,
+        name: displayName,
+        role: 'customer',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    // 4. If legacy customer record exists unlinked, link it safely
+    if (user.email_confirmed_at) {
+      await adminSb
+        .from('customers')
+        .update({ profile_id: user.id, updated_at: new Date().toISOString() })
+        .eq('email', email)
+        .is('profile_id', null);
+    }
 
     writeAuditLog(
       email,
       'login',
       'auth',
-      userId,
+      user.id,
       undefined,
       { role: userRole, ip },
       { ip, userAgent }
     );
 
     return { success: true, role: userRole };
-  }
-
-  // Record failed attempt for rate limiting
-  recordAuthAttempt(ip, 'login');
-
-  writeAuditLog(
-    email,
-    'login',
-    'auth',
-    undefined,
-    undefined,
-    { success: false, ip },
-    { ip, userAgent }
-  );
-
-  // Return uniform, generic error message (OWASP Standard)
-  return { success: false, error: 'Invalid email or password.' };
-}
-
-async function checkUserAuth() {
-  const cookieStore = await cookies();
-  return cookieStore.get('pb_auth_token')?.value;
-}
-
-/**
- * Establishes a server session cookie after a successful client OAuth2 authentication flow.
- */
-export async function setOAuthSessionAction(token: string): Promise<AuthActionResult> {
-  await checkUserAuth();
-  if (!token) {
-    return { success: false, error: 'OAuth token is required.' };
-  }
-
-  const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
-  if (!pbUrl) {
-    return { success: false, error: 'Server configuration error.' };
-  }
-
-  try {
-    const pb = new PocketBase(pbUrl);
-    pb.authStore.save(token, null);
-
-    // Cryptographically verify token signature & refresh record against PocketBase
-    let record;
-    try {
-      const refreshed = await pb.collection('users').authRefresh();
-      record = refreshed.record;
-    } catch {
-      return { success: false, error: 'Invalid authentication token.' };
-    }
-
-    if (!record) {
-      return { success: false, error: 'Invalid authentication token.' };
-    }
-
-    let userRole: AdminRole | 'customer' = 'customer';
-    const role = record.role as string | undefined;
-
-    // Check role validity against defined AdminRoles
-    if (role && (ADMIN_ROLES as readonly string[]).includes(role)) {
-      userRole = role as AdminRole;
-    } else if (record.isAdmin === true || record.is_admin === true) {
-      userRole = 'super_admin';
-    } else {
-      // New OAuth customer with no role set yet -> Provision in database
-      if (!record.role && record.id) {
-        try {
-          const adminPb = await getAdminPb();
-          await adminPb.collection('users').update(record.id, { role: 'customer' });
-        } catch (provisionErr) {
-          console.error('[setOAuthSessionAction] Role provisioning failed:', provisionErr);
-        }
-      }
-      userRole = 'customer';
-    }
-
-    const headersList = await headers();
-    const ip = getTrustedClientIp(headersList);
-    const userAgent = headersList.get('user-agent') || 'unknown';
-
-    const displayName = record.name || record.email?.split('@')[0] || 'User';
-    const avatarUrl = record.avatar
-      ? `${pbUrl}/api/files/_pb_users_auth_/${record.id}/${record.avatar}`
-      : undefined;
-
-    await setSessionCookies({
-      token,
-      role: userRole,
-      name: displayName,
-      avatarUrl,
-    });
-
-    writeAuditLog(
-      record.email || 'oauth_user',
-      'login',
-      'auth',
-      record.id,
-      undefined,
-      { role: userRole, provider: 'google', ip },
-      { ip, userAgent }
-    );
-
-    return { success: true, role: userRole };
   } catch (err) {
-    console.error('[setOAuthSessionAction] Failed:', err);
-    return { success: false, error: 'Failed to complete OAuth authentication.' };
+    console.error('[loginAction] Unexpected error:', err);
+    recordAuthAttempt(ip, 'login');
+    return { success: false, error: 'Unable to sign in. Please try again later.' };
   }
 }
 
-// ─── SignUp Action ────────────────────────────────────────────────────────────
+// ─── Sign Up Action ───────────────────────────────────────────────────────────
 
 /**
- * Server action to register a new user account.
- * Follows OWASP Anti-User-Enumeration and Rate Limiting standards.
+ * Server action to register a new user account with native Supabase Auth.
+ * Passwords are never temporarily stored or encrypted by the application.
  */
 export async function signUpAction(formData: FormData): Promise<AuthActionResult> {
   const name = (formData.get('name') as string || '').trim();
@@ -543,7 +227,7 @@ export async function signUpAction(formData: FormData): Promise<AuthActionResult
   const password = formData.get('password') as string || '';
   const confirmPassword = formData.get('confirmPassword') as string || '';
 
-  if (!email) {
+  if (!email || !email.includes('@')) {
     return { success: false, error: 'Please enter a valid email address.' };
   }
 
@@ -569,270 +253,128 @@ export async function signUpAction(formData: FormData): Promise<AuthActionResult
   }
 
   try {
-    const adminPb = await getAdminPb();
-    
-    // Check if user already exists
-    let existingUser = null;
-    try {
-      existingUser = await adminPb.collection('users').getFirstListItem(
-        adminPb.filter('email = {:email}', { email })
-      );
-    } catch {
-      // User not found
-    }
+    const supabase = await createServerSupabase();
+    const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
-    if (existingUser) {
-      return { 
-        success: false, 
-        error: 'An account with this email address already exists.' 
-      };
-    }
-
-    // Prune expired signup OTP records — capped at 50 to avoid unbounded sequential deletes.
-    try {
-      const expiredOtps = await adminPb.collection('signup_otps').getList(1, 50, {
-        filter: adminPb.filter('expiresAt < {:now}', { now: new Date().toISOString() }),
-        fields: 'id',
-      });
-      await Promise.all(
-        expiredOtps.items.map((oldOtp) =>
-          adminPb.collection('signup_otps').delete(oldOtp.id).catch(() => {})
-        )
-      );
-    } catch (pruneErr) {
-      console.error('Failed to prune expired OTPs:', pruneErr);
-    }
-
-    // Generate 6-digit random code using cryptographically secure random integers
-    const code = (100000 + crypto.randomInt(900000)).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes TTL
-
-    // Create temporary record in PocketBase signup_otps collection
-    const tempSignup = await adminPb.collection('signup_otps').create({
+    const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
-      code,
-      name,
-      password: encryptPassword(password), // Save encrypted temporary password to create user upon verification
-      expiresAt,
-      attempts: 0,
+      password,
+      options: {
+        data: {
+          name: name || email.split('@')[0],
+        },
+        emailRedirectTo: `${origin}/auth/callback?next=/account/profile`,
+      },
     });
 
-    // Send OTP email
-    const emailResult = await sendOtpEmail({
-      to: email,
-      code,
-      expiresMinutes: 10,
-    });
-
-    if (!emailResult.success) {
-      // Clean up on failure
-      try {
-        await adminPb.collection('signup_otps').delete(tempSignup.id);
-      } catch {}
-      return {
-        success: false,
-        error: emailResult.error || 'Failed to send verification code. Please try again.',
-      };
+    if (authError) {
+      recordAuthAttempt(ip, 'signup');
+      return { success: false, error: authError.message || 'Failed to create account.' };
     }
 
-    return { 
-      success: true, 
-      requiresOtp: true,
-      otpId: tempSignup.id,
-      message: 'A 6-digit verification code has been sent to your email.' 
+    clearAuthAttempts(ip, 'signup');
+
+    // If email confirmation is disabled or user is already confirmed
+    if (authData?.user && authData.user.email_confirmed_at) {
+      const adminSb = getAdminSupabase();
+      await adminSb.from('profiles').upsert({
+        id: authData.user.id,
+        name: name || email.split('@')[0],
+        role: 'customer',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      // Link legacy unlinked customer record
+      await adminSb
+        .from('customers')
+        .update({ profile_id: authData.user.id, updated_at: new Date().toISOString() })
+        .eq('email', email)
+        .is('profile_id', null);
+
+      writeAuditLog(email, 'create', 'profiles', authData.user.id, undefined, { email, role: 'customer' }, { ip, userAgent });
+      return { success: true, message: 'Account created successfully!' };
+    }
+
+    return {
+      success: true,
+      requiresConfirmation: true,
+      message: 'A confirmation link has been sent to your email. Please check your inbox to activate your account.',
     };
   } catch (err) {
-    console.error('[signUpAction] Registration failed:', err);
+    console.error('[signUpAction] Error:', err);
     recordAuthAttempt(ip, 'signup');
-    return { 
-      success: false, 
-      error: 'Unable to complete registration right now. Please try again.' 
-    };
+    return { success: false, error: 'Unable to complete registration right now. Please try again.' };
   }
 }
 
+// ─── Legacy Customer Activation ───────────────────────────────────────────────
+
 /**
- * Verifies OTP and creates the real user account.
+ * Initiates activation for an existing legacy customer record without requiring password guessing.
+ * Uses native Supabase Auth signup or invite flow through the secure server boundary.
  */
-export async function verifyOtpAction(otpId: string, code: string): Promise<AuthActionResult> {
-  if (!otpId || !code) {
-    return { success: false, error: 'Verification code is required.' };
+export async function requestLegacyCustomerActivationAction(email: string): Promise<AuthActionResult> {
+  const cleanEmail = (email || '').trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return { success: false, error: 'Valid email is required.' };
   }
 
   const headersList = await headers();
   const ip = getTrustedClientIp(headersList);
-  const userAgent = headersList.get('user-agent') || 'unknown';
-
-  // 1. IP-based Rate Limit Check
-  const rateCheck = checkAuthRateLimit(ip, 'verifyOtp');
+  const rateCheck = checkAuthRateLimit(ip, 'signup');
   if (!rateCheck.allowed) {
-    const minutes = Math.ceil((rateCheck.retryAfterMs || 0) / 60000);
-    return {
-      success: false,
-      error: `Too many verification attempts. Please try again in ${minutes} minute${minutes > 1 ? 's' : ''}.`
-    };
+    return { success: false, error: 'Too many requests. Please try again later.' };
   }
 
+  recordAuthAttempt(ip, 'signup');
+
+  // Generic OWASP response to prevent email enumeration
+  const uniformResponse: AuthActionResult = {
+    success: true,
+    message: 'If an account matching that email address exists, an activation link has been sent to your email.',
+  };
+
   try {
-    const adminPb = await getAdminPb();
-    
-    // Fetch temp signup record
-    let record: any;
-    try {
-      record = await adminPb.collection('signup_otps').getOne(otpId);
-    } catch {
-      return { success: false, error: 'Verification session expired. Please sign up again.' };
+    const adminSb = getAdminSupabase();
+    const { data: customer } = await adminSb
+      .from('customers')
+      .select('id, name, email, profile_id')
+      .eq('email', cleanEmail)
+      .is('profile_id', null)
+      .maybeSingle();
+
+    if (!customer) {
+      return uniformResponse;
     }
 
-    const currentAttempts = Number(record.attempts || 0);
-
-    // 2. Brute Force Protection (Check/Self-Destruct if limit exceeded)
-    if (currentAttempts >= 5) {
-      try {
-        await adminPb.collection('signup_otps').delete(otpId);
-      } catch {}
-      return { success: false, error: 'Too many incorrect verification attempts. Please sign up again.' };
-    }
-
-    // Verify OTP code
-    if (record.code !== code.trim()) {
-      recordAuthAttempt(ip, 'verifyOtp');
-
-      // Atomic server-side increment: avoids read-modify-write race across concurrent requests.
-      let newAttempts = currentAttempts + 1;
-      try {
-        const updated = await adminPb.collection('signup_otps').update(otpId, {
-          'attempts+': 1,
-        });
-        newAttempts = Number(updated.attempts ?? newAttempts);
-      } catch {}
-
-      if (newAttempts >= 5) {
-        try {
-          await adminPb.collection('signup_otps').delete(otpId);
-        } catch {}
-        return { success: false, error: 'Too many incorrect verification attempts. Please sign up again.' };
-      }
-
-      return { success: false, error: 'Incorrect verification code. Please check and try again.' };
-    }
-
-    // Check expiration
-    if (new Date(record.expiresAt).getTime() < Date.now()) {
-      try {
-        await adminPb.collection('signup_otps').delete(otpId);
-      } catch {}
-      return { success: false, error: 'Verification code has expired. Please sign up again.' };
-    }
-
-    // Double check if user was created in the meantime
-    let existingUser = null;
-    try {
-      existingUser = await adminPb.collection('users').getFirstListItem(
-        adminPb.filter('email = {:email}', { email: record.email })
-      );
-    } catch {}
-
-    if (existingUser) {
-      try {
-        await adminPb.collection('signup_otps').delete(otpId);
-      } catch {}
-      return { success: false, error: 'An account with this email address already exists.' };
-    }
-
-    // Decrypt the temporary user password — returns null if tampered or key-mismatched.
-    const decryptedPassword = decryptPassword(record.password);
-    if (decryptedPassword === null) {
-      console.error('[verifyOtpAction] decryptPassword returned null for otpId:', otpId);
-      try {
-        await adminPb.collection('signup_otps').delete(otpId);
-      } catch {}
-      return { success: false, error: 'Verification session is invalid. Please sign up again.' };
-    }
-
-    // Create real user in users collection
-    const newUser = await adminPb.collection('users').create({
-      email: record.email,
-      password: decryptedPassword,
-      passwordConfirm: decryptedPassword,
-      name: record.name,
-      role: 'customer',
+    const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    // Generate secure activation / invite link
+    const { error: inviteErr } = await adminSb.auth.admin.inviteUserByEmail(cleanEmail, {
+      data: { name: customer.name },
+      redirectTo: `${origin}/auth/callback?next=/account/profile`,
     });
 
-    // Delete temporary OTP record
-    try {
-      await adminPb.collection('signup_otps').delete(otpId);
-    } catch {}
-
-    writeAuditLog(
-      record.email,
-      'create',
-      'users',
-      newUser.id,
-      undefined,
-      { email: record.email, name: record.name, role: 'customer' },
-      { ip, userAgent }
-    );
-
-    // Authenticate new user automatically to log them in
-    const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
-    if (!pbUrl) {
-      return { success: true, message: 'Account verified successfully! Please sign in.' };
+    if (inviteErr) {
+      console.warn('[requestLegacyCustomerActivationAction] Invite notice:', inviteErr.message);
     }
 
-    const pb = new PocketBase(pbUrl);
-
-    // Use decryptedPassword (not record.password which holds the AES-GCM ciphertext).
-    // Wrap in try/catch: a login failure must not discard the successfully created account.
-    let authData;
-    try {
-      authData = await pb.collection('users').authWithPassword(record.email, decryptedPassword);
-    } catch (loginErr) {
-      console.error('[verifyOtpAction] Auto-login after signup failed:', loginErr);
-      return { success: true, message: 'Account verified successfully! Please sign in.' };
-    }
-
-    if (authData?.token) {
-      const displayName = record.name || record.email.split('@')[0] || 'User';
-      const avatarUrl = authData.record?.avatar
-        ? `${pbUrl}/api/files/_pb_users_auth_/${authData.record.id}/${authData.record.avatar}`
-        : undefined;
-
-      await setSessionCookies({
-        token: authData.token,
-        role: 'customer',
-        name: displayName,
-        avatarUrl,
-      });
-      
-      // Notify navbar client-side
-      return { success: true, role: 'customer' };
-    }
-
-    return { 
-      success: true, 
-      message: 'Account verified successfully! Please sign in.' 
-    };
-  } catch (err: any) {
-    console.error('[verifyOtpAction] Verification/login failed:', err);
-    return { 
-      success: false, 
-      error: 'Unable to complete verification right now. Please try again.' 
-    };
+    return uniformResponse;
+  } catch (err) {
+    console.error('[requestLegacyCustomerActivationAction] Error:', err);
+    return uniformResponse;
   }
 }
 
 // ─── Forgot Password Action ───────────────────────────────────────────────────
 
 /**
- * Server action to initiate password reset.
- * Generates 256-bit secure random token, stores SHA-256 hash with 1-hour TTL,
- * and enforces uniform response & timing (OWASP anti-user-enumeration).
+ * Initiates native Supabase password recovery.
  */
 export async function forgotPasswordAction(formData: FormData): Promise<AuthActionResult> {
   const email = (formData.get('email') as string || '').trim().toLowerCase();
 
-  if (!email) {
+  if (!email || !email.includes('@')) {
     return { success: false, error: 'Please enter a valid email address.' };
   }
 
@@ -848,65 +390,24 @@ export async function forgotPasswordAction(formData: FormData): Promise<AuthActi
     };
   }
 
-  // Unconditionally record the attempt against rate limiter for every valid request
   recordAuthAttempt(ip, 'forgotPassword');
 
-  // Uniform generic OWASP success message
   const uniformResponse: AuthActionResult = {
     success: true,
-    message: 'If an account matching that email address exists, a password reset link has been sent.',
+    message: 'If an account matching that email address exists, a password reset link has been sent to your email.',
   };
 
   try {
-    const adminPb = await getAdminPb();
-    let user = null;
-    try {
-      user = await adminPb.collection('users').getFirstListItem(
-        adminPb.filter('email = {:email}', { email })
-      );
-    } catch {
-      // User not found
-    }
+    const supabase = await createServerSupabase();
+    const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
-    if (!user) {
-      // Perform dummy operations for timing consistency
-      crypto.randomBytes(32);
-      await executeDummyKdf();
-      return uniformResponse;
-    }
-
-    // 1. Revoke existing tokens for this user
-    await revokeUserTokens(email);
-
-    // 2. Generate 256-bit cryptographically secure random token
-    const rawToken = crypto.randomBytes(32).toString('hex');
-
-    // 3. Compute SHA-256 one-way cryptographic hash of the token for storage
-    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-
-    // 4. Strict 1-hour TTL (3600000 ms)
-    const expiresAt = Date.now() + 60 * 60 * 1000;
-
-    // 5. Store hashed token
-    await saveResetTokenRecord({
-      email,
-      tokenHash,
-      expiresAt,
-      used: false,
+    await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${origin}/auth/callback?next=/reset-password`,
     });
-
-    // 6. Build reset URL & dispatch email via Resend / Dev Fallback
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const resetUrl = `${baseUrl}/reset-password?token=${rawToken}`;
-    await sendPasswordResetEmail({ to: email, resetUrl });
-
-    // Write audit log entry
-    writeAuditLog(email, 'update', 'users', user.id, undefined, { action: 'forgot_password_request' }, { ip });
 
     return uniformResponse;
   } catch (err) {
-    console.error('[forgotPasswordAction] Failed to process password reset request:', err);
-    await executeDummyKdf();
+    console.error('[forgotPasswordAction] Error:', err);
     return uniformResponse;
   }
 }
@@ -914,17 +415,12 @@ export async function forgotPasswordAction(formData: FormData): Promise<AuthActi
 // ─── Reset Password Action ────────────────────────────────────────────────────
 
 /**
- * Server action to complete password reset using secure token.
- * Validates token hash, 1-hour TTL, single-use status, and applies slow KDF.
+ * Updates the user's password using native Supabase Auth within the verified recovery context.
+ * Does NOT use service-role admin APIs for normal user password resets.
  */
 export async function resetPasswordAction(formData: FormData): Promise<AuthActionResult> {
-  const token = formData.get('token') as string || '';
   const password = formData.get('password') as string || '';
   const confirmPassword = formData.get('confirmPassword') as string || '';
-
-  if (!token) {
-    return { success: false, error: 'Invalid or missing reset token.' };
-  }
 
   if (!password || password.length < 8) {
     return { success: false, error: 'Password must be at least 8 characters long.' };
@@ -946,45 +442,33 @@ export async function resetPasswordAction(formData: FormData): Promise<AuthActio
     };
   }
 
-  // Hash incoming token using SHA-256 to compare against stored hash
-  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-
-  const record = await findResetTokenRecord(tokenHash);
-
-  // Validate token existence, single-use enforcement, and 1-hour TTL
-  if (!record || record.used || record.expiresAt < Date.now()) {
-    await executeDummyKdf();
-    recordAuthAttempt(ip, 'resetPassword');
-    return { success: false, error: 'Invalid or expired password reset token.' };
-  }
-
   try {
-    const adminPb = await getAdminPb();
-    const user = await adminPb.collection('users').getFirstListItem(
-      adminPb.filter('email = {:email}', { email: record.email })
-    );
+    const supabase = await createServerSupabase();
+    const { data: { user }, error: userErr } = await supabase.auth.getUser();
 
-    // Update user password in PocketBase (adaptive KDF applied by PB)
-    await adminPb.collection('users').update(user.id, {
+    if (userErr || !user) {
+      recordAuthAttempt(ip, 'resetPassword');
+      return { success: false, error: 'Password reset session expired or invalid. Please request a new link.' };
+    }
+
+    const { error: updateErr } = await supabase.auth.updateUser({
       password,
-      passwordConfirm: password,
     });
 
-    // Mark token as used (single-use enforcement)
-    await markTokenUsed(tokenHash, record);
+    if (updateErr) {
+      recordAuthAttempt(ip, 'resetPassword');
+      return { success: false, error: updateErr.message || 'Failed to update password.' };
+    }
 
-    // Revoke all remaining tokens for user
-    await revokeUserTokens(record.email);
+    clearAuthAttempts(ip, 'resetPassword');
+    writeAuditLog(user.email || 'user', 'update', 'profiles', user.id, undefined, { action: 'password_reset_success' }, { ip });
 
-    writeAuditLog(record.email, 'update', 'users', user.id, undefined, { action: 'password_reset_success' }, { ip });
-
-    return { 
-      success: true, 
-      message: 'Your password has been successfully reset. You may now log in with your new password.' 
+    return {
+      success: true,
+      message: 'Your password has been successfully updated. You may now continue using your account.',
     };
   } catch (err) {
-    console.error('[resetPasswordAction] Failed to apply reset:', err);
-    await executeDummyKdf();
+    console.error('[resetPasswordAction] Error:', err);
     recordAuthAttempt(ip, 'resetPassword');
     return { success: false, error: 'Unable to reset your password right now. Please try again.' };
   }
@@ -993,153 +477,56 @@ export async function resetPasswordAction(formData: FormData): Promise<AuthActio
 // ─── Logout Action ────────────────────────────────────────────────────────────
 
 /**
- * Server action to log out.
- * Clears all auth cookies and writes audit log.
+ * Logs out the current user via Supabase Auth and cleans up legacy cookie artifacts.
  */
 export async function logoutAction(): Promise<{ success: boolean }> {
-  await checkUserAuth();
-  const cookieStore = await cookies();
-  const headersList = await headers();
+  try {
+    const supabase = await createServerSupabase();
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.auth.signOut();
 
-  const ip = headersList.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+    const cookieStore = await cookies();
+    const legacyCookies = [
+      'pb_auth_token',
+      'pb_auth_refresh_token',
+      'pb_auth_role',
+      'pb_auth_indicator',
+      'pb_auth_name',
+      'pb_auth_avatar',
+      'pb_auth_cache',
+    ];
+    legacyCookies.forEach((name) => cookieStore.delete(name));
 
-  let actorEmail = 'unknown';
-  const token = cookieStore.get('pb_auth_token')?.value;
-  if (token) {
-    try {
-      const parts = token.split('.');
-      if (parts.length === 3) {
-        const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-        const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
-        const decoded = atob(padded);
-        const payload = JSON.parse(decoded);
-        actorEmail = payload.email || payload.sub || 'unknown';
-      }
-    } catch {
-      // Ignore
+    if (user?.email) {
+      writeAuditLog(user.email, 'logout', 'auth', user.id);
     }
+
+    return { success: true };
+  } catch (err) {
+    console.error('[logoutAction] Error:', err);
+    return { success: true };
   }
-
-  cookieStore.delete('pb_auth_token');
-  cookieStore.delete('pb_auth_role');
-  cookieStore.delete('pb_auth_indicator');
-  cookieStore.delete('pb_auth_name');
-  cookieStore.delete('pb_auth_avatar');
-
-  writeAuditLog(actorEmail, 'logout', 'auth', undefined, undefined, { ip }, { ip });
-
-  return { success: true };
 }
 
-export interface CustomerProfileData {
-  id: string;
-  email: string;
-  name: string;
-  firstName?: string;
-  lastName?: string;
-  phone?: string;
-  address?: string;
-  addressLine1?: string;
-  addressLine2?: string;
-  city?: string;
-  state?: string;
-  postalCode?: string;
-  country?: string;
-  role: string;
-  created: string;
-  avatar?: string;
-}
+// ─── Customer Session & Profile ───────────────────────────────────────────────
 
 /**
- * Retrieves the currently logged-in user profile from PocketBase session cookie.
+ * Retrieves the currently authenticated customer profile from the Supabase SSR session.
+ * Uses request-scoped deduplication via getCurrentUserSession.
  */
 export async function getCurrentUserSessionAction(): Promise<{
   success: boolean;
   user?: CustomerProfileData;
   error?: string;
 }> {
-  try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get('pb_auth_token')?.value;
-
-    if (!token) {
-      return { success: false, error: 'Not authenticated.' };
-    }
-
-    const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
-    if (!pbUrl) return { success: false, error: 'Server error.' };
-
-    // Instantiate client with user's own token to verify signature authenticity
-    const pb = new PocketBase(pbUrl);
-    pb.authStore.save(token, null);
-
-    // authRefresh will validate the token against PocketBase's secret and throw if forged/expired
-    const authData = await pb.collection('users').authRefresh();
-    const record = authData.record;
-
-    if (!record) {
-      return { success: false, error: 'Not authenticated.' };
-    }
-
-    const avatarUrl = record.avatar
-      ? `${pbUrl}/api/files/_pb_users_auth_/${record.id}/${record.avatar}`
-      : undefined;
-
-    const fullName = record.name || record.username || record.email?.split('@')[0] || 'Customer';
-    const nameParts = fullName.trim().split(' ');
-    const firstName = nameParts[0] || '';
-    const lastName = nameParts.slice(1).join(' ') || '';
-
-    let addressLine1 = record.address || '';
-    let addressLine2 = '';
-    let city = '';
-    let state = '';
-    let postalCode = '';
-    let country = 'Sri Lanka';
-
-    if (record.address && record.address.trim().startsWith('{')) {
-      try {
-        const parsed = JSON.parse(record.address);
-        addressLine1 = parsed.addressLine1 || '';
-        addressLine2 = parsed.addressLine2 || '';
-        city = parsed.city || '';
-        state = parsed.state || '';
-        postalCode = parsed.postalCode || '';
-        country = parsed.country || 'Sri Lanka';
-      } catch {
-        // Stored value is malformed JSON — clear raw JSON text from addressLine1
-        addressLine1 = '';
-      }
-    }
-
-    return {
-      success: true,
-      user: {
-        id: record.id,
-        email: record.email || '',
-        name: fullName,
-        firstName,
-        lastName,
-        phone: record.phone || '',
-        address: record.address || '',
-        addressLine1,
-        addressLine2,
-        city,
-        state,
-        postalCode,
-        country,
-        role: record.role || 'read_only',
-        created: record.created || new Date().toISOString(),
-        avatar: avatarUrl,
-      },
-    };
-  } catch {
-    return { success: false, error: 'Failed to load user profile.' };
-  }
+  const { getCurrentUserSession } = await import('@/lib/auth-server');
+  return getCurrentUserSession();
 }
 
 /**
- * Updates the current logged-in customer's profile details in PocketBase.
+ * Updates the current logged-in customer's profile details.
+ * Strictly updates safe user-editable fields (name, phone, address, avatar).
+ * Sensitive security fields (role, pin, id) are NEVER modifiable through this action.
  */
 export async function updateUserProfilePageAction(data: {
   name?: string;
@@ -1153,36 +540,30 @@ export async function updateUserProfilePageAction(data: {
   postalCode?: string;
   country?: string;
   address?: string;
+  avatar?: string;
 }): Promise<{ success: boolean; error?: string }> {
-  await checkUserAuth();
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get('pb_auth_token')?.value;
+    const supabase = await createServerSupabase();
+    const { data: { user }, error: authErr } = await supabase.auth.getUser();
 
-    if (!token) return { success: false, error: 'Not authenticated.' };
-
-    const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
-    if (!pbUrl) return { success: false, error: 'Server error.' };
-
-    // Instantiate client with user's own token to verify signature authenticity
-    const pb = new PocketBase(pbUrl);
-    pb.authStore.save(token, null);
-
-    // authRefresh will validate the token against PocketBase's secret and throw if forged/expired
-    const authData = await pb.collection('users').authRefresh();
-    const record = authData.record;
-
-    if (!record) {
+    if (authErr || !user) {
       return { success: false, error: 'Not authenticated.' };
     }
 
-    const existingNameParts = (record.name || '').trim().split(' ');
+    const adminSb = getAdminSupabase();
+    const { data: currentProfile } = await adminSb
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    const existingNameParts = ((currentProfile?.name || user.user_metadata?.name || '').trim()).split(' ');
     const existingFirstName = existingNameParts[0] || '';
     const existingLastName = existingNameParts.slice(1).join(' ') || '';
 
     const finalFirstName = data.firstName !== undefined ? data.firstName : (data.name ? data.name.split(' ')[0] : existingFirstName);
     const finalLastName = data.lastName !== undefined ? data.lastName : (data.name ? data.name.split(' ').slice(1).join(' ') : existingLastName);
-    const fullName = `${finalFirstName} ${finalLastName}`.trim() || record.name || 'Customer';
+    const fullName = `${finalFirstName} ${finalLastName}`.trim() || currentProfile?.name || user.user_metadata?.name || 'Customer';
 
     const hasAddressInput =
       data.addressLine1 !== undefined ||
@@ -1193,116 +574,83 @@ export async function updateUserProfilePageAction(data: {
       data.country !== undefined ||
       data.address !== undefined;
 
-    const payload: Record<string, string> = { name: fullName };
-    if (data.phone !== undefined) {
-      payload.phone = data.phone;
-    }
-
+    let finalAddress = currentProfile?.address || '';
     if (hasAddressInput) {
       if (typeof data.address === 'string' && data.address.trim().length > 0) {
-        payload.address = data.address.trim();
+        finalAddress = data.address.trim();
       } else {
         let existingAddr: Record<string, string> = {};
-        if (record.address) {
+        const oldAddr = currentProfile?.address || '';
+        if (oldAddr) {
           try {
-            existingAddr = typeof record.address === 'string' && record.address.startsWith('{')
-              ? JSON.parse(record.address)
-              : { addressLine1: record.address };
+            existingAddr = typeof oldAddr === 'string' && oldAddr.startsWith('{')
+              ? JSON.parse(oldAddr)
+              : { addressLine1: oldAddr };
           } catch {
-            existingAddr = { addressLine1: record.address };
+            existingAddr = { addressLine1: oldAddr };
           }
         }
 
-        payload.address = JSON.stringify({
-          addressLine1: data.addressLine1 ?? existingAddr.addressLine1 ?? '',
-          addressLine2: data.addressLine2 ?? existingAddr.addressLine2 ?? '',
-          city: data.city ?? existingAddr.city ?? '',
-          state: data.state ?? existingAddr.state ?? '',
-          postalCode: data.postalCode ?? existingAddr.postalCode ?? '',
-          country: data.country ?? existingAddr.country ?? 'Sri Lanka',
-        });
+        const merged = {
+          addressLine1: data.addressLine1 !== undefined ? data.addressLine1 : (existingAddr.addressLine1 || ''),
+          addressLine2: data.addressLine2 !== undefined ? data.addressLine2 : (existingAddr.addressLine2 || ''),
+          city: data.city !== undefined ? data.city : (existingAddr.city || ''),
+          state: data.state !== undefined ? data.state : (existingAddr.state || ''),
+          postalCode: data.postalCode !== undefined ? data.postalCode : (existingAddr.postalCode || ''),
+          country: data.country !== undefined ? data.country : (existingAddr.country || 'Sri Lanka'),
+        };
+        finalAddress = JSON.stringify(merged);
       }
     }
 
-    // Perform update on the authenticated client instance to enforce PB policy security rules
-    await pb.collection('users').update(record.id, payload);
+    // Explicit safe payload: NO role, NO pin, NO id
+    const safePayload: { name: string; phone?: string | null; address?: string; avatar?: string | null; updated_at: string } = {
+      name: fullName,
+      updated_at: new Date().toISOString(),
+    };
+    if (data.phone !== undefined) safePayload.phone = data.phone;
+    if (hasAddressInput) safePayload.address = finalAddress;
+    if (data.avatar !== undefined) safePayload.avatar = data.avatar;
 
-    // Also update the name cookie so navbar avatar reflects new name
-    cookieStore.set('pb_auth_name', encodeURIComponent(fullName), {
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7,
-    });
+    // Update public.profiles table
+    const { error: profileErr } = await adminSb
+      .from('profiles')
+      .upsert({ id: user.id, ...safePayload });
+
+    if (profileErr) {
+      console.error('[updateUserProfilePageAction] profiles update failed:', profileErr);
+      return { success: false, error: 'Failed to update profile.' };
+    }
+
+    // Sync name and phone to public.customers CRM entity if linked
+    await adminSb
+      .from('customers')
+      .update({
+        name: fullName,
+        phone: data.phone ?? currentProfile?.phone ?? null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('profile_id', user.id);
 
     return { success: true };
-  } catch (err: any) {
-    console.error('[updateUserProfilePageAction] Failed:', err);
+  } catch (err) {
+    console.error('[updateUserProfilePageAction] Unexpected error:', err);
     return { success: false, error: 'Failed to update profile.' };
   }
 }
 
+// ─── Customer Orders Action ───────────────────────────────────────────────────
+
 /**
- * Fetches real customer orders matching the authenticated user's email.
+ * Fetches orders belonging to the authenticated customer.
+ * Primary ownership is enforced by orders.user_id = auth.uid().
+ * Uses request-scoped deduplication via getCustomerOrders.
  */
 export async function getCustomerOrdersAction(): Promise<{
   success: boolean;
   orders: any[];
   error?: string;
 }> {
-  try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get('pb_auth_token')?.value;
-
-    if (!token) return { success: false, orders: [], error: 'Not authenticated.' };
-
-    const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
-    if (!pbUrl) return { success: false, orders: [], error: 'Server error.' };
-
-    // Instantiate client with user's own token to verify signature authenticity
-    const pb = new PocketBase(pbUrl);
-    pb.authStore.save(token, null);
-
-    // authRefresh will validate the token against PocketBase's secret and throw if forged/expired
-    const authData = await pb.collection('users').authRefresh();
-    const record = authData.record;
-
-    if (!record) {
-      return { success: false, orders: [], error: 'Not authenticated.' };
-    }
-
-    const userEmail = record.email || '';
-    if (!userEmail) return { success: false, orders: [], error: 'User email not found.' };
-
-    const adminPb = await getAdminPb();
-    let records: any[] = [];
-    try {
-      records = await adminPb.collection('orders').getFullList({
-        filter: adminPb.filter(
-          'customer.email = {:email} || shippingAddress.email = {:email} || user = {:userId} || customer.userId = {:userId}',
-          { email: userEmail, userId: record.id }
-        ),
-        sort: '-created',
-      });
-    } catch (filterErr) {
-      console.warn('[getCustomerOrdersAction] Order query error:', filterErr);
-      try {
-        // Narrower fallback search matching only on user relation
-        records = await adminPb.collection('orders').getFullList({
-          filter: adminPb.filter('user = {:userId}', { userId: record.id }),
-          sort: '-created',
-        });
-      } catch (fallbackErr) {
-        console.error('[getCustomerOrdersAction] Fallback query failed:', fallbackErr);
-        return { success: false, orders: [], error: 'Failed to load orders.' };
-      }
-    }
-
-    return { success: true, orders: records };
-  } catch (err: any) {
-    console.error('[getCustomerOrdersAction] Failed:', err);
-    return { success: false, orders: [], error: 'Failed to load orders.' };
-  }
+  const { getCustomerOrders } = await import('@/lib/auth-server');
+  return getCustomerOrders();
 }
-

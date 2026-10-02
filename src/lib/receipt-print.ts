@@ -44,7 +44,7 @@ const esc = (v?: string): string =>
 function safeImageUrl(url?: string): string | undefined {
   if (!url) return undefined;
   const trimmed = url.trim();
-  return /^(https?:|data:image\/)/i.test(trimmed) ? trimmed : undefined;
+  return /^(https?:|data:image\/|\/(?!\/))/i.test(trimmed) ? trimmed : undefined;
 }
 
 export function getReceiptHtml(

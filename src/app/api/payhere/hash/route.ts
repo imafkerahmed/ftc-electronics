@@ -1,9 +1,8 @@
 import crypto from 'crypto';
 import { headers } from 'next/headers';
-import { getAdminPb } from '@/lib/pb-admin';
+import { getAdminSupabase } from '@/lib/supabase-admin';
 import { getTrustedClientIp } from '@/lib/get-client-ip';
 
-// In-memory rate limiting store for API route protection (max 20 requests per IP per minute)
 const globalForHashRateLimit = globalThis as unknown as {
   __hashRateLimitStore?: Map<string, { count: number; windowStart: number }>;
 };
@@ -15,10 +14,9 @@ const rateLimitStore = (globalForHashRateLimit.__hashRateLimitStore ??= new Map<
 
 function checkRateLimit(ip: string): { allowed: boolean; retryAfter?: number } {
   const now = Date.now();
-  const windowMs = 60 * 1000; // 1 minute window
+  const windowMs = 60 * 1000;
   const maxRequests = 20;
 
-  // Cleanup expired entries periodically if store grows large
   if (rateLimitStore.size > 2000) {
     for (const [key, entry] of rateLimitStore.entries()) {
       if (now - entry.windowStart > windowMs) {
@@ -42,18 +40,8 @@ function checkRateLimit(ip: string): { allowed: boolean; retryAfter?: number } {
   return { allowed: true };
 }
 
-/**
- * POST /api/payhere/hash
- * Generates the secure PayHere payment hash on the server.
- * Reads the authoritative order total directly from the PocketBase server record.
- * This MUST be server-side — merchant_secret must never be exposed to the client.
- *
- * Body: { order_id: string, currency?: string }
- * Returns: { hash: string, merchant_id: string, amount: string }
- */
 export async function POST(req: Request) {
   try {
-    // 1. IP Rate Limiting Check
     const headersList = await headers();
     const clientIp = getTrustedClientIp(headersList);
     const rateLimit = checkRateLimit(clientIp);
@@ -68,7 +56,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2. Validate JSON Request Body
     let body: Record<string, unknown>;
     try {
       body = await req.json();
@@ -107,16 +94,25 @@ export async function POST(req: Request) {
       );
     }
 
-    const cleanOrderId = order_id.trim();
+    const cleanOrderId = order_id.trim().replace(/[^a-zA-Z0-9-]/g, '');
+    if (!cleanOrderId) {
+      return Response.json({ error: 'Valid order_id is required' }, { status: 400 });
+    }
 
-    // 3. Look up order in PocketBase for authoritative server-side total
     let orderAmount: number;
     try {
-      const adminPb = await getAdminPb();
-      const orderRecord = await adminPb.collection('orders').getFirstListItem(
-        adminPb.filter('orderId = {:orderId}', { orderId: cleanOrderId })
-      );
-      orderAmount = Number(orderRecord.total || orderRecord.totalAmount || 0);
+      const supabase = getAdminSupabase();
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanOrderId);
+      let query = supabase.from('orders').select('*');
+      if (isUuid) {
+        query = query.or(`id.eq.${cleanOrderId},order_id.eq.${cleanOrderId}`);
+      } else {
+        query = query.eq('order_id', cleanOrderId);
+      }
+      const { data: orderRecord } = await query.maybeSingle();
+
+      if (!orderRecord) throw new Error('Order not found');
+      orderAmount = Number(orderRecord.total || 0);
     } catch {
       return Response.json({ error: 'Order record not found' }, { status: 404 });
     }
@@ -125,10 +121,8 @@ export async function POST(req: Request) {
       return Response.json({ error: 'Invalid order amount on server record' }, { status: 400 });
     }
 
-    // 4. Format amount to exactly 2 decimal places (PayHere requirement)
     const formattedAmount = orderAmount.toFixed(2);
 
-    // Hash formula: MD5(merchant_id + order_id + amount + currency + MD5(merchant_secret).toUpperCase())
     const secretHash = crypto
       .createHash('md5')
       .update(merchantSecret)

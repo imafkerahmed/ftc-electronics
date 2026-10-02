@@ -1,47 +1,57 @@
 import { NextResponse } from 'next/server';
-import { getAdminPb, getPbUrl } from '@/lib/pb-admin';
+import { getAdminSupabase } from '@/lib/supabase-admin';
+import { getVerifiedPosSession } from '@/lib/pos-server-session';
+import { checkPermission } from '@/app/actions/admin';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const adminPb = await getAdminPb();
-    const pbUrl = getPbUrl();
+    const posSession = await getVerifiedPosSession();
+    let adminAuthorized = false;
+    if (!posSession) {
+      const perm = await checkPermission('orders', 'read');
+      adminAuthorized = perm.allowed;
+    }
 
-    const [records, availableUnits] = await Promise.all([
-      adminPb.collection('products').getFullList({
-        filter: 'status = "published"',
-        expand: 'category',
-        sort: 'name',
-        fields: 'id,name,slug,price,discountPrice,wholesalePrice,wholesale_price,images,category,collectionId,expand,countInStock',
-      }),
-      adminPb.collection('stock_management').getFullList({
-        filter: 'status = "available"',
-      }).catch(() => []),
-    ]);
+    if (!posSession && !adminAuthorized) {
+      return NextResponse.json({ products: [], error: 'Unauthorized: Staff or admin session required.' }, { status: 401 });
+    }
+
+    const supabase = getAdminSupabase();
+
+    const { data: records, error } = await supabase
+      .from('products')
+      .select('*, categories(*)')
+      .eq('status', 'published')
+      .order('name', { ascending: true });
+
+    if (error) throw error;
+
+    const { data: availableUnits } = await supabase
+      .from('stock_management')
+      .select('*')
+      .eq('status', 'available');
 
     const unitsByProduct: Record<string, any[]> = {};
-    availableUnits.forEach((u: any) => {
-      if (!unitsByProduct[u.product]) unitsByProduct[u.product] = [];
-      unitsByProduct[u.product].push(u);
+    (availableUnits || []).forEach((u: any) => {
+      if (!unitsByProduct[u.product_id]) unitsByProduct[u.product_id] = [];
+      unitsByProduct[u.product_id].push(u);
     });
 
-    const products = records.map((r: any) => ({
+    const products = (records || []).map((r: any) => ({
       id: r.id,
       name: r.name,
       sku: r.slug || r.id,
-      price: r.discountPrice || r.price,
-      wholesalePrice: r.wholesalePrice || r.wholesale_price || undefined,
-      imageUrl:
-        r.images?.[0]
-          ? `${pbUrl}/api/files/${r.collectionId}/${r.id}/${r.images[0]}?thumb=200x200`
-          : null,
-      category: r.expand?.category?.name || '',
-      countInStock: r.countInStock ?? 0,
+      price: r.discount_price || r.price,
+      wholesalePrice: r.wholesale_price || undefined,
+      imageUrl: r.images?.[0] || null,
+      category: r.categories?.name || '',
+      countInStock: r.count_in_stock ?? 0,
       availableUnits: (unitsByProduct[r.id] || []).map((u: any) => ({
         id: u.id,
         barcode: u.barcode,
-        serialNumber: u.serialNumber,
+        serialNumber: u.serial_number,
       })),
     }));
 

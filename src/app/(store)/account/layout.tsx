@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { User, ShoppingBag, LogOut, ArrowLeft } from 'lucide-react';
 import { logoutAction } from '@/app/actions/auth';
-import { pb } from '@/lib/pocketbase';
+import { supabase } from '@/lib/supabase';
 import { clearAllClientSessions } from '@/lib/clear-client-storage';
 
 export default function AccountLayout({
@@ -22,9 +22,8 @@ export default function AccountLayout({
       console.error('Failed to invalidate server session:', err);
     }
 
-    pb.authStore.clear();
+    await supabase.auth.signOut().catch(() => null);
     clearAllClientSessions();
-    // Immediately tell the navbar to re-check auth state
     window.dispatchEvent(new Event('auth-change'));
     router.refresh();
     router.push('/');

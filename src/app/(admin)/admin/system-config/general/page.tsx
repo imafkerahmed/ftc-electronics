@@ -23,7 +23,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { pbSiteSettings } from '@/lib/pb-collections';
+import { pbSiteSettings } from '@/lib/supabase-collections';
 import { updateSiteSettingsAction } from '@/app/actions/admin';
 
 export default function GeneralSettingsPage() {
@@ -58,9 +58,20 @@ export default function GeneralSettingsPage() {
   const [telegram, setTelegram] = useState({ enabled: true, url: '' });
   const [viber, setViber] = useState({ enabled: true, url: '' });
 
+  const [digitalCardEnabled, setDigitalCardEnabled] = useState(true);
+
+  // Bank Account Details
+  const [bankName, setBankName] = useState('');
+  const [accountName, setAccountName] = useState('');
+  const [accountNo, setAccountNo] = useState('');
+  const [branch, setBranch] = useState('');
+  const [branchCode, setBranchCode] = useState('');
+
   const [originUrl, setOriginUrl] = useState('https://ftc.lk');
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadedSuccessfully, setLoadedSuccessfully] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -78,65 +89,82 @@ export default function GeneralSettingsPage() {
     };
   };
 
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      setLoadError(null);
+      const settings = await pbSiteSettings.get<any>('general');
+      if (settings) {
+        setSiteName(settings.siteName || '');
+        setTagline(settings.tagline || '');
+        setPhone(settings.contactInfo?.phone || '');
+        setEmail(settings.contactInfo?.email || '');
+        setWhatsapp(settings.contactInfo?.whatsapp || '');
+        setHours(settings.storeHoursCopy || '');
+
+        const rawList = settings.storeHoursList || settings.weeklyHours;
+        if (Array.isArray(rawList) && rawList.length > 0) {
+          const daysOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+          const mapped = daysOrder.map((dayName) => {
+            const found = rawList.find((item: any) => (item.days || item.day || '').toLowerCase() === dayName.toLowerCase());
+            if (found) {
+              return {
+                day: dayName,
+                isOpen: found.isOpen !== false && found.time !== 'Closed',
+                time: found.time && found.time !== 'Closed' ? found.time : '9:00 AM - 7:00 PM',
+              };
+            }
+            return { day: dayName, isOpen: true, time: '9:00 AM - 7:00 PM' };
+          });
+          setWeeklyHours(mapped);
+        }
+
+        setCurrency(settings.currency || 'LKR');
+        setTaxRate(settings.taxRate?.toString() || '15');
+        setAddress(settings.location?.address || '');
+        setCity(settings.location?.city || '');
+        setGoogleMapsUrl(settings.location?.googleMapsUrl || '');
+
+        setInstagram(parseSocial(settings.socialLinks?.instagram, 'https://instagram.com/ftcelectronics'));
+        setFacebook(parseSocial(settings.socialLinks?.facebook, 'https://facebook.com/ftcelectronics'));
+        setTiktok(parseSocial(settings.socialLinks?.tiktok, 'https://tiktok.com/@ftcelectronics'));
+        setYoutube(parseSocial(settings.socialLinks?.youtube, 'https://youtube.com/@ftcelectronics'));
+        setLinkedin(parseSocial(settings.socialLinks?.linkedin, 'https://linkedin.com/company/ftcelectronics'));
+        setTwitter(parseSocial(settings.socialLinks?.twitter, 'https://x.com/ftcelectronics'));
+        setTelegram(parseSocial(settings.socialLinks?.telegram, 'https://t.me/ftcelectronics'));
+        setViber(parseSocial(settings.socialLinks?.viber, 'https://viber.com'));
+
+        setDigitalCardEnabled(settings.digitalCardEnabled !== false);
+
+        setBankName(settings.bankDetails?.bankName || '');
+        setAccountName(settings.bankDetails?.accountName || '');
+        setAccountNo(settings.bankDetails?.accountNo || '');
+        setBranch(settings.bankDetails?.branch || '');
+        setBranchCode(settings.bankDetails?.branchCode || '');
+      }
+      setLoadedSuccessfully(true);
+    } catch (err) {
+      console.error('[GeneralSettingsPage] Failed to load settings:', err);
+      setLoadError('Failed to load existing configuration. Saving has been disabled to prevent accidental overwrites.');
+      setLoadedSuccessfully(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       setOriginUrl(window.location.origin);
-    }
-    async function loadData() {
-      try {
-        setLoading(true);
-        const settings = await pbSiteSettings.get<any>('general');
-        if (settings) {
-          setSiteName(settings.siteName || '');
-          setTagline(settings.tagline || '');
-          setPhone(settings.contactInfo?.phone || '');
-          setEmail(settings.contactInfo?.email || '');
-          setWhatsapp(settings.contactInfo?.whatsapp || '');
-          setHours(settings.storeHoursCopy || '');
-
-          const rawList = settings.storeHoursList || settings.weeklyHours;
-          if (Array.isArray(rawList) && rawList.length > 0) {
-            const daysOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-            const mapped = daysOrder.map((dayName) => {
-              const found = rawList.find((item: any) => (item.days || item.day || '').toLowerCase() === dayName.toLowerCase());
-              if (found) {
-                return {
-                  day: dayName,
-                  isOpen: found.isOpen !== false && found.time !== 'Closed',
-                  time: found.time && found.time !== 'Closed' ? found.time : '9:00 AM - 7:00 PM',
-                };
-              }
-              return { day: dayName, isOpen: true, time: '9:00 AM - 7:00 PM' };
-            });
-            setWeeklyHours(mapped);
-          }
-
-          setCurrency(settings.currency || 'LKR');
-          setTaxRate(settings.taxRate?.toString() || '15');
-          setAddress(settings.location?.address || '');
-          setCity(settings.location?.city || '');
-          setGoogleMapsUrl(settings.location?.googleMapsUrl || '');
-
-          setInstagram(parseSocial(settings.socialLinks?.instagram, 'https://instagram.com/ftcelectronics'));
-          setFacebook(parseSocial(settings.socialLinks?.facebook, 'https://facebook.com/ftcelectronics'));
-          setTiktok(parseSocial(settings.socialLinks?.tiktok, 'https://tiktok.com/@ftcelectronics'));
-          setYoutube(parseSocial(settings.socialLinks?.youtube, 'https://youtube.com/@ftcelectronics'));
-          setLinkedin(parseSocial(settings.socialLinks?.linkedin, 'https://linkedin.com/company/ftcelectronics'));
-          setTwitter(parseSocial(settings.socialLinks?.twitter, 'https://x.com/ftcelectronics'));
-          setTelegram(parseSocial(settings.socialLinks?.telegram, 'https://t.me/ftcelectronics'));
-          setViber(parseSocial(settings.socialLinks?.viber, 'https://viber.com'));
-        }
-      } catch (err: any) {
-        // use defaults
-      } finally {
-        setLoading(false);
-      }
     }
     void loadData();
   }, []);
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!loadedSuccessfully) {
+      showToast('Cannot save while settings failed to load. Please retry loading first.', 'error');
+      return;
+    }
     startTransition(async () => {
       let cleanGoogleMapsUrl = googleMapsUrl.trim();
       if (cleanGoogleMapsUrl.includes('<iframe') || cleanGoogleMapsUrl.startsWith('<iframe')) {
@@ -192,6 +220,14 @@ export default function GeneralSettingsPage() {
           twitter: { enabled: twitter.enabled, url: twitter.url.trim() },
           telegram: { enabled: telegram.enabled, url: telegram.url.trim() },
           viber: { enabled: viber.enabled, url: viber.url.trim() },
+        },
+        digitalCardEnabled,
+        bankDetails: {
+          bankName,
+          accountName,
+          accountNo,
+          branch,
+          branchCode,
         },
       };
       const res = await updateSiteSettingsAction('general', payload);
@@ -276,6 +312,24 @@ export default function GeneralSettingsPage() {
           </div>
         </div>
       </div>
+
+      {loadError && (
+        <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center justify-between gap-3 text-xs text-red-400">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
+            <span>{loadError}</span>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void loadData()}
+            className="h-7 text-xs border-red-500/30 hover:bg-red-500/20 text-red-300 shrink-0"
+          >
+            Retry Loading
+          </Button>
+        </div>
+      )}
 
       {loading ? (
         <div className="p-8 text-center text-xs text-muted-foreground bg-card border border-border rounded-2xl">
@@ -459,6 +513,63 @@ export default function GeneralSettingsPage() {
                   </p>
                 </div>
               </div>
+            </div>
+
+            {/* Bank Account Details */}
+            <div className="bg-card border border-border rounded-2xl p-5 space-y-4 md:col-span-2 shadow-sm">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground border-b border-border pb-1.5 flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5 text-blue-500" /> Bank Account Details
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground/80">Bank</label>
+                  <Input
+                    value={bankName}
+                    onChange={(e) => setBankName(e.target.value)}
+                    placeholder="e.g. Commercial Bank of Ceylon"
+                    className="h-8.5 text-xs"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground/80">Account Name</label>
+                  <Input
+                    value={accountName}
+                    onChange={(e) => setAccountName(e.target.value)}
+                    placeholder="e.g. FTC Electronics"
+                    className="h-8.5 text-xs"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground/80">Account No.</label>
+                  <Input
+                    value={accountNo}
+                    onChange={(e) => setAccountNo(e.target.value)}
+                    placeholder="e.g. 8001234567"
+                    className="h-8.5 text-xs"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground/80">Branch</label>
+                  <Input
+                    value={branch}
+                    onChange={(e) => setBranch(e.target.value)}
+                    placeholder="e.g. Colombo 03"
+                    className="h-8.5 text-xs"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground/80">Branch Code</label>
+                  <Input
+                    value={branchCode}
+                    onChange={(e) => setBranchCode(e.target.value)}
+                    placeholder="e.g. 003"
+                    className="h-8.5 text-xs"
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] text-muted-foreground leading-relaxed mt-2 pt-2 border-t border-border">
+                These bank details are included in the automated bank transfer instructions email sent to customers upon checkout. Customers are prompted to upload their deposit slip for administrative verification before order fulfillment.
+              </p>
             </div>
 
             {/* Social Media Channels */}
@@ -668,13 +779,24 @@ export default function GeneralSettingsPage() {
                     <p className="text-[10px] text-muted-foreground">Print this QR code on physical business cards for instant customer scans.</p>
                   </div>
                 </div>
-                <Link
-                  href="/contact"
-                  target="_blank"
-                  className="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-600 font-medium transition-colors"
-                >
-                  Preview Card Page <ExternalLink className="h-3 w-3" />
-                </Link>
+                <div className="flex items-center gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setDigitalCardEnabled(prev => !prev)}
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full cursor-pointer transition-colors ${
+                      digitalCardEnabled ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/30' : 'bg-muted text-muted-foreground border border-border'
+                    }`}
+                  >
+                    {digitalCardEnabled ? 'ENABLED' : 'DISABLED'}
+                  </button>
+                  <Link
+                    href="/contact"
+                    target="_blank"
+                    className="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-600 font-medium transition-colors"
+                  >
+                    Preview Card Page <ExternalLink className="h-3 w-3" />
+                  </Link>
+                </div>
               </div>
 
               <div className="flex flex-col sm:flex-row items-center gap-6 pt-1">
@@ -727,8 +849,8 @@ export default function GeneralSettingsPage() {
           <div className="flex justify-end pt-2">
             <Button
               type="submit"
-              disabled={isPending}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs h-9 px-5 flex items-center gap-2 cursor-pointer shadow-sm"
+              disabled={isPending || !loadedSuccessfully || loading}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs h-9 px-5 flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Save Store Information

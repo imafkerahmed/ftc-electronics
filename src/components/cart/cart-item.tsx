@@ -1,8 +1,8 @@
 'use client';
 
-import { formatPrice } from '@/lib/utils';
+import { formatPrice, getProductThumbnail } from '@/lib/utils';
 import Image from 'next/image';
-import { Trash2, Plus, Minus } from 'lucide-react';
+import { Trash2, Plus, Minus, Package } from 'lucide-react';
 import { CartItem } from '@/types/cart';
 import { useCart } from '@/hooks/use-cart';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ export default function CartItemRow({ item }: CartItemRowProps) {
   const { id, product, quantity } = item;
 
   const displayPrice = product.discountPrice ?? product.price;
+  const itemImage = getProductThumbnail(product.images);
 
   const handleIncrement = () => {
     updateQuantity(id, quantity + 1);
@@ -31,14 +32,18 @@ export default function CartItemRow({ item }: CartItemRowProps) {
     <div className="flex items-center gap-4 py-3 border-b border-border last:border-b-0">
       
       {/* Product Image */}
-      <div className="h-16 w-16 shrink-0 overflow-hidden rounded-md border border-border bg-muted relative">
-        <Image
-          src={product.images[0]}
-          alt={product.name}
-          fill
-          className="object-cover object-center"
-          sizes="64px"
-        />
+      <div className="h-16 w-16 shrink-0 overflow-hidden rounded-md border border-border bg-muted relative flex items-center justify-center">
+        {itemImage ? (
+          <Image
+            src={itemImage}
+            alt={product.name}
+            fill
+            className="object-cover object-center"
+            sizes="64px"
+          />
+        ) : (
+          <Package className="h-6 w-6 stroke-1 text-muted-foreground opacity-50" />
+        )}
       </div>
 
       {/* Title / Description info */}

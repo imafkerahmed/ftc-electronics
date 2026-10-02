@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, MouseEvent } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronLeft, ChevronRight, Maximize2, X, ZoomIn, ZoomOut } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, getProductThumbnail } from '@/lib/utils';
 
 interface ProductGalleryProps {
   images: string[];
@@ -12,7 +12,11 @@ interface ProductGalleryProps {
 }
 
 export default function ProductGallery({ images, name }: ProductGalleryProps) {
-  const galleryImages = images && images.length > 0 ? images : ["/placeholder.jpg"];
+  const sanitizedImages = (Array.isArray(images) ? images : [])
+    .map((img) => getProductThumbnail(img))
+    .filter((img): img is string => typeof img === 'string' && img.length > 0);
+
+  const galleryImages = sanitizedImages.length > 0 ? sanitizedImages : ['/logo.svg'];
   const [activeIndex, setActiveIndex] = useState(0);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const [lightboxScale, setLightboxScale] = useState(1);

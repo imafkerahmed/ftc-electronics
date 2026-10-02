@@ -2,20 +2,33 @@
 
 import React, { useState, useEffect, useTransition } from 'react';
 import Image from 'next/image';
-import { 
-  Package, Plus, Search, Filter, ArrowUpDown, Edit, Trash2, Eye, 
+import {
+  Package, Plus, Search, Filter, ArrowUpDown, Edit, Trash2, Eye,
   X, CheckCircle, AlertCircle, Save, Loader2, DollarSign, Image as ImageIcon, FileText, Sparkles,
-  ChevronUp, ChevronDown
+  ChevronUp, ChevronDown, Star, ArrowLeft, ArrowRight
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { 
-  createProductAction, 
-  updateProductAction, 
-  deleteProductAction 
+import {
+  createProductAction,
+  updateProductAction,
+  deleteProductAction,
+  getAdminProductsAction,
+  getAdminProductAction,
+  getAdminCategoriesAction,
+  getAdminBrandsAction,
 } from '@/app/actions/admin';
-import { pbCategories, pbBrands, pbProducts } from '@/lib/pb-collections';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { adminKeys, productKeys } from '@/lib/query-keys';
+import { sanitizeImageUrl } from '@/lib/supabase-collections';
 import { Product } from '@/types/product';
+
+interface ManagedImage {
+  id: string;
+  type: 'url' | 'file';
+  url: string;
+  file?: File;
+}
 
 interface DescriptionBlock {
   id: string;
@@ -109,19 +122,59 @@ function convertDescBlocksToText(blocks: DescriptionBlock[]): string {
 }
 
 export default function AdminProductsPage() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loadingProducts, setLoadingProducts] = useState(true);
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
-  
-  // Relations state
-  const [allCategories, setAllCategories] = useState<{ id: string; name: string }[]>([]);
-  const [allBrands, setAllBrands] = useState<{ id: string; name: string }[]>([]);
-  
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const { data: productsData, isLoading: loadingProducts, isFetching, isError: isProductsError, error: productsError } = useQuery({
+    queryKey: adminKeys.products({ page, pageSize, search: debouncedSearch }),
+    queryFn: async () => {
+      const res = await getAdminProductsAction({ page, pageSize, search: debouncedSearch });
+      if (!res.success) throw new Error(res.error || "Failed to load products");
+      return res;
+    },
+    placeholderData: (prev) => prev,
+  });
+
+  const products = productsData?.data || [];
+  const totalPages = productsData?.totalPages || 1;
+  const totalCount = productsData?.total || 0;
+
+  const { data: categoriesData } = useQuery({
+    queryKey: adminKeys.categories(),
+    queryFn: async () => {
+      const res = await getAdminCategoriesAction();
+      if (!res.success) throw new Error(res.error || "Failed to load categories");
+      return res.data?.map((c: any) => ({ id: c.id, name: c.name })) || [];
+    }
+  });
+  const allCategories = categoriesData || [];
+
+  const { data: brandsData } = useQuery({
+    queryKey: adminKeys.brands(),
+    queryFn: async () => {
+      const res = await getAdminBrandsAction();
+      if (!res.success) throw new Error(res.error || "Failed to load brands");
+      return res.data?.map((b: any) => ({ id: b.id, name: b.name })) || [];
+    }
+  });
+  const allBrands = brandsData || [];
+
   // Drawer/Modal states
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [activeTab, setActiveTab] = useState<'general' | 'pricing' | 'media' | 'specs'>('general');
-  
+
   // Form states
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
@@ -131,10 +184,16 @@ export default function AdminProductsPage() {
   const [category, setCategory] = useState(''); // Stores category ID
   const [brand, setBrand] = useState('');       // Stores brand ID
   const [countInStock, setCountInStock] = useState('10');
+  const [inventoryTrackingType, setInventoryTrackingType] = useState<'counter' | 'unit'>('counter');
+  const isEditingExistingUnitProduct = Boolean(
+    editingProduct &&
+    (editingProduct.inventoryTrackingType === 'unit' || editingProduct.inventory_tracking_type === 'unit')
+  );
   const [description, setDescription] = useState('');
   const [descBlocks, setDescBlocks] = useState<DescriptionBlock[]>([]);
   const [descMode, setDescMode] = useState<'visual' | 'plain'>('visual');
-  const [imageFiles, setImageFiles] = useState<FileList | null>(null);
+  const [managedImages, setManagedImages] = useState<ManagedImage[]>([]);
+  const [imageUrlInput, setImageUrlInput] = useState('');
   const [badgesText, setBadgesText] = useState('');
   const [specsText, setSpecsText] = useState('{}');
   const [specsList, setSpecsList] = useState<{ id: string; key: string; value: string }[]>([]);
@@ -145,45 +204,121 @@ export default function AdminProductsPage() {
   const [isFeatured, setIsFeatured] = useState(false);
   const [isPreOrder, setIsPreOrder] = useState(false);
   const [currency, setCurrency] = useState<'USD' | 'LKR'>('USD');
-  
+
+  // Image management helpers
+  const handleAddImageFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const newItems: ManagedImage[] = Array.from(files).map((f) => ({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      type: 'file',
+      url: URL.createObjectURL(f),
+      file: f,
+    }));
+    setManagedImages((prev) => [...prev, ...newItems]);
+  };
+
+  const handleAddImageUrl = () => {
+    const trimmed = imageUrlInput.trim();
+    if (!trimmed) return;
+    setManagedImages((prev) => [
+      ...prev,
+      { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, type: 'url', url: trimmed },
+    ]);
+    setImageUrlInput('');
+  };
+
+  const handleMakeCover = (index: number) => {
+    if (index <= 0 || index >= managedImages.length) return;
+    setManagedImages((prev) => {
+      const next = [...prev];
+      const [chosen] = next.splice(index, 1);
+      next.unshift(chosen);
+      return next;
+    });
+  };
+
+  const handleMoveImage = (index: number, direction: 'left' | 'right') => {
+    const targetIndex = direction === 'left' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= managedImages.length) return;
+    setManagedImages((prev) => {
+      const next = [...prev];
+      const temp = next[index];
+      next[index] = next[targetIndex];
+      next[targetIndex] = temp;
+      return next;
+    });
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setManagedImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  
+
   // Feedback states
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  // Load products initially
-  const loadData = async () => {
-    try {
-      setLoadingProducts(true);
-      const res = await pbProducts.getAll({ perPage: 100 });
-      setProducts(res.items || []);
-    } catch (err: any) {
-      console.error('Failed to load products:', err);
-    } finally {
-      setLoadingProducts(false);
+  const updateProductMutation = useMutation({
+    mutationFn: async ({ id, formData }: { id: string, formData: FormData }) => {
+      const res = await updateProductAction(id, formData);
+      if (!res.success) throw new Error(res.error || "Failed to update product");
+      return res;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: adminKeys.products() });
+      queryClient.invalidateQueries({ queryKey: adminKeys.dashboard() });
+      queryClient.invalidateQueries({ queryKey: productKeys.lists() });
+      // Invalidate ALL product detail queries so the storefront page refetches the new price
+      queryClient.invalidateQueries({ queryKey: productKeys.details() });
+      setSuccess('Product updated successfully.');
+      setIsDrawerOpen(false);
+    },
+    onError: (err: Error) => {
+      setError(err.message);
     }
-  };
+  });
 
-  const loadRelations = async () => {
-    try {
-      const [cats, brs] = await Promise.all([
-        pbCategories.getAll(),
-        pbBrands.getAll(),
-      ]);
-      setAllCategories(cats.map(c => ({ id: c.id, name: c.name })));
-      setAllBrands(brs.map(b => ({ id: b.id, name: b.name })));
-    } catch (err) {
-      console.error('Failed to load category/brand relations:', err);
+  const createProductMutation = useMutation({
+    mutationFn: async (formData: FormData) => {
+      const res = await createProductAction(formData);
+      if (!res.success) throw new Error(res.error || "Failed to create product");
+      return res;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: adminKeys.products() });
+      queryClient.invalidateQueries({ queryKey: adminKeys.dashboard() });
+      queryClient.invalidateQueries({ queryKey: productKeys.lists() });
+      setSuccess('Product created successfully.');
+      setIsDrawerOpen(false);
+    },
+    onError: (err: Error) => {
+      setError(err.message);
     }
-  };
+  });
 
-  useEffect(() => {
-    loadData();
-    loadRelations();
-  }, []);
+  const deleteProductMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await deleteProductAction(id);
+      if (!res.success) throw new Error(res.error || "Failed to delete product");
+      return res;
+    },
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: adminKeys.products() });
+      queryClient.invalidateQueries({ queryKey: adminKeys.dashboard() });
+      queryClient.invalidateQueries({ queryKey: productKeys.lists() });
+      // Invalidate ALL product detail queries so the storefront page refetches the new price
+      queryClient.invalidateQueries({ queryKey: productKeys.details() });
+      setSuccess('Product deleted successfully.');
+    },
+    onError: (err: Error) => {
+      setError(err.message);
+    }
+  });
+
+  const isSubmitting = isPending || createProductMutation.isPending || updateProductMutation.isPending;
 
   // Lock the admin main scroll container when modal is open
   useEffect(() => {
@@ -201,16 +336,6 @@ export default function AdminProductsPage() {
     };
   }, [isDrawerOpen]);
 
-  // Filtered list
-  const filteredProducts = products.filter((p) => {
-    const term = search.toLowerCase();
-    return (
-      p.name.toLowerCase().includes(term) ||
-      p.category.toLowerCase().includes(term) ||
-      p.brand.toLowerCase().includes(term)
-    );
-  });
-
   const handleOpenCreate = () => {
     setEditingProduct(null);
     setName('');
@@ -218,16 +343,18 @@ export default function AdminProductsPage() {
     setPrice('');
     setDiscountPrice('');
     setWholesalePrice('');
-    setCategory(allCategories[0]?.id || '');
-    setBrand(allBrands[0]?.id || '');
+    setCategory('');
+    setBrand('');
     setCountInStock('10');
+    setInventoryTrackingType('counter');
     setDescription('');
     setDescBlocks([
       { id: '1', type: 'title', content: 'Product Overview' },
       { id: '2', type: 'paragraph', content: 'Enter product description here...' },
     ]);
     setDescMode('visual');
-    setImageFiles(null);
+    setManagedImages([]);
+    setImageUrlInput('');
     setBadgesText('');
     setSpecsText('{}');
     setSpecsList([
@@ -248,42 +375,43 @@ export default function AdminProductsPage() {
     setIsDrawerOpen(true);
   };
 
-  const handleOpenEdit = (product: Product) => {
+  const handleOpenEdit = async (product: Product) => {
     setEditingProduct(product);
     setName(product.name);
     setSlug(product.slug);
     setPrice(product.price.toString());
     setDiscountPrice(product.discountPrice?.toString() || '');
     setWholesalePrice(product.wholesalePrice?.toString() || '');
-    
-    // Resolve relation IDs from names
-    const catRecord = allCategories.find(c => c.name === product.category);
-    const brandRecord = allBrands.find(b => b.name === product.brand);
-    setCategory(catRecord ? catRecord.id : '');
-    setBrand(brandRecord ? brandRecord.id : '');
-    
+
+    // Resolve relation IDs from names or IDs safely
+    const catRecord = allCategories.find(c => c.id === product.category || c.name.toLowerCase().trim() === String(product.category || '').toLowerCase().trim());
+    const brandRecord = allBrands.find(b => b.id === product.brand || b.name.toLowerCase().trim() === String(product.brand || '').toLowerCase().trim());
+    setCategory(catRecord ? catRecord.id : (product.category || ''));
+    setBrand(brandRecord ? brandRecord.id : (product.brand || ''));
+
     setCountInStock(product.countInStock.toString());
-    setDescription(product.description || '');
-    
-    // Parse description into visual blocks
-    const parsedBlocks = parseTextToDescBlocks(product.description || '');
-    setDescBlocks(parsedBlocks);
+    setInventoryTrackingType(product.inventoryTrackingType || product.inventory_tracking_type || 'counter');
+
+    // Temporarily clear heavy fields until they load
+    setDescription('');
+    setDescBlocks([]);
     setDescMode('visual');
 
-    setImageFiles(null);
-    setBadgesText(product.badges?.join(', ') || '');
-    setSpecsText(JSON.stringify(product.specs || {}, null, 2));
-    
-    const initialSpecs = Object.entries(product.specs || {}).map(([k, v], idx) => ({
-      id: String(idx + 1),
-      key: k,
-      value: String(v)
-    }));
-    setSpecsList(initialSpecs.length > 0 ? initialSpecs : [{ id: '1', key: '', value: '' }]);
+    setManagedImages(
+      (product.images || []).map((img, i) => ({
+        id: `${i}-${Date.now()}`,
+        type: 'url',
+        url: img,
+      }))
+    );
+    setImageUrlInput('');
+    setBadgesText('');
+    setSpecsText('{}');
+    setSpecsList([{ id: '1', key: '', value: '' }]);
     setSpecsMode('visual');
 
-    setBannerImage(product.bannerImage || '');
-    setBannerText(product.bannerText || '');
+    setBannerImage('');
+    setBannerText('');
     setStatus(product.status || 'published');
     setIsFeatured(product.isFeatured || false);
     setIsPreOrder(product.isPreOrder || false);
@@ -292,15 +420,43 @@ export default function AdminProductsPage() {
     setSuccess(null);
     setActiveTab('general');
     setIsDrawerOpen(true);
+
+    // Fetch full details since list view omits heavy fields
+    try {
+      const fullRes = await getAdminProductAction(product.id);
+      if (fullRes.success && fullRes.data) {
+        const full = fullRes.data;
+        setDescription(full.description || '');
+        const parsedBlocks = parseTextToDescBlocks(full.description || '');
+        setDescBlocks(parsedBlocks);
+        setBadgesText(full.badges?.join(', ') || '');
+        setSpecsText(JSON.stringify(full.specs || {}, null, 2));
+        const initialSpecs = Object.entries(full.specs || {}).map(([k, v], idx) => ({
+          id: String(idx + 1),
+          key: k,
+          value: String(v)
+        }));
+        setSpecsList(initialSpecs.length > 0 ? initialSpecs : [{ id: '1', key: '', value: '' }]);
+        setBannerImage(full.bannerImage || '');
+        setBannerText(full.bannerText || '');
+      }
+    } catch (err) {
+      console.error('Failed to load full product details', err);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     setError(null);
     setSuccess(null);
 
-    if (!name || !slug || !price || !category || !brand) {
-      setError('Please fill in all required fields.');
+    const targetCategory = category || '';
+    const targetBrand = brand || '';
+
+    if (!name || !slug || !price) {
+      setError('Please fill in required fields: Product Name, Slug, and Retail Price.');
       return;
     }
 
@@ -334,9 +490,21 @@ export default function AdminProductsPage() {
         formData.append('wholesalePrice', wholesalePrice);
         formData.append('wholesale_price', wholesalePrice); // redundancy
       }
-      formData.append('category', category); // category ID
-      formData.append('brand', brand);       // brand ID
-      formData.append('countInStock', countInStock || '0');
+      formData.append('category', targetCategory); // category ID
+      formData.append('brand', targetBrand);       // brand ID
+      // Finding 10 & CodeRabbit Fix:
+      // - New UNIT product: must initialize with 0 aggregate stock.
+      // - Existing UNIT product staying UNIT: client value is not authoritative (server omits count_in_stock).
+      // - Existing UNIT transitioning to COUNTER: submit entered countInStock for conversion.
+      // - Existing COUNTER transitioning to UNIT or staying COUNTER: submit entered/existing count.
+      const submittedCountInStock = (!editingProduct && inventoryTrackingType === 'unit')
+        ? '0'
+        : (isEditingExistingUnitProduct && inventoryTrackingType === 'unit')
+          ? '0'
+          : (countInStock || '0');
+
+      formData.append('countInStock', submittedCountInStock);
+      formData.append('inventoryTrackingType', inventoryTrackingType);
       formData.append('description', finalDescription);
       formData.append('status', status);
       formData.append('isFeatured', isFeatured.toString());
@@ -364,64 +532,86 @@ export default function AdminProductsPage() {
         }
       }
       if (bannerText) formData.append('bannerText', bannerText);
-      
-      // Append files
-      if (imageFiles && imageFiles.length > 0) {
-        for (let i = 0; i < imageFiles.length; i++) {
-          formData.append('images', imageFiles[i]);
+
+      // Append all managed images in exact user-configured sequence (files & URLs converted reliably)
+      for (const imgItem of managedImages) {
+        if (imgItem.type === 'file' && imgItem.file) {
+          try {
+            const base64Str = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = (err) => reject(err);
+              reader.readAsDataURL(imgItem.file!);
+            });
+            formData.append('images', base64Str);
+          } catch {
+            formData.append('images', imgItem.file);
+          }
+        } else if (imgItem.type === 'url' && imgItem.url) {
+          formData.append('images', imgItem.url);
         }
       }
 
-      let res;
       if (editingProduct) {
-        res = await updateProductAction(editingProduct.id, formData);
+        updateProductMutation.mutate({ id: editingProduct.id, formData });
       } else {
-        res = await createProductAction(formData);
-      }
-
-      if (res.success) {
-        setSuccess(editingProduct ? 'Product updated successfully.' : 'Product created successfully.');
-        setIsDrawerOpen(false);
-        loadData();
-      } else {
-        setError(res.error || 'Failed to save product.');
+        createProductMutation.mutate(formData);
       }
     });
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     if (!confirm('Are you sure you want to delete this product?')) return;
-    
+
     setError(null);
     setSuccess(null);
 
-    const res = await deleteProductAction(id);
-    if (res.success) {
-      setSuccess('Product deleted successfully.');
-      loadData();
-    } else {
-      setError(res.error || 'Failed to delete product.');
-    }
+    deleteProductMutation.mutate(id);
   };
 
-  const handleBulkDelete = async () => {
+  const handleBulkDelete = () => {
     if (selectedIds.length === 0) return;
-    if (!confirm(`Are you sure you want to delete ${selectedIds.length} products?`)) return;
+    const totalSelected = selectedIds.length;
+    if (!confirm(`Are you sure you want to delete ${totalSelected} products?`)) return;
 
     setError(null);
     setSuccess(null);
 
     startTransition(async () => {
       let deletedCount = 0;
+      let failedCount = 0;
+      const successfullyDeletedIds: string[] = [];
+
       for (const id of selectedIds) {
-        const res = await deleteProductAction(id);
-        if (res.success) {
-          deletedCount++;
+        try {
+          const res = await deleteProductAction(id);
+          if (res && res.success) {
+            deletedCount++;
+            successfullyDeletedIds.push(id);
+          } else {
+            failedCount++;
+          }
+        } catch {
+          failedCount++;
         }
       }
-      setSuccess(`Successfully deleted ${deletedCount} products.`);
-      setSelectedIds([]);
-      loadData();
+
+      if (deletedCount > 0 && failedCount === 0) {
+        setSuccess(`Successfully deleted ${deletedCount} product${deletedCount > 1 ? 's' : ''}.`);
+      } else if (deletedCount > 0 && failedCount > 0) {
+        setSuccess(`Successfully deleted ${deletedCount} product${deletedCount > 1 ? 's' : ''}.`);
+        setError(`${failedCount} product${failedCount > 1 ? 's' : ''} could not be deleted.`);
+      } else {
+        setError(`Failed to delete the selected product${totalSelected > 1 ? 's' : ''}.`);
+      }
+
+      setSelectedIds((prev) => prev.filter((id) => !successfullyDeletedIds.includes(id)));
+      queryClient.invalidateQueries({ queryKey: adminKeys.products() });
+      queryClient.invalidateQueries({ queryKey: adminKeys.dashboard() });
+      queryClient.invalidateQueries({ queryKey: productKeys.lists() });
+      for (const id of successfullyDeletedIds) {
+        queryClient.invalidateQueries({ queryKey: productKeys.detail(id) });
+      }
     });
   };
 
@@ -458,7 +648,7 @@ export default function AdminProductsPage() {
           <p className="text-xs text-muted-foreground mt-1">Manage storefront catalog, pricing, and quantities.</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button 
+          <Button
             onClick={handleOpenCreate}
             size="sm"
             className="bg-blue-600 hover:bg-blue-500 text-white transition-colors shadow-sm shadow-blue-500/20 font-semibold"
@@ -473,7 +663,7 @@ export default function AdminProductsPage() {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           type="text"
-          placeholder="Search products by name, category, or brand..."
+          placeholder="Search products by name..."
           className="pl-10 bg-card/40 border-border placeholder:text-muted-foreground"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -486,9 +676,9 @@ export default function AdminProductsPage() {
           <span className="text-xs font-semibold text-red-500">
             {selectedIds.length} catalog items selected
           </span>
-          <Button 
+          <Button
             onClick={handleBulkDelete}
-            size="sm" 
+            size="sm"
             className="bg-red-600 hover:bg-red-500 text-white font-bold h-8 text-[11px] px-3.5"
             disabled={isPending}
           >
@@ -505,18 +695,33 @@ export default function AdminProductsPage() {
               <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-blue-500" />
               Loading product listings...
             </div>
+          ) : isProductsError ? (
+            <div className="bg-red-500/5 border border-red-500/10 p-8 text-center text-xs text-red-500 rounded-xl">
+              <AlertCircle className="mx-auto mb-3 h-8 w-8 text-red-500/80" />
+              <p className="mb-1 font-semibold">Failed to load products</p>
+              <p className="opacity-80">
+                {(productsError as Error)?.message ||
+                  "An unexpected error occurred."}
+              </p>
+            </div>
           ) : (
-            <table className="w-full text-left text-xs border-collapse">
+            <div className="relative">
+              {isFetching && (
+                <div className="bg-background/50 absolute inset-0 z-10 flex items-center justify-center backdrop-blur-[1px]">
+                  <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+                </div>
+              )}
+              <table className="w-full border-collapse text-left text-xs">
               <thead>
                 <tr className="bg-secondary/40 border-b border-border text-muted-foreground uppercase tracking-wider font-semibold text-[10px]">
                   <th className="p-4 w-10">
-                    <input 
+                    <input
                       type="checkbox"
                       className="rounded border-border accent-blue-500"
-                      checked={selectedIds.length === filteredProducts.length && filteredProducts.length > 0}
+                      checked={selectedIds.length === products.length && products.length > 0}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          setSelectedIds(filteredProducts.map(p => p.id));
+                          setSelectedIds(products.map(p => p.id));
                         } else {
                           setSelectedIds([]);
                         }
@@ -531,16 +736,16 @@ export default function AdminProductsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filteredProducts.map((product) => {
+                {products.map((product) => {
                   const stock = getStockBadge(product.countInStock);
                   const price = product.discountPrice ?? product.price;
-                  const currency = product.currency === 'LKR' ? 'LKR ' : '$';
+                  const currency = (product as any).currency === 'LKR' ? 'LKR ' : '$';
                   const isChecked = selectedIds.includes(product.id);
 
                   return (
                     <tr key={product.id} className={`hover:bg-muted/10 transition-colors group ${isChecked ? 'bg-blue-500/5' : ''}`}>
                       <td className="p-4 w-10">
-                        <input 
+                        <input
                           type="checkbox"
                           className="rounded border-border accent-blue-500 cursor-pointer"
                           checked={isChecked}
@@ -557,7 +762,7 @@ export default function AdminProductsPage() {
                         <div className="flex items-center gap-3">
                           <div className="h-10 w-10 rounded-lg bg-muted border border-border overflow-hidden shrink-0 relative">
                             { }
-                            <img src={product.images[0]} alt={product.name} className="h-full w-full object-cover" />
+                            <img src={product.images?.[0] || 'https://images.unsplash.com/photo-1531403009284-440f080d1e12?q=80&w=600&auto=format&fit=crop'} alt={product.name || 'Product'} className="h-full w-full object-cover" />
                           </div>
                           <div>
                             <p className="font-semibold text-foreground leading-tight max-w-[200px] truncate">{product.name}</p>
@@ -568,32 +773,45 @@ export default function AdminProductsPage() {
                       <td className="p-4 text-muted-foreground capitalize">{product.category}</td>
                       <td className="p-4">
                         <div>
-                          <p className="font-bold text-foreground">{currency}{price.toLocaleString()}</p>
+                          <p className="font-bold text-foreground">{(product as any).currency || 'USD'} {(product.discountPrice || product.price || 0).toLocaleString()}</p>
                           {product.discountPrice && (
-                            <p className="text-muted-foreground line-through text-[10px]">{currency}{product.price.toLocaleString()}</p>
+                            <p className="text-muted-foreground line-through text-[10px]">{(product as any).currency || 'USD'} {(product.price || 0).toLocaleString()}</p>
                           )}
                         </div>
                       </td>
                       <td className="p-4">
-                        <div className="flex items-center gap-2">
-                          <span className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider ${stock.cls}`}>
-                            {stock.label}
-                          </span>
-                          <span className="text-muted-foreground">{product.countInStock}</span>
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider ${stock.cls}`}>
+                              {stock.label}
+                            </span>
+                            <span className="text-muted-foreground">{product.countInStock}</span>
+                          </div>
+                          <div>
+                            {product.inventoryTrackingType === 'unit' || (product as any).inventory_tracking_type === 'unit' ? (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+                                Unit Tracked
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-slate-500/10 text-slate-400 border border-slate-500/20">
+                                Counter
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </td>
                       <td className="p-4 text-right">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button 
-                            onClick={() => handleOpenEdit(product)}
-                            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent hover:border-border transition-all" 
+                          <button
+                            onClick={() => handleOpenEdit(product as unknown as Product)}
+                            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent hover:border-border transition-all"
                             title="Edit"
                           >
                             <Edit className="h-3.5 w-3.5" />
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleDelete(product.id)}
-                            className="p-1.5 rounded-md text-muted-foreground hover:text-red-500 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all" 
+                            className="p-1.5 rounded-md text-muted-foreground hover:text-red-500 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all"
                             title="Delete"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -605,13 +823,45 @@ export default function AdminProductsPage() {
                 })}
               </tbody>
             </table>
+            </div>
+          )}
+
+          {/* Pagination Controls */}
+          {products.length > 0 && (
+            <div className="p-4 border-t border-border flex items-center justify-between text-xs text-muted-foreground bg-secondary/10">
+              <div className="flex items-center gap-4">
+                <span>Showing {products.length} of {totalCount} items</span>
+                {isFetching && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2"
+                  disabled={page <= 1}
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                </Button>
+                <span className="px-3 font-medium">Page {page} of {totalPages}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                >
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
           )}
         </div>
       </div>
 
       {/* Centered Modal Dialog */}
       {isDrawerOpen && (
-        <div 
+        <div
           className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm p-4 sm:p-6 flex items-center justify-center animate-in fade-in duration-200"
           onClick={(e) => {
             if (e.target === e.currentTarget) setIsDrawerOpen(false);
@@ -630,7 +880,7 @@ export default function AdminProductsPage() {
                   Update database fields for this specific product.
                 </p>
               </div>
-              <button 
+              <button
                 type="button"
                 onClick={() => setIsDrawerOpen(false)}
                 className="p-1.5 text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted transition-colors cursor-pointer"
@@ -695,7 +945,7 @@ export default function AdminProductsPage() {
             <form onSubmit={handleSubmit} className="flex flex-col">
               {/* Scrollable Form Body */}
               <div className="max-h-[calc(85vh-180px)] min-h-[300px] overflow-y-auto overscroll-contain p-6 space-y-4">
-                
+
                 {/* TAB 1: GENERAL INFO */}
                 {activeTab === 'general' && (
                   <div className="space-y-4 animate-in fade-in duration-150">
@@ -712,16 +962,16 @@ export default function AdminProductsPage() {
                           </button>
                         )}
                       </div>
-                      <Input 
-                        value={name} 
+                      <Input
+                        value={name}
                         onChange={(e) => {
                           setName(e.target.value);
                           if (!editingProduct) {
                             setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, ''));
                           }
-                        }} 
-                        placeholder="e.g. ApexBook Pro 16" 
-                        required 
+                        }}
+                        placeholder="e.g. ApexBook Pro 16"
+                        required
                       />
                     </div>
 
@@ -855,92 +1105,261 @@ export default function AdminProductsPage() {
                         </div>
                       </div>
                     )}
+
+                    {/* INVENTORY TRACKING CONTROL */}
+                    <div className="p-4 rounded-xl border border-border bg-card/60 space-y-3">
+                      <div className="space-y-0.5">
+                        <label className="text-xs font-semibold text-foreground tracking-wide block">
+                          Inventory Tracking *
+                        </label>
+                        <p className="text-[11px] text-muted-foreground">
+                          Choose how physical stock is monitored and fulfilled for this product.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                        <label
+                          className={`relative flex flex-col p-3 rounded-xl border text-xs cursor-pointer transition-all ${
+                            inventoryTrackingType === 'counter'
+                              ? 'border-blue-500 bg-blue-500/5 ring-1 ring-blue-500'
+                              : 'border-border bg-background hover:bg-muted/40'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 font-semibold text-foreground">
+                            <input
+                              type="radio"
+                              name="inventoryTrackingType"
+                              value="counter"
+                              checked={inventoryTrackingType === 'counter'}
+                              onChange={() => setInventoryTrackingType('counter')}
+                              className="accent-blue-600"
+                            />
+                            <span>Counter Stock</span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground mt-1.5 pl-5">
+                            Track only the available quantity. Stock is deducted directly without individual unit records.
+                          </p>
+                        </label>
+
+                        <label
+                          className={`relative flex flex-col p-3 rounded-xl border text-xs cursor-pointer transition-all ${
+                            inventoryTrackingType === 'unit'
+                              ? 'border-blue-500 bg-blue-500/5 ring-1 ring-blue-500'
+                              : 'border-border bg-background hover:bg-muted/40'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 font-semibold text-foreground">
+                            <input
+                              type="radio"
+                              name="inventoryTrackingType"
+                              value="unit"
+                              checked={inventoryTrackingType === 'unit'}
+                              onChange={() => setInventoryTrackingType('unit')}
+                              className="accent-blue-600"
+                            />
+                            <span>Individually Tracked Units</span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground mt-1.5 pl-5">
+                            Track each physical item using its barcode/serial record. Requires stock units for fulfillment.
+                          </p>
+                        </label>
+                      </div>
+
+                      {inventoryTrackingType === 'counter' && (
+                        <div className="pt-2 max-w-xs space-y-1.5">
+                          <label className="text-xs font-semibold text-foreground/80 tracking-wide block">
+                            Current Stock Quantity
+                          </label>
+                          <Input
+                            type="number"
+                            min="0"
+                            value={countInStock}
+                            onChange={(e) => setCountInStock(e.target.value)}
+                            placeholder="0"
+                            required
+                          />
+                          <p className="text-[10px] text-muted-foreground">
+                            Aggregate inventory available for counter sale.
+                          </p>
+                        </div>
+                      )}
+
+                      {inventoryTrackingType === 'unit' && isEditingExistingUnitProduct && editingProduct && (
+                        <div className="pt-2 p-3 bg-muted/30 rounded-lg border border-border text-[11px] text-muted-foreground space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium text-foreground">Tracked Unit Stock:</span>
+                            <span className="font-bold text-foreground">{editingProduct.countInStock} available units</span>
+                          </div>
+                          <p className="text-[10px]">
+                            Stock count is reconciled automatically with physical units in Stock Management.
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
 
                 {/* TAB 3: MEDIA & IMAGES */}
                 {activeTab === 'media' && (
-                  <div className="space-y-5 animate-in fade-in duration-150">
-                    <div className="space-y-2">
-                      <label className="text-xs font-semibold text-foreground/80 tracking-wide block">Product Photos & Gallery</label>
-                      
-                      {/* Styled Dropzone / Multiple File Picker */}
-                      <div className="relative border-2 border-dashed border-border hover:border-blue-500/60 transition-colors rounded-2xl p-6 bg-card/40 flex flex-col items-center justify-center text-center group cursor-pointer">
-                        <input 
-                          type="file" 
-                          multiple 
-                          accept="image/*" 
-                          onChange={(e) => setImageFiles(e.target.files)} 
-                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                        />
-                        <div className="h-10 w-10 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
-                          <ImageIcon className="h-5 w-5" />
+                  <div className="space-y-6 animate-in fade-in duration-150">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-semibold text-foreground/80 tracking-wide block">
+                          Product Gallery & Cover Photo
+                        </label>
+                        <span className="text-[11px] text-muted-foreground">
+                          The first photo (★ Cover) will be used as the primary thumbnail.
+                        </span>
+                      </div>
+
+                      {/* Dropzone & Direct URL input */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="sm:col-span-2 relative border-2 border-dashed border-border hover:border-blue-500/60 transition-colors rounded-2xl p-5 bg-card/40 flex flex-col items-center justify-center text-center group cursor-pointer">
+                          <input
+                            type="file"
+                            multiple
+                            accept="image/*"
+                            onChange={(e) => handleAddImageFiles(e.target.files)}
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                          />
+                          <div className="h-9 w-9 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-1.5 group-hover:scale-110 transition-transform">
+                            <ImageIcon className="h-4 w-4" />
+                          </div>
+                          <p className="text-xs font-semibold text-foreground">
+                            Click to browse or drag & drop image files
+                          </p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            Supports PNG, JPG, WEBP, GIF. Select multiple files at once.
+                          </p>
                         </div>
-                        <p className="text-xs font-semibold text-foreground">
-                          Click to browse or drag & drop multiple images
-                        </p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                          Hold <kbd className="px-1.5 py-0.5 rounded bg-muted font-mono text-[10px]">Ctrl</kbd> or <kbd className="px-1.5 py-0.5 rounded bg-muted font-mono text-[10px]">Cmd</kbd> to select multiple photos at once. Supports PNG, JPG, WEBP.
-                        </p>
+
+                        <div className="flex flex-col justify-between p-4 rounded-2xl border border-border bg-card/40 space-y-2">
+                          <label className="text-[11px] font-semibold text-foreground">Add via Image URL</label>
+                          <div className="flex gap-2">
+                            <Input
+                              type="text"
+                              placeholder="https://..."
+                              value={imageUrlInput}
+                              onChange={(e) => setImageUrlInput(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddImageUrl(); } }}
+                              className="h-9 text-xs"
+                            />
+                            <Button type="button" size="sm" onClick={handleAddImageUrl} variant="secondary" className="h-9 px-3">
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          <span className="text-[10px] text-muted-foreground">Paste direct web links to images</span>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Live Preview of Newly Selected Local Files */}
-                    {imageFiles && imageFiles.length > 0 && (
-                      <div className="space-y-2 p-4 rounded-xl border border-blue-500/20 bg-blue-500/5">
+                    {/* Interactive Re-orderable Image Gallery */}
+                    {managedImages.length > 0 ? (
+                      <div className="space-y-3">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
-                            <Sparkles className="h-3.5 w-3.5" />
-                            {imageFiles.length} New {imageFiles.length === 1 ? 'Photo' : 'Photos'} Selected for Upload
+                          <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                            <Sparkles className="h-3.5 w-3.5 text-blue-500" />
+                            Product Photos ({managedImages.length})
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => setImageFiles(null)}
-                            className="text-[10px] text-muted-foreground hover:text-red-500 underline cursor-pointer"
-                          >
-                            Clear Selection
-                          </button>
+                          <span className="text-[10px] text-muted-foreground">
+                            Use arrows to re-arrange order, or click Star to set as Cover Photo
+                          </span>
                         </div>
 
-                        <div className="grid grid-cols-4 gap-3 pt-1">
-                          {Array.from(imageFiles).map((file, idx) => (
-                            <div key={idx} className="relative aspect-square rounded-xl border border-blue-500/30 bg-background overflow-hidden group">
-                              <img 
-                                src={URL.createObjectURL(file)} 
-                                alt={`Selected Preview ${idx + 1}`} 
-                                className="w-full h-full object-contain p-1.5"
-                              />
-                              <span className="absolute bottom-1 left-1 bg-black/70 text-white text-[9px] font-bold px-1.5 py-0.5 rounded backdrop-blur-sm">
-                                {idx === 0 ? 'Main Cover' : `#${idx + 1}`}
-                              </span>
-                            </div>
-                          ))}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                          {managedImages.map((imgItem, idx) => {
+                            const isCover = idx === 0;
+                            const displayUrl = imgItem.url.startsWith('blob:') || imgItem.url.startsWith('http') || imgItem.url.startsWith('/')
+                              ? imgItem.url
+                              : sanitizeImageUrl(imgItem.url);
+
+                            return (
+                              <div
+                                key={imgItem.id}
+                                className={`group relative aspect-square rounded-2xl border transition-all overflow-hidden bg-card/60 ${
+                                  isCover
+                                    ? 'border-amber-500 shadow-md ring-2 ring-amber-500/20 bg-amber-500/5'
+                                    : 'border-border hover:border-blue-500/50'
+                                }`}
+                              >
+                                <img
+                                  src={displayUrl}
+                                  alt={`Product Photo ${idx + 1}`}
+                                  className="w-full h-full object-contain p-2"
+                                />
+
+                                {/* Badge */}
+                                <div className="absolute top-2 left-2 z-10 flex items-center gap-1">
+                                  {isCover ? (
+                                    <span className="px-2 py-0.5 rounded-full bg-amber-500 text-black text-[10px] font-extrabold flex items-center gap-1 shadow-sm">
+                                      <Star className="h-3 w-3 fill-black" />
+                                      COVER
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-full bg-black/75 text-white text-[9px] font-bold backdrop-blur-sm">
+                                      #{idx + 1}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Control Overlay */}
+                                <div className="absolute inset-0 bg-black/65 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2 z-20">
+                                  <div className="flex justify-between items-center">
+                                    {!isCover ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleMakeCover(idx)}
+                                        className="px-2 py-1 rounded bg-amber-500 text-black text-[10px] font-bold flex items-center gap-1 hover:bg-amber-400 transition-colors shadow cursor-pointer"
+                                        title="Set as Main Cover Photo"
+                                      >
+                                        <Star className="h-3 w-3 fill-black" />
+                                        Set Cover
+                                      </button>
+                                    ) : (
+                                      <span className="text-[10px] text-amber-300 font-bold px-2 py-1">Main Thumbnail</span>
+                                    )}
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveImage(idx)}
+                                      className="p-1 rounded-lg bg-red-500/80 hover:bg-red-600 text-white transition-colors cursor-pointer"
+                                      title="Remove photo"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+
+                                  {/* Reorder Arrow Controls */}
+                                  <div className="flex items-center justify-center gap-2 pt-2">
+                                    <button
+                                      type="button"
+                                      disabled={idx === 0}
+                                      onClick={() => handleMoveImage(idx, 'left')}
+                                      className="p-1.5 rounded-lg bg-white/20 hover:bg-white/40 disabled:opacity-30 disabled:hover:bg-white/20 text-white transition-colors cursor-pointer"
+                                      title="Move Left / Earlier"
+                                    >
+                                      <ArrowLeft className="h-4 w-4" />
+                                    </button>
+                                    <span className="text-[10px] font-mono text-white/80">Pos {idx + 1}</span>
+                                    <button
+                                      type="button"
+                                      disabled={idx === managedImages.length - 1}
+                                      onClick={() => handleMoveImage(idx, 'right')}
+                                      className="p-1.5 rounded-lg bg-white/20 hover:bg-white/40 disabled:opacity-30 disabled:hover:bg-white/20 text-white transition-colors cursor-pointer"
+                                      title="Move Right / Later"
+                                    >
+                                      <ArrowRight className="h-4 w-4" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
-                    )}
-
-                    {/* Saved Product Images (for existing products) */}
-                    {editingProduct && editingProduct.images && editingProduct.images.length > 0 && (
-                      <div className="space-y-2 pt-2">
-                        <div className="flex items-center justify-between">
-                          <label className="text-xs font-semibold text-foreground/80 tracking-wide block">Currently Saved Images ({editingProduct.images.length})</label>
-                          <span className="text-[10px] text-muted-foreground">Uploading new files above will replace these</span>
-                        </div>
-                        <div className="grid grid-cols-4 gap-3">
-                          {editingProduct.images.map((img, idx) => (
-                            <div key={idx} className="relative aspect-square rounded-xl border border-neutral-200/90 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 overflow-hidden group">
-                              <Image 
-                                src={img.startsWith('http') ? img : `https://ftc-db.codix.site/api/files/pbc_4092854851/${editingProduct.id}/${img}`}
-                                alt={`Saved Image ${idx + 1}`}
-                                fill
-                                className="object-contain p-1.5"
-                              />
-                              <span className="absolute bottom-1 left-1 bg-neutral-900/80 text-white text-[9px] font-bold px-1.5 py-0.5 rounded backdrop-blur-sm">
-                                {idx === 0 ? 'Main Cover' : `#${idx + 1}`}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
+                    ) : (
+                      <div className="p-6 rounded-2xl border border-dashed border-border text-center text-muted-foreground text-xs">
+                        No product images added yet. Upload files or add an image URL above.
                       </div>
                     )}
 
@@ -963,10 +1382,10 @@ export default function AdminProductsPage() {
                                 <img src={bannerImage} alt="Banner Preview" className="w-full h-full object-cover" />
                               </div>
                               <div className="flex-1 space-y-1">
-                                <Input 
-                                  value={bannerImage} 
-                                  onChange={(e) => setBannerImage(e.target.value)} 
-                                  placeholder="Image URL or Data URI" 
+                                <Input
+                                  value={bannerImage}
+                                  onChange={(e) => setBannerImage(e.target.value)}
+                                  placeholder="Image URL or Data URI"
                                   className="bg-background text-xs h-7"
                                 />
                                 <div className="flex items-center gap-2">
@@ -1026,10 +1445,10 @@ export default function AdminProductsPage() {
                         </div>
                         <div className="space-y-1.5">
                           <label className="text-[11px] font-semibold text-foreground/80 block">Banner Headline / Tagline</label>
-                          <Input 
-                            value={bannerText} 
-                            onChange={(e) => setBannerText(e.target.value)} 
-                            placeholder="e.g. Next-Gen M3 Processing Power & Liquid Retina XDR" 
+                          <Input
+                            value={bannerText}
+                            onChange={(e) => setBannerText(e.target.value)}
+                            placeholder="e.g. Next-Gen M3 Processing Power & Liquid Retina XDR"
                             className="bg-background text-xs"
                           />
                         </div>
@@ -1421,8 +1840,8 @@ export default function AdminProductsPage() {
                           <div className="space-y-2">
                             {specsList.map((row, idx) => (
                               <div key={row.id || idx} className="flex items-center gap-2">
-                                <Input 
-                                  value={row.key} 
+                                <Input
+                                  value={row.key}
                                   onChange={(e) => {
                                     const updated = [...specsList];
                                     updated[idx].key = e.target.value;
@@ -1431,8 +1850,8 @@ export default function AdminProductsPage() {
                                   placeholder="Spec Name (e.g. RAM)"
                                   className="w-1/3 text-xs bg-background"
                                 />
-                                <Input 
-                                  value={row.value} 
+                                <Input
+                                  value={row.value}
                                   onChange={(e) => {
                                     const updated = [...specsList];
                                     updated[idx].value = e.target.value;
@@ -1485,9 +1904,9 @@ export default function AdminProductsPage() {
               <div className="p-4 border-t border-border flex items-center justify-between bg-secondary/10 shrink-0">
                 <div className="flex items-center gap-2">
                   {activeTab !== 'general' && (
-                    <Button 
-                      type="button" 
-                      variant="outline" 
+                    <Button
+                      type="button"
+                      variant="outline"
                       size="sm"
                       onClick={() => {
                         const tabs: ('general' | 'pricing' | 'media' | 'specs')[] = ['general', 'pricing', 'media', 'specs'];
@@ -1500,9 +1919,9 @@ export default function AdminProductsPage() {
                     </Button>
                   )}
                   {activeTab !== 'specs' && (
-                    <Button 
-                      type="button" 
-                      variant="outline" 
+                    <Button
+                      type="button"
+                      variant="outline"
                       size="sm"
                       onClick={() => {
                         const tabs: ('general' | 'pricing' | 'media' | 'specs')[] = ['general', 'pricing', 'media', 'specs'];
@@ -1517,21 +1936,21 @@ export default function AdminProductsPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Button 
-                    type="button" 
-                    variant="ghost" 
+                  <Button
+                    type="button"
+                    variant="ghost"
                     onClick={() => setIsDrawerOpen(false)}
                     className="text-muted-foreground border border-border"
-                    disabled={isPending}
+                    disabled={isSubmitting}
                   >
                     Cancel
                   </Button>
-                  <Button 
+                  <Button
                     type="submit"
                     className="bg-blue-600 hover:bg-blue-500 text-white font-semibold flex items-center gap-1"
-                    disabled={isPending}
+                    disabled={isSubmitting}
                   >
-                    {isPending ? (
+                    {isSubmitting ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" /> Saving...
                       </>

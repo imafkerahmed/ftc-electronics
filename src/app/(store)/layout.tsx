@@ -4,12 +4,23 @@ import CartDropdown from '@/components/cart/cart-dropdown';
 import WhatsAppButton from '@/components/ui/whatsapp-button';
 import AnnouncementModal from '@/components/layout/announcement-modal';
 import InitialLoader from '@/components/layout/initial-loader';
+import { redirect } from 'next/navigation';
+import { checkSupabaseHealth } from '@/lib/supabase-admin';
 
-export default function StoreLayout({
+// Check DB health on every store request — if it's down, show the server-down page
+// Uses a short timeout so a slow DB doesn't block page load for too long
+export const revalidate = 0;
+
+export default async function StoreLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const healthy = await checkSupabaseHealth();
+  if (!healthy) {
+    redirect('/server-down');
+  }
+
   return (
     <div className="relative flex min-h-screen flex-col bg-background text-foreground font-sans">
       {/* Initial Page Preloader with Setting Logo */}

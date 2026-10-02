@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { User, Lock, Delete, ChevronRight, ShieldCheck, Loader2, KeyRound, AlertCircle } from 'lucide-react';
 import type { PBEmployee, PosEmployeeSession } from '@/types/pos';
-import { getPosEmployeesAction } from '@/app/actions/admin';
+import { getPosEmployeesAction, verifyPosEmployeePinAction } from '@/app/actions/admin';
 import { setPosSession } from '@/lib/pos-session';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,7 @@ interface EmployeeLockScreenProps {
 export default function EmployeeLockScreen({ onUnlock }: EmployeeLockScreenProps) {
   const [employees, setEmployees] = useState<PBEmployee[]>([]);
   const [loading, setLoading] = useState(true);
+  const [verifying, setVerifying] = useState(false);
   const [selected, setSelected] = useState<PBEmployee | null>(null);
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
@@ -44,36 +45,48 @@ export default function EmployeeLockScreen({ onUnlock }: EmployeeLockScreenProps
     setError('');
   }, []);
 
-  const handleVerify = useCallback(() => {
-    if (!selected) return;
-    if (pin === selected.pin) {
-      const session: PosEmployeeSession = {
-        id: selected.id,
-        name: selected.name,
-        role: selected.role,
-        loginTime: new Date().toISOString(),
-      };
-      setPosSession(session);
-      onUnlock(session);
-    } else {
+  const handleVerify = useCallback(async () => {
+    if (!selected || verifying) return;
+    if (pin.length < 4) {
+      setError('Please enter a valid PIN.');
+      return;
+    }
+
+    setVerifying(true);
+    setError('');
+
+    try {
+      const res = await verifyPosEmployeePinAction(selected.id, pin);
+      if (res.success && res.session) {
+        setPosSession(res.session);
+        onUnlock(res.session);
+      } else {
+        setShaking(true);
+        setError(res.error || 'Incorrect PIN. Try again.');
+        setPin('');
+        setTimeout(() => setShaking(false), 600);
+      }
+    } catch {
       setShaking(true);
-      setError('Incorrect PIN. Try again.');
+      setError('PIN verification failed. Please try again.');
       setPin('');
       setTimeout(() => setShaking(false), 600);
+    } finally {
+      setVerifying(false);
     }
-  }, [selected, pin, onUnlock]);
+  }, [selected, pin, verifying, onUnlock]);
 
   // Allow physical keyboard entry
   useEffect(() => {
-    if (!selected) return;
+    if (!selected || verifying) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key >= '0' && e.key <= '9') handlePinDigit(e.key);
       else if (e.key === 'Backspace') handleBackspace();
-      else if (e.key === 'Enter' && pin.length >= 4) handleVerify();
+      else if (e.key === 'Enter' && pin.length >= 4) void handleVerify();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selected, pin, handlePinDigit, handleBackspace, handleVerify]);
+  }, [selected, pin, verifying, handlePinDigit, handleBackspace, handleVerify]);
 
   const roleBadgeColor = (role: string) =>
     role === 'manager'
@@ -145,8 +158,9 @@ export default function EmployeeLockScreen({ onUnlock }: EmployeeLockScreenProps
             <div className={`space-y-5 ${shaking ? 'animate-shake' : ''}`}>
               {/* Selected user badge */}
               <button
-                onClick={() => { setSelected(null); setPin(''); setError(''); }}
-                className="w-full flex items-center gap-3 p-3 bg-background/60 border border-border rounded-xl cursor-pointer hover:bg-muted/40 transition-colors"
+                onClick={() => { if (!verifying) { setSelected(null); setPin(''); setError(''); } }}
+                disabled={verifying}
+                className="w-full flex items-center gap-3 p-3 bg-background/60 border border-border rounded-xl cursor-pointer hover:bg-muted/40 transition-colors disabled:opacity-50"
               >
                 <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-blue-500/20 to-indigo-500/20 border border-border flex items-center justify-center shrink-0">
                   <span className="text-xs font-bold text-foreground">{initials(selected.name)}</span>
@@ -186,8 +200,9 @@ export default function EmployeeLockScreen({ onUnlock }: EmployeeLockScreenProps
                     <button
                       key="backspace"
                       type="button"
+                      disabled={verifying}
                       onClick={handleBackspace}
-                      className="h-12 rounded-xl bg-muted/50 hover:bg-muted border border-border flex items-center justify-center text-foreground transition-all cursor-pointer active:scale-95"
+                      className="h-12 rounded-xl bg-muted/50 hover:bg-muted border border-border flex items-center justify-center text-foreground transition-all cursor-pointer active:scale-95 disabled:opacity-50"
                     >
                       <Delete className="h-4 w-4" />
                     </button>
@@ -195,8 +210,9 @@ export default function EmployeeLockScreen({ onUnlock }: EmployeeLockScreenProps
                     <button
                       key={`num-${k}`}
                       type="button"
+                      disabled={verifying}
                       onClick={() => handlePinDigit(k)}
-                      className="h-12 rounded-xl bg-background/80 hover:bg-blue-500/10 hover:border-blue-500/40 border border-border text-foreground font-bold text-lg flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-xs"
+                      className="h-12 rounded-xl bg-background/80 hover:bg-blue-500/10 hover:border-blue-500/40 border border-border text-foreground font-bold text-lg flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-xs disabled:opacity-50"
                     >
                       {k}
                     </button>
@@ -206,12 +222,21 @@ export default function EmployeeLockScreen({ onUnlock }: EmployeeLockScreenProps
 
               {/* Unlock button */}
               <Button
-                onClick={handleVerify}
-                disabled={pin.length < 4}
-                className="w-full h-11 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-md shadow-blue-500/20"
+                onClick={() => void handleVerify()}
+                disabled={pin.length < 4 || verifying}
+                className="w-full h-11 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 disabled:opacity-60"
               >
-                <Lock className="h-4 w-4" />
-                Unlock POS
+                {verifying ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Verifying PIN…
+                  </>
+                ) : (
+                  <>
+                    <Lock className="h-4 w-4" />
+                    Unlock POS
+                  </>
+                )}
               </Button>
             </div>
           )}

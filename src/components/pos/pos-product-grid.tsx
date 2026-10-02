@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, ScanLine, X, Plus, Grid3x3 } from 'lucide-react';
+import { Search, ScanLine, X, Plus, Grid3x3, AlertCircle } from 'lucide-react';
 import type { PosCartItem } from '@/types/pos';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -28,23 +28,38 @@ export default function PosProductGrid({ onAddToCart, refreshTrigger }: PosProdu
   const [activeCategory, setActiveCategory] = useState<string>('All');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const loadProducts = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await fetch('/api/pos/products');
-      if (res.ok) {
-        const data = await res.json();
-        setProducts(data.products || []);
-        const cats = ['All', ...new Set<string>((data.products as Product[]).map((p) => p.category).filter(Boolean))];
-        setCategories(cats);
+      if (!res.ok) {
+        let errMsg = `Failed to load products (${res.status})`;
+        try {
+          const errBody = await res.json();
+          if (errBody?.error) errMsg = errBody.error;
+        } catch {
+          // ignore non-json
+        }
+        throw new Error(errMsg);
       }
-    } catch {
-      // fallback silently
+      const data = await res.json();
+      if (!data || !Array.isArray(data.products)) {
+        throw new Error('Invalid response structure received from server.');
+      }
+      setProducts(data.products);
+      const cats = ['All', ...new Set<string>((data.products as Product[]).map((p) => p.category).filter(Boolean))];
+      setCategories(cats);
+    } catch (err: any) {
+      setLoadError(err.message || 'Unable to load products. Please try again.');
+      setProducts([]);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -184,6 +199,14 @@ export default function PosProductGrid({ onAddToCart, refreshTrigger }: PosProdu
             {Array.from({ length: 9 }).map((_, i) => (
               <div key={i} className="h-28 rounded-xl bg-muted/40 animate-pulse" />
             ))}
+          </div>
+        ) : loadError ? (
+          <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-3 py-10 px-4 text-center">
+            <AlertCircle className="h-8 w-8 text-red-500 opacity-80" />
+            <p className="text-sm font-semibold text-foreground">{loadError}</p>
+            <Button size="sm" variant="outline" onClick={() => void loadProducts()}>
+              Retry
+            </Button>
           </div>
         ) : filtered.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-2 py-10">

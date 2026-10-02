@@ -25,8 +25,10 @@ import {
   Palette,
   ShoppingBag,
   FileText,
+  Receipt,
   Building2,
   MessageSquare,
+  Landmark,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { logoutAction } from '@/app/actions/auth';
@@ -42,8 +44,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { name: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard },
-  { name: 'Sales Tracker', href: '/admin/sales', icon: ScrollText },
-  { name: 'Quotations', href: '/admin/quotations', icon: FileText },
+  { name: 'Sales Management', href: '/admin/sales', icon: Receipt },
   { name: 'Wholesale Dealers', href: '/admin/wholesale-dealers', icon: Building2 },
   { name: 'Customer Inquiries', href: '/admin/inquiries', icon: MessageSquare },
   {
@@ -69,7 +70,7 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 import AdminNotificationBell from '@/components/admin/notification-bell';
-import { getAdminNotificationsAction } from '@/app/actions/admin';
+import { getAdminNotificationsAction, getAdminCurrentSessionAction } from '@/app/actions/admin';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { logoUrl, darkLogoUrl, siteName } = useSiteBranding();
@@ -79,41 +80,36 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ Catalog: true });
   const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
   const [newInquiriesCount, setNewInquiriesCount] = useState(0);
-
-  const activeLogo = darkLogoUrl || logoUrl;
+  const [currentUser, setCurrentUser] = useState<{
+    id: string;
+    email: string;
+    name: string;
+    formattedRole: string;
+  } | null>(null);
 
   useEffect(() => {
-    async function loadAlerts() {
-      try {
-        const res = await getAdminNotificationsAction();
-        if (res.success && res.notifications) {
-          setPendingOrdersCount(res.notifications.filter((n) => n.type === 'order').length);
-          setNewInquiriesCount(res.notifications.filter((n) => n.type === 'inquiry').length);
-        }
-      } catch (err) {
-        console.error('[AdminLayout] Failed to load notifications:', err);
+    let mounted = true;
+    const fetchSession = async () => {
+      const res = await getAdminCurrentSessionAction();
+      if (mounted && res.success && res.user) {
+        setCurrentUser(res.user);
       }
-    }
-
-    let interval: ReturnType<typeof setInterval> | null = null;
-    const start = () => {
-      if (interval) return;
-      void loadAlerts();
-      interval = setInterval(() => void loadAlerts(), 30000);
     };
-    const stop = () => {
-      if (interval) clearInterval(interval);
-      interval = null;
-    };
-    const onVisibility = () => (document.hidden ? stop() : start());
+    void fetchSession();
 
-    if (!document.hidden) start();
-    document.addEventListener('visibilitychange', onVisibility);
+    const handleProfileUpdate = (e: any) => {
+      const updatedName = e?.detail?.name;
+      setCurrentUser((prev) => (prev ? { ...prev, name: updatedName ?? prev.name } : prev));
+    };
+
+    window.addEventListener('admin-profile-updated', handleProfileUpdate);
     return () => {
-      document.removeEventListener('visibilitychange', onVisibility);
-      stop();
+      mounted = false;
+      window.removeEventListener('admin-profile-updated', handleProfileUpdate);
     };
   }, []);
+
+  const activeLogo = darkLogoUrl || logoUrl;
 
   const handleLogout = async () => {
     try {
@@ -300,15 +296,40 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <header className="h-14 border-b border-border bg-card/40 backdrop-blur-md flex items-center px-6 gap-4 sticky top-0 z-20">
           <div className="flex-1" />
           <div className="flex items-center gap-3">
-            <AdminNotificationBell />
+            <AdminNotificationBell onCountsUpdate={(orders, inquiries) => {
+              setPendingOrdersCount(orders);
+              setNewInquiriesCount(inquiries);
+            }} />
             <div className="h-4 w-px bg-border/60 mx-1" />
-            <div className="h-7 w-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-[10px] font-bold">
-              A
-            </div>
-            <div className="hidden sm:block">
-              <p className="text-xs font-semibold text-foreground leading-none">Admin User</p>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Super Admin</p>
-            </div>
+            <Link
+              href="/admin/profile"
+              className="flex items-center gap-2.5 px-2 py-1 -mr-2 rounded-xl hover:bg-muted/60 transition-colors group cursor-pointer"
+              title="Manage Your Profile"
+            >
+              <div className="h-7 w-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-[10px] font-bold shadow-xs">
+                {currentUser?.name
+                  ? currentUser.name
+                      .split(' ')
+                      .map((s) => s[0])
+                      .filter(Boolean)
+                      .slice(0, 2)
+                      .join('')
+                      .toUpperCase()
+                  : currentUser?.email
+                  ? currentUser.email[0].toUpperCase()
+                  : 'A'}
+              </div>
+              <div className="hidden sm:block text-left">
+                <p className="text-xs font-semibold text-foreground leading-none group-hover:text-blue-500 transition-colors">
+                  {currentUser?.name || currentUser?.email || 'Admin Staff'}
+                </p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  {currentUser?.name
+                    ? currentUser.email || currentUser.formattedRole
+                    : currentUser?.formattedRole || 'Administrator'}
+                </p>
+              </div>
+            </Link>
           </div>
         </header>
 

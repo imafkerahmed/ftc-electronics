@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { pbSiteSettings } from '@/lib/pb-collections';
+import { pbSiteSettings } from '@/lib/supabase-collections';
 
 function escapeVCardValue(value: string): string {
   return String(value || '')

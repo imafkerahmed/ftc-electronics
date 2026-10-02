@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { pbSiteSettings } from '@/lib/pb-collections';
+import { pbSiteSettings } from '@/lib/supabase-collections';
 import { updateSiteSettingsAction, uploadMediaAction } from '@/app/actions/admin';
 
 function ImageUploadField({
@@ -47,8 +47,7 @@ function ImageUploadField({
 
       const res = await uploadMediaAction(formData);
       if (res.success && res.data) {
-        const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'https://ftc-db.codix.site';
-        const uploadedUrl = `${pbUrl}/api/files/${res.data.collectionId}/${res.data.id}/${res.data.file}`;
+        const uploadedUrl = res.data.url || res.data.file_url || res.data.file || '';
         onChange(uploadedUrl);
       }
     } catch (err) {
@@ -150,6 +149,7 @@ export default function PersonalizationSettingsPage() {
   const [announcementBg, setAnnouncementBg] = useState('#1e293b');
 
   const [loading, setLoading] = useState(true);
+  const [loadedSuccessfully, setLoadedSuccessfully] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -162,21 +162,24 @@ export default function PersonalizationSettingsPage() {
     async function loadData() {
       try {
         setLoading(true);
-        const settings = await pbSiteSettings.get<any>('personalization');
-        if (settings) {
-          setLogoUrl(settings.logoUrl || '');
-          setDarkLogoUrl(settings.darkLogoUrl || '');
-          setFaviconUrl(settings.faviconUrl || '');
-          setPrimaryColor(settings.primaryColor || '#2563eb');
-          setFontFamily(settings.fontFamily || 'Inter');
-          setBorderRadius(settings.borderRadius || 'rounded-xl');
-          setShowAnnouncement(settings.announcement?.show ?? true);
-          setAnnouncementText(settings.announcement?.text || '');
-          setAnnouncementLink(settings.announcement?.link || '');
-          setAnnouncementBg(settings.announcement?.bgColor || '#1e293b');
+        const response = await fetch('/api/settings/branding');
+        if (response.ok) {
+          const data = await response.json();
+          const settings = data.personalization;
+          if (settings) {
+            setLogoUrl(settings.logoUrl || '');
+            setDarkLogoUrl(settings.darkLogoUrl || '');
+            setFaviconUrl(settings.faviconUrl || '');
+            setPrimaryColor(settings.primaryColor || '#2563eb');
+            setFontFamily(settings.fontFamily || 'Inter');
+            setBorderRadius(settings.borderRadius || 'rounded-xl');
+          }
+          setLoadedSuccessfully(true);
+        } else {
+          setLoadedSuccessfully(false);
         }
       } catch {
-        // Fall back to defaults
+        setLoadedSuccessfully(false);
       } finally {
         setLoading(false);
       }
@@ -186,6 +189,10 @@ export default function PersonalizationSettingsPage() {
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!loadedSuccessfully) {
+      showToast('Cannot save while personalization settings failed to load. Please refresh and try again.', 'error');
+      return;
+    }
     startTransition(async () => {
       const payload = {
         logoUrl,
@@ -194,12 +201,6 @@ export default function PersonalizationSettingsPage() {
         primaryColor,
         fontFamily,
         borderRadius,
-        announcement: {
-          show: showAnnouncement,
-          text: announcementText,
-          link: announcementLink,
-          bgColor: announcementBg,
-        },
       };
       const res = await updateSiteSettingsAction('personalization', payload);
       if (res.success) {
@@ -354,47 +355,6 @@ export default function PersonalizationSettingsPage() {
                   <option value="rounded-2xl">Soft Extra Curved (16px / 24px)</option>
                   <option value="rounded-md">Subtle Rounded (6px / 8px)</option>
                 </select>
-              </div>
-            </div>
-          </div>
-
-          {/* Section 4: Storefront Announcement Bar */}
-          <div className="bg-card border border-border rounded-2xl p-5 space-y-4 shadow-sm">
-            <div className="flex items-center justify-between border-b border-border pb-2">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                <Bell className="h-3.5 w-3.5 text-purple-500" /> Top Announcement Banner
-              </h3>
-              <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-foreground/80">
-                <input
-                  type="checkbox"
-                  checked={showAnnouncement}
-                  onChange={(e) => setShowAnnouncement(e.target.checked)}
-                  className="rounded"
-                />
-                Show Top Banner
-              </label>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="md:col-span-2 space-y-1.5">
-                <label className="text-xs font-semibold text-foreground/80">Banner Copy / Announcement Text</label>
-                <Input value={announcementText} onChange={(e) => setAnnouncementText(e.target.value)} className="h-8.5 text-xs" />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-foreground/80">CTA Destination Link</label>
-                <Input value={announcementLink} onChange={(e) => setAnnouncementLink(e.target.value)} placeholder="/products" className="h-8.5 text-xs" />
-              </div>
-            </div>
-
-            {/* Live Banner Preview */}
-            <div className="pt-2">
-              <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-1.5">Live Banner Preview</label>
-              <div
-                style={{ backgroundColor: announcementBg }}
-                className="w-full py-2 px-4 rounded-xl text-white text-xs font-medium flex items-center justify-between shadow-xs"
-              >
-                <span>{announcementText || 'Your announcement message will appear here...'}</span>
-                <span className="text-[10px] underline opacity-80">Learn More &rarr;</span>
               </div>
             </div>
           </div>

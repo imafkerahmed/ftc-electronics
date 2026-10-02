@@ -1,10 +1,11 @@
 import { Suspense } from "react";
-import CollectionSection from "@/components/product/collection-section";
 import LazyScrollSection from "@/components/layout/lazy-scroll-section";
+import ProductCarouselClient from "./product-carousel-client";
 import {
   pbProducts,
   pbBrands,
-} from "@/lib/pb-collections";
+  sanitizeImageUrl,
+} from "@/lib/supabase-collections";
 
 interface ProductCarouselBlockProps {
   block: {
@@ -26,7 +27,7 @@ interface ProductCarouselBlockProps {
   };
   allCategories: any[];
   allBrands: any[];
-  pbUrl: string;
+  pbUrl?: string;
 }
 
 // Skeleton shown while the product carousel is streaming in
@@ -81,7 +82,7 @@ async function ProductCarouselFetcher({
           c.slug === categorySlug || c.id === categorySlug || c.name === categorySlug,
       );
       if (categoryRecord) {
-        const res = await pbProducts.getAll({ category: categoryRecord.name, perPage: limit });
+        const res = await pbProducts.getAll({ category: categoryRecord.id, perPage: limit });
         products = res.items;
       }
     } else if (source === "brand") {
@@ -91,7 +92,7 @@ async function ProductCarouselFetcher({
           b.slug === brandSlug || b.id === brandSlug || b.name === brandSlug,
       );
       if (brandRecord) {
-        const res = await pbProducts.getAll({ brand: brandRecord.name, perPage: limit });
+        const res = await pbProducts.getAll({ brand: brandRecord.id, perPage: limit });
         products = res.items;
       }
     }
@@ -127,16 +128,16 @@ async function ProductCarouselFetcher({
         b.slug === brandSlug || b.id === brandSlug || b.name === brandSlug,
     );
     if (brandRecord?.logo) {
-      brandLogoUrl = `${pbUrl}/api/files/${brandRecord.collectionId}/${brandRecord.id}/${brandRecord.logo}`;
+      brandLogoUrl = sanitizeImageUrl(brandRecord.logo);
     }
   }
 
   return (
     <LazyScrollSection heightClass="min-h-[500px]">
-      <CollectionSection
+      <ProductCarouselClient
         title={block.title || "Products"}
         layout={(block.config?.layout as any) || "featured-grid"}
-        products={products}
+        initialProducts={products}
         seeAllLink={seeAllLink}
         rows={block.config?.rows ? Number(block.config.rows) : undefined}
         mobileRows={block.config?.mobileRows ? Number(block.config.mobileRows) : 2}

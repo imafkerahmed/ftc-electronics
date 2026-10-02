@@ -21,11 +21,15 @@ export interface Product {
   wholesalePrice?: number;
   images: string[];
   category: string;
+  categoryId?: string;
   brand: string;
+  brandId?: string;
   specs: ProductSpec;
   rating: number;
   numReviews: number;
   countInStock: number;
+  inventoryTrackingType?: 'counter' | 'unit';
+  inventory_tracking_type?: 'counter' | 'unit';
   isFeatured?: boolean;
   isPreOrder?: boolean;
   currency?: 'USD' | 'LKR';

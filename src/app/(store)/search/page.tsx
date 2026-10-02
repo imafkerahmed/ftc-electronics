@@ -8,6 +8,9 @@ interface PageProps {
   searchParams: Promise<{ q?: string }>;
 }
 
+// Always render fresh — results depend on live product data
+export const dynamic = 'force-dynamic';
+
 export async function generateMetadata({ searchParams }: PageProps): Promise<Metadata> {
   const { q = '' } = await searchParams;
   const title = q ? `Search results for "${q}" | FTC Electronics` : 'Search Products | FTC Electronics';

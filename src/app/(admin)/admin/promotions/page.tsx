@@ -4,8 +4,7 @@ import React, { useState, useEffect, useTransition } from 'react';
 import { Tag, Plus, Edit, Trash2, Percent, Calendar, X, Save, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { pbPromotions } from '@/lib/pb-collections';
-import { createPromotionAction, deletePromotionAction, updatePromotionAction } from '@/app/actions/admin';
+import { createPromotionAction, deletePromotionAction, updatePromotionAction, getAdminPromotionsAction } from '@/app/actions/admin';
 
 interface Promotion {
   id: string;
@@ -48,9 +47,14 @@ export default function AdminPromotionsPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const res = await pbPromotions.getAll();
+      setError(null);
+      const res = await getAdminPromotionsAction();
+      const items = res.success && res.data ? res.data : [];
+      if (res.error) {
+        setError(res.error);
+      }
       const now = new Date();
-      setPromotions((res?.items || []).map((p: any) => {
+      setPromotions(items.map((p: any) => {
         const start = new Date(p.startDate || p.starts_at);
         const end = new Date(p.endDate || p.ends_at);
         let status: 'active' | 'scheduled' | 'expired' = 'active';
@@ -75,6 +79,7 @@ export default function AdminPromotionsPage() {
       }));
     } catch (err: any) {
       console.error(err);
+      setError('An error occurred loading promotions.');
     } finally {
       setLoading(false);
     }

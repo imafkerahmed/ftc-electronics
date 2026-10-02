@@ -39,7 +39,7 @@ export const DEFAULT_RECEIPT_CONFIG: ReceiptPrintConfig = {
   storeName: 'FTC Electronics',
   headerAddress: 'Main Street, Colombo, Sri Lanka',
   headerPhone: '+94 77 123 4567',
-  taxNumber: 'VAT: 123456789-0000',
+  taxNumber: '',
   footerMessage: 'Thank you for shopping with FTC Electronics!',
   returnPolicyText: 'Returns accepted within 7 days with original receipt.',
   showCustomerInfo: true,

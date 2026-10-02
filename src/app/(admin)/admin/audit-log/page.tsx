@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { ScrollText, Search, User, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import { pbAuditLog } from '@/lib/pb-collections';
+import { getAdminAuditLogsAction } from '@/app/actions/admin';
 
 interface AuditRecord {
   id: string;
@@ -23,8 +23,9 @@ export default function AdminAuditLogPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const res = await pbAuditLog.getAll();
-      setLogs((res?.items || []).map((l: any) => ({
+      const res = await getAdminAuditLogsAction(100);
+      const items = res.success && Array.isArray(res.data) ? res.data : [];
+      setLogs(items.map((l: any) => ({
         id: l.id,
         actor: l.actor || 'unknown',
         action: l.action || 'update',
@@ -40,7 +41,7 @@ export default function AdminAuditLogPage() {
         }),
       })));
     } catch (err: any) {
-      console.warn('Audit logs are empty or collection not created yet:', err.message);
+      console.warn('Audit logs are empty or failed to load:', err.message);
     } finally {
       setLoading(false);
     }

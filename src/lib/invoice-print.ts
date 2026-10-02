@@ -10,22 +10,66 @@ import { getInvoicePrintPresetsAction } from '@/app/actions/admin';
 export type { InvoiceItem };
 
 export async function resolveInvoiceConfig(): Promise<InvoicePrintConfig> {
+  let baseConfig = { ...DEFAULT_INVOICE_CONFIG };
   try {
     const res = await getInvoicePrintPresetsAction();
-    if (!res.success) return DEFAULT_INVOICE_CONFIG;
-    const presets = (res.data || []) as InvoicePrintPreset[];
-    const preset = presets.find((p) => p.isDefault) || presets[0];
-    return preset ? normalizeInvoiceConfig(preset.config) : DEFAULT_INVOICE_CONFIG;
-  } catch {
-    return DEFAULT_INVOICE_CONFIG;
+    if (res.success && res.data && res.data.length > 0) {
+      const presets = res.data as InvoicePrintPreset[];
+      const preset = presets.find((p) => p.isDefault) || presets[0];
+      if (preset) {
+        baseConfig = normalizeInvoiceConfig(preset.config);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load invoice presets:', err);
   }
+
+  // Fetch branding settings to inject latest logo and store info
+  try {
+    const brandRes = await fetch('/api/settings/branding');
+    if (brandRes.ok) {
+      const { general, personalization } = await brandRes.json();
+      
+      const logoUrl = personalization?.logoUrl || personalization?.darkLogoUrl || baseConfig.logoUrl;
+      const storeName = general?.siteName || baseConfig.storeName;
+      const address = [general?.contactInfo?.address, general?.contactInfo?.city].filter(Boolean).join(', ') || baseConfig.headerAddress;
+      const phone = general?.contactInfo?.phone || baseConfig.headerPhone;
+      const email = general?.contactInfo?.email || baseConfig.headerEmail;
+
+      const bank = general?.bankDetails;
+      const dynamicBankHtml = bank 
+        ? `Bank: ${bank.bankName} | Account Name: ${bank.accountName} | Account No: ${bank.accountNo} | Branch: ${bank.branch} (${bank.branchCode})`
+        : '';
+
+      return {
+        ...baseConfig,
+        logoUrl,
+        storeName,
+        headerAddress: address,
+        headerPhone: phone,
+        headerEmail: email,
+        dynamicBankHtml,
+      };
+    }
+  } catch (err) {
+    console.error('Failed to load branding settings for invoice:', err);
+  }
+
+  return baseConfig;
 }
 
 export interface InvoiceData {
-  docType: 'Invoice' | 'Quotation';
+  docType?: 'Invoice' | 'Quotation';
   docNumber: string;
   date: string;
   dueDate?: string;
+  paymentTerms?: string;
+  isOverdue?: boolean;
+  isRevoked?: boolean;
+  invoiceRevokedAt?: string;
+  invoiceRevokedBy?: string;
+  invoiceRevokeReason?: string;
+  invoiceRevokeNotes?: string;
   customerName?: string;
   customerCompany?: string;
   customerPhone?: string;
@@ -36,6 +80,12 @@ export interface InvoiceData {
   discountAmount?: number;
   totalAmount: number;
   paymentMethod?: string;
+  clearedPaid?: number;
+  grossClearedPaid?: number;
+  returnedAmount?: number;
+  pendingClearance?: number;
+  balanceDue?: number;
+  paymentStatus?: 'PAID' | 'BALANCE PENDING' | 'UNPAID' | 'REVOKED';
   notes?: string;
   logoUrl?: string;
 }
@@ -51,12 +101,18 @@ const esc = (v?: string): string =>
 function safeImageUrl(url?: string): string | undefined {
   if (!url) return undefined;
   const trimmed = url.trim();
-  return /^(https?:|data:image\/)/i.test(trimmed) ? trimmed : undefined;
+  return /^(https?:|data:image\/|\/(?!\/))/i.test(trimmed) ? trimmed : undefined;
 }
 
 const LEGACY_COMBINED_TITLE = 'TAX INVOICE / QUOTATION';
-const normalizeDocTitle = (t?: string, type?: 'Invoice' | 'Quotation') =>
-  !t || t === LEGACY_COMBINED_TITLE ? (type === 'Quotation' ? 'QUOTATION' : 'INVOICE') : t;
+const normalizeDocTitle = (t?: string, type?: 'Invoice' | 'Quotation', status?: string, isRevoked?: boolean) => {
+  if (type === 'Quotation') return 'QUOTATION';
+  if (isRevoked || status === 'REVOKED') return 'REVOKED INVOICE';
+  if (status === 'PAID') return 'PAID INVOICE';
+  if (status === 'BALANCE PENDING') return 'INVOICE — BALANCE PENDING';
+  if (!t || t === LEGACY_COMBINED_TITLE) return 'INVOICE';
+  return t;
+};
 
 export function getInvoiceHtml(
   rawCfg: InvoicePrintConfig,
@@ -68,19 +124,35 @@ export function getInvoiceHtml(
   const isThermal = cfg.paperWidthMm <= 100;
   const currency = 'Rs.';
   const logoSrc = safeImageUrl(data.logoUrl || cfg.logoUrl);
-  const docHeading = normalizeDocTitle(cfg.documentTitle, data.docType);
+  const docHeading = normalizeDocTitle(cfg.documentTitle, data.docType, data.paymentStatus, data.isRevoked);
+  const isQuote = data.docType === 'Quotation';
 
   const itemsHtml = data.items
     .map((item, index) => {
       const lineTotal = item.qty * item.unitPrice - (item.discount || 0);
-      const serialHtml = item.serialNumber
-        ? `<div class="item-sn">SN: ${esc(item.serialNumber)}</div>`
+
+      // Partial handover note (only if partially handed over: 0 < quantityFulfilled < qty)
+      const isPartial = typeof item.quantityFulfilled === 'number' && item.quantityFulfilled > 0 && item.quantityFulfilled < item.qty;
+      const partialHtml = isPartial
+        ? `<div class="item-partial">Handed Over: ${item.quantityFulfilled} / ${item.qty}</div>`
         : '';
+
+      // Authoritative snapshotted serial numbers rendered compactly as a secondary line
+      const rawSerials = item.serialNumbers && item.serialNumbers.length > 0
+        ? item.serialNumbers
+        : (item.serialNumber ? [item.serialNumber] : []);
+      const serials = Array.from(new Set(rawSerials.map(s => (s || '').trim()).filter(Boolean)));
+
+      const serialHtml = serials.length > 0
+        ? `<div class="item-sn"><span class="item-sn-label">SN: </span>${esc(serials.join(' · '))}</div>`
+        : '';
+
       return `
         <tr>
           <td class="col-idx">${String(index + 1).padStart(2, '0')}</td>
           <td class="col-desc">
             <span class="item-title">${esc(item.name)}</span>
+            ${partialHtml}
             ${serialHtml}
           </td>
           <td class="col-num">${item.qty}</td>
@@ -96,67 +168,94 @@ export function getInvoiceHtml(
     <!DOCTYPE html>
     <html>
       <head>
+        <meta charset="utf-8" />
         <title>${esc(docHeading)} — ${esc(data.docNumber)}</title>
         ${cfg.showQrCode ? '<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"><\/script>' : ''}
         <style>
           @page {
-            size: ${cfg.paperWidthMm}mm auto;
-            margin: 0;
+            size: ${isThermal ? `${cfg.paperWidthMm}mm auto` : 'A4 portrait'};
+            margin: ${isThermal ? '2mm' : '8mm 10mm'};
           }
           * { box-sizing: border-box; margin: 0; padding: 0; }
           body {
-            font-family: system-ui, -apple-system, sans-serif;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             font-size: ${cfg.fontSizeMm}mm;
-            line-height: 1.4;
+            line-height: 1.35;
             color: #0f172a;
             background: ${isPreview ? 'transparent' : '#fff'};
-            width: ${cfg.paperWidthMm}mm;
-            padding: ${isThermal ? '6mm 4mm' : '15mm 20mm'};
+            width: 100%;
+            max-width: ${cfg.paperWidthMm}mm;
+            padding: ${isThermal ? '3mm' : (isPreview ? '6mm 8mm' : '8mm 10mm')};
             margin: 0 auto;
           }
-          .top-row { display: flex; justify-content: space-between; margin-bottom: 20px; align-items: flex-start; }
-          .brand-title { font-size: 20px; font-weight: 800; text-transform: uppercase; color: #0f172a; letter-spacing: -0.5px; }
-          .brand-sub { font-size: 11px; color: #64748b; margin-top: 2px; }
+          .top-row { display: flex; justify-content: space-between; margin-bottom: 12px; align-items: flex-start; }
+          .brand-title { font-size: 17px; font-weight: 800; text-transform: uppercase; color: #0f172a; letter-spacing: -0.3px; }
+          .brand-sub { font-size: 9.5px; color: #64748b; margin-top: 1.5px; line-height: 1.3; }
           .doc-header-right { text-align: right; }
-          .doc-type-title { font-size: 22px; font-weight: 900; color: #1e3a8a; letter-spacing: -0.5px; }
-          .doc-meta-line { font-size: 11px; color: #475569; margin-top: 3px; }
+          .doc-type-title { font-size: 19px; font-weight: 900; color: #1e3a8a; letter-spacing: -0.3px; }
+          .doc-meta-line { font-size: 9.5px; color: #475569; margin-top: 2px; }
           
-          .customer-section { margin-bottom: 24px; border-left: 2px solid #cbd5e1; padding-left: 12px; }
-          .section-label { font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px; }
-          .customer-name { font-size: 13px; font-weight: 700; color: #0f172a; margin-top: 2px; }
-          .customer-detail { font-size: 11px; color: #475569; margin-top: 1px; }
+          .customer-section { margin-bottom: 12px; border-left: 2.5px solid #cbd5e1; padding: 2px 0 2px 10px; }
+          .section-label { font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px; }
+          .customer-name { font-size: 12px; font-weight: 700; color: #0f172a; margin-top: 1px; }
+          .customer-detail { font-size: 10px; color: #475569; margin-top: 1px; }
 
-          table { width: 100%; border-collapse: collapse; margin: 20px 0 24px 0; }
-          th { background: #f8fafc; font-size: 10px; font-weight: 700; text-transform: uppercase; color: #475569; text-align: left; padding: 8px 10px; border-bottom: 2px solid #e2e8f0; }
-          td { padding: 10px; vertical-align: top; border-bottom: 1px solid #f1f5f9; }
-          .col-idx { width: 35px; color: #94a3b8; font-size: 11px; text-align: center; }
-          .col-desc { font-size: 12px; }
+          table { width: 100%; border-collapse: collapse; margin: 10px 0 12px 0; }
+          th { background: #f8fafc; font-size: 9px; font-weight: 700; text-transform: uppercase; color: #475569; text-align: left; padding: 6px 8px; border-bottom: 1.5px solid #e2e8f0; }
+          td { padding: 5px 8px; vertical-align: top; border-bottom: 1px solid #f1f5f9; }
+          .col-idx { width: 28px; color: #94a3b8; font-size: 9.5px; text-align: center; }
+          .col-desc { font-size: 10.5px; }
           .item-title { font-weight: 600; color: #0f172a; }
-          .item-sn { font-size: 9px; color: #64748b; margin-top: 1px; font-family: monospace; }
-          .col-num { font-size: 11px; text-align: right; color: #334155; }
+          .item-partial { font-size: 8.5px; color: #b45309; font-weight: 600; margin-top: 1.5px; }
+          .item-sn { font-size: 8.5px; color: #334155; margin-top: 1.5px; font-family: monospace; line-height: 1.35; word-break: break-word; }
+          .item-sn-label { font-weight: 700; color: #0f172a; }
+          .col-num { font-size: 10px; text-align: right; color: #334155; }
           .total-cell { font-weight: 600; color: #0f172a; }
 
-          .bottom-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; margin-top: 20px; }
-          .info-block { margin-bottom: 16px; }
-          .info-block-title { font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 4px; letter-spacing: 0.5px; }
-          .info-block-body { font-size: 10.5px; color: #475569; line-height: 1.5; white-space: pre-line; }
+          .bottom-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; margin-top: 10px; }
+          .info-block { margin-bottom: 8px; }
+          .info-block-title { font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 2px; letter-spacing: 0.5px; }
+          .info-block-body { font-size: 9.5px; color: #475569; line-height: 1.4; white-space: pre-line; }
 
           .totals-table { width: 100%; margin: 0; }
-          .totals-table td { padding: 6px 10px; border-bottom: none; font-size: 11.5px; color: #475569; }
-          .totals-table tr.grand-row td { font-size: 14px; font-weight: 800; color: #1e3a8a; border-top: 2px solid #e2e8f0; padding-top: 10px; }
+          .totals-table td { padding: 4px 6px; border-bottom: none; font-size: 10.5px; color: #475569; }
+          .totals-table tr.grand-row td { font-size: 12.5px; font-weight: 800; color: #1e3a8a; border-top: 1.5px solid #e2e8f0; padding-top: 6px; }
 
-          .signature-section { display: flex; justify-content: space-between; margin-top: 60px; padding-top: 10px; }
-          .sig-box { width: 180px; border-top: 1px dashed #94a3b8; text-align: center; font-size: 10px; color: #64748b; padding-top: 6px; }
+          .signature-section { display: flex; justify-content: space-between; margin-top: 24px; padding-top: 6px; }
+          .sig-box { width: 150px; border-top: 1px dashed #94a3b8; text-align: center; font-size: 9px; color: #64748b; padding-top: 4px; }
 
-          .qr-wrapper { text-align: right; margin-top: 12px; padding-right: 10px; }
-          canvas { max-width: 80px; height: auto; }
+          .qr-wrapper { text-align: right; margin-top: 8px; padding-right: 6px; }
+          canvas { max-width: 70px; height: auto; }
+
+          @media print {
+            @page {
+              size: ${isThermal ? `${cfg.paperWidthMm}mm auto` : 'A4 portrait'};
+              margin: ${isThermal ? '2mm' : '8mm 10mm'};
+            }
+            body {
+              padding: 0 !important;
+              margin: 0 !important;
+              width: 100% !important;
+              max-width: 100% !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            tr {
+              page-break-inside: avoid;
+              break-inside: avoid;
+            }
+            .top-row, .customer-section, .bottom-grid, .signature-section {
+              page-break-inside: avoid;
+              break-inside: avoid;
+            }
+          }
         </style>
       </head>
       <body>
 
         <div class="top-row">
           <div>
-            ${logoSrc ? `<img src="${esc(logoSrc)}" style="max-height: 50px; max-width: 200px; display: block;" />` : `<div class="brand-title">${esc(cfg.storeName || 'FTC Electronics')}</div>`}
+            ${logoSrc ? `<img src="${esc(logoSrc)}" style="max-height: 44px; max-width: 180px; display: block;" />` : `<div class="brand-title">${esc(cfg.storeName || 'FTC Electronics')}</div>`}
             ${cfg.headerAddress ? `<div class="brand-sub">${esc(cfg.headerAddress)}</div>` : ''}
             ${cfg.headerPhone ? `<div class="brand-sub">Tel: ${esc(cfg.headerPhone)}</div>` : ''}
             ${cfg.headerEmail ? `<div class="brand-sub">Email: ${esc(cfg.headerEmail)}</div>` : ''}
@@ -165,12 +264,47 @@ export function getInvoiceHtml(
           <div class="doc-header-right">
             <div class="doc-type-title">${esc(docHeading)}</div>
             <div class="doc-meta-line">#${esc(data.docNumber)} | ${esc(data.date)}</div>
-            ${cfg.showDueDate && data.dueDate ? `<div class="doc-meta-line">Due: ${esc(data.dueDate)}</div>` : ''}
+            ${isQuote && data.dueDate ? `<div class="doc-meta-line">Valid Until: ${esc(data.dueDate)}</div>` : ''}
+            ${!isQuote && data.dueDate ? `<div class="doc-meta-line">Due Date: ${esc(data.dueDate)}</div>` : ''}
+            ${!isQuote && data.paymentTerms ? `<div class="doc-meta-line">Terms: ${esc(data.paymentTerms.replace(/_/g, ' ').toUpperCase())}</div>` : ''}
+            ${!isQuote && data.paymentStatus ? `
+              <div style="margin-top: 4px; display: flex; gap: 4px; justify-content: flex-end;">
+                <span style="display: inline-block; font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 6px; border-radius: 4px; ${
+                  data.isRevoked || data.paymentStatus === 'REVOKED'
+                    ? 'background: #fef2f2; color: #991b1b; border: 1.5px solid #dc2626;'
+                    : data.paymentStatus === 'PAID'
+                    ? 'background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0;'
+                    : data.paymentStatus === 'BALANCE PENDING'
+                    ? 'background: #fffbeb; color: #b45309; border: 1px solid #fde68a;'
+                    : 'background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca;'
+                }">
+                  ${esc(data.isRevoked || data.paymentStatus === 'REVOKED' ? 'REVOKED INVOICE' : data.paymentStatus === 'PAID' ? 'PAID INVOICE' : data.paymentStatus === 'BALANCE PENDING' ? 'BALANCE PENDING' : 'UNPAID INVOICE')}
+                </span>
+                ${data.isOverdue && !data.isRevoked ? `
+                  <span style="display: inline-block; font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 6px; border-radius: 4px; background: #450a0a; color: #fecaca; border: 1px solid #dc2626;">
+                    OVERDUE
+                  </span>
+                ` : ''}
+              </div>
+            ` : ''}
           </div>
         </div>
 
+        ${data.isRevoked ? `
+          <div style="margin-bottom: 12px; background: #fef2f2; border: 1.5px solid #f87171; border-radius: 6px; padding: 8px 12px;">
+            <div style="font-size: 11px; font-weight: 900; color: #991b1b; text-transform: uppercase; letter-spacing: 0.5px;">
+              ⚠️ INVOICE REVOKED — VOIDED FOR COMMERCIAL PURPOSES
+            </div>
+            <div style="margin-top: 4px; font-size: 9.5px; color: #7f1d1d; line-height: 1.4;">
+              <div><strong>Revoked On:</strong> ${esc(data.invoiceRevokedAt || 'Recorded')} &nbsp;|&nbsp; <strong>Revoked By:</strong> ${esc(data.invoiceRevokedBy || 'Staff')}</div>
+              <div><strong>Reason:</strong> ${esc(data.invoiceRevokeReason || 'Document issued in error')}</div>
+              ${data.invoiceRevokeNotes ? `<div><strong>Notes:</strong> ${esc(data.invoiceRevokeNotes)}</div>` : ''}
+            </div>
+          </div>
+        ` : ''}
+
         <div class="customer-section">
-          <div class="section-label">Billed To</div>
+          <div class="section-label">${isQuote ? 'Quotation For' : 'Billed To'}</div>
           <div class="customer-name">${esc(data.customerName || 'Walk-in Customer')}</div>
           ${data.customerCompany ? `<div class="customer-detail">${esc(data.customerCompany)}</div>` : ''}
           ${data.customerPhone ? `<div class="customer-detail">Tel: ${esc(data.customerPhone)}</div>` : ''}
@@ -193,8 +327,8 @@ export function getInvoiceHtml(
 
         <div class="bottom-grid">
           <div>
-            ${data.paymentMethod ? `<div class="info-block"><div class="info-block-title">Payment Method</div><div class="info-block-body">${esc(data.paymentMethod)}</div></div>` : ''}
-            ${cfg.bankDetailsText ? `<div class="info-block"><div class="info-block-title">Payment Info</div><div class="info-block-body">${esc(cfg.bankDetailsText)}</div></div>` : ''}
+            ${!isQuote && data.paymentMethod ? `<div class="info-block"><div class="info-block-title">Payment Method</div><div class="info-block-body">${esc(data.paymentMethod)}</div></div>` : ''}
+            ${cfg.dynamicBankHtml ? `<div class="info-block"><div class="info-block-title">Bank Details</div><div class="info-block-body">${esc(cfg.dynamicBankHtml)}</div></div>` : ''}
             ${data.notes ? `<div class="info-block"><div class="info-block-title">Notes / Terms</div><div class="info-block-body">${esc(data.notes)}</div></div>` : ''}
             ${cfg.termsAndConditions ? `<div class="info-block"><div class="info-block-title">Terms &amp; Conditions</div><div class="info-block-body">${esc(cfg.termsAndConditions)}</div></div>` : ''}
           </div>
@@ -204,16 +338,27 @@ export function getInvoiceHtml(
               ${data.discountAmount ? `<tr><td>Discount</td><td class="col-num">-${currency} ${data.discountAmount.toLocaleString()}</td></tr>` : ''}
               ${data.taxAmount ? `<tr><td>Tax</td><td class="col-num">${currency} ${data.taxAmount.toLocaleString()}</td></tr>` : ''}
               <tr class="grand-row"><td>Total</td><td class="col-num">${currency} ${data.totalAmount.toLocaleString()}</td></tr>
+              ${!isQuote && data.returnedAmount && data.returnedAmount > 0 ? `
+                ${data.grossClearedPaid !== undefined ? `<tr><td style="color: #047857; font-weight: 600;">Payments Received</td><td class="col-num" style="color: #047857; font-weight: 600;">${currency} ${data.grossClearedPaid.toLocaleString()}</td></tr>` : ''}
+                <tr><td style="color: #e11d48; font-weight: 600;">Payments Returned</td><td class="col-num" style="color: #e11d48; font-weight: 600;">-${currency} ${data.returnedAmount.toLocaleString()}</td></tr>
+                ${data.clearedPaid !== undefined ? `<tr><td style="color: #047857; font-weight: 700;">Effective Paid</td><td class="col-num" style="color: #047857; font-weight: 700;">${currency} ${data.clearedPaid.toLocaleString()}</td></tr>` : ''}
+              ` : !isQuote && data.clearedPaid !== undefined ? `<tr><td style="color: #047857; font-weight: 600;">Cleared Paid</td><td class="col-num" style="color: #047857; font-weight: 600;">${currency} ${data.clearedPaid.toLocaleString()}</td></tr>` : ''}
+              ${!isQuote && data.pendingClearance !== undefined && data.pendingClearance > 0 ? `<tr><td style="color: #b45309; font-weight: 600;">Pending Cheques</td><td class="col-num" style="color: #b45309; font-weight: 600;">${currency} ${data.pendingClearance.toLocaleString()}</td></tr>` : ''}
+              ${!isQuote && data.balanceDue !== undefined ? `<tr style="border-top: 1px dashed #cbd5e1;"><td style="font-weight: 700; color: #0f172a;">Balance Due</td><td class="col-num" style="font-weight: 800; color: #0f172a;">${currency} ${data.balanceDue.toLocaleString()}</td></tr>` : ''}
             </table>
             ${cfg.showQrCode ? `<div class="qr-wrapper"><canvas id="invoice-qr"></canvas></div>` : ''}
           </div>
         </div>
 
-        ${cfg.showSignatureBlock ? `<div class="signature-section"><div class="sig-box">Authorized Sign</div><div class="sig-box">Customer Sign</div></div>` : ''}
+        ${data.isRevoked ? `
+          <div style="position: fixed; top: 40%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); font-size: 80px; font-weight: 900; color: rgba(239, 68, 68, 0.12); border: 8px dashed rgba(239, 68, 68, 0.2); padding: 10px 40px; border-radius: 20px; pointer-events: none; z-index: 999; text-transform: uppercase; letter-spacing: 4px;">
+            REVOKED
+          </div>
+        ` : ''}
 
         <script>
           function initDoc() {
-            ${cfg.showQrCode ? `try { QRCode.toCanvas(document.getElementById('invoice-qr'), ${JSON.stringify(data.docNumber)}, { width: 80, margin: 0 }); } catch(e) {}` : ''}
+            ${cfg.showQrCode ? `try { QRCode.toCanvas(document.getElementById('invoice-qr'), ${JSON.stringify(data.docNumber)}, { width: 70, margin: 0 }); } catch(e) {}` : ''}
             ${isPreview ? '' : 'setTimeout(function() { window.print(); }, 700);'}
           }
           if (document.readyState === 'complete') {
@@ -257,9 +402,9 @@ export function generateTestInvoiceData(type: 'Invoice' | 'Quotation' = 'Invoice
     customerPhone: '+94 11 234 5678',
     customerAddress: 'No. 45 Galle Road, Colombo 03, Sri Lanka',
     items: [
-      { name: 'Dell UltraSharp 27" 4K USB-C Monitor', qty: 2, unitPrice: 145000, discount: 5000, serialNumber: 'SN-MON-90812' },
-      { name: 'Logitech MX Master 3S Wireless Mouse', qty: 2, unitPrice: 38500, serialNumber: 'SN-MS-77123' },
-      { name: 'Anker PowerConf Bluetooth Speakerphone', qty: 1, unitPrice: 42000, serialNumber: 'SN-SPK-3341' },
+      { name: 'Dell UltraSharp 27" 4K USB-C Monitor', qty: 2, unitPrice: 145000, discount: 5000, serialNumbers: ['SN-MON-90812', 'SN-MON-90813'] },
+      { name: 'Logitech MX Master 3S Wireless Mouse', qty: 2, unitPrice: 38500, serialNumbers: ['SN-MS-77123', 'SN-MS-77124'] },
+      { name: 'Anker PowerConf Bluetooth Speakerphone', qty: 1, unitPrice: 42000, serialNumbers: ['SN-SPK-3341'] },
     ],
     subtotal: 409000,
     taxAmount: 18000,
@@ -285,7 +430,7 @@ export async function generateInvoicePdfBlob(
   iframe.style.left = '-9999px';
   iframe.style.top = '-9999px';
   iframe.style.width = '210mm';
-  iframe.style.height = '297mm';
+  iframe.style.height = 'auto';
   iframe.style.border = 'none';
   document.body.appendChild(iframe);
 
@@ -323,7 +468,7 @@ export async function generateInvoicePdfBlob(
     const filename = `${data.docNumber || 'Invoice'}.pdf`;
     const targetElement = iframeDoc.body;
     const opt = {
-      margin: 5,
+      margin: 6,
       filename,
       image: { type: 'jpeg' as const, quality: 0.98 },
       html2canvas: {

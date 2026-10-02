@@ -1,24 +1,27 @@
+'use server';
+
 /**
- * Database access layer for the FTC Electronics storefront.
- * 
- * This module provides the data access functions consumed by all storefront
- * pages and components. It queries live data from PocketBase.
+ * Database access layer for FTC Electronics storefront.
+ * Connects to live data from Supabase PostgreSQL.
  */
 
+import { cache } from 'react';
 import { Product, Category, Brand } from '../types/product';
-import { pbProducts, pbCategories, pbBrands } from './pb-collections';
-import { getPbUrl } from './pb-admin';
+import { sbProducts, sbCategories, sbBrands, pbReviews, pbAnnouncements } from './supabase-collections';
 
 /**
  * Get products with optional filters.
  */
-export async function getProducts(filters?: {
+export const getProducts = cache(async function getProducts(filters?: {
   category?: string;
+  categoryId?: string;
   brand?: string;
+  brandId?: string;
   search?: string;
   minPrice?: number;
   maxPrice?: number;
   sortBy?: 'price-asc' | 'price-desc' | 'rating' | 'newest';
+  status?: 'draft' | 'published';
   page?: number;
   perPage?: number;
 }): Promise<Product[]> {
@@ -27,136 +30,162 @@ export async function getProducts(filters?: {
     if (filters?.sortBy === 'price-asc') sort = 'price';
     if (filters?.sortBy === 'price-desc') sort = '-price';
     if (filters?.sortBy === 'rating') sort = '-rating';
-    if (filters?.sortBy === 'newest') sort = '-created';
+    if (filters?.sortBy === 'newest') sort = '-created_at';
 
-    const filterStrings: string[] = [];
-    if (filters?.minPrice !== undefined) {
-      filterStrings.push(`price >= ${filters.minPrice}`);
-    }
-    if (filters?.maxPrice !== undefined) {
-      filterStrings.push(`price <= ${filters.maxPrice}`);
-    }
-
-    const result = await pbProducts.getAll({
+    const result = await sbProducts.getAll({
       category: filters?.category,
+      categoryId: filters?.categoryId,
       brand: filters?.brand,
+      brandId: filters?.brandId,
       search: filters?.search,
+      minPrice: filters?.minPrice,
+      maxPrice: filters?.maxPrice,
+      status: filters?.status || 'published',
       sort,
-      filter: filterStrings.length > 0 ? filterStrings.join(' && ') : undefined,
       page: filters?.page || 1,
       perPage: filters?.perPage || 100,
     });
     return result?.items || [];
   } catch (err) {
-    console.error('[db] pbProducts.getAll failed:', (err as Error).message);
+    console.error('[db] getProducts failed:', (err as Error).message);
     return [];
   }
-}
+});
 
 /**
  * Get a single product by slug.
  */
-export async function getProductBySlug(slug: string): Promise<Product | null> {
+export const getProductBySlug = cache(async function getProductBySlug(slug: string): Promise<Product | null> {
   try {
-    return await pbProducts.getBySlug(slug);
+    return await sbProducts.getBySlug(slug, { status: 'published' });
   } catch (err) {
-    console.error(`[db] pbProducts.getBySlug failed for ${slug}:`, (err as Error).message);
+    console.error(`[db] getProductBySlug failed for ${slug}:`, (err as Error).message);
     return null;
   }
-}
+});
 
 /**
  * Get featured products.
  */
-export async function getFeaturedProducts(): Promise<Product[]> {
+export const getFeaturedProducts = cache(async function getFeaturedProducts(): Promise<Product[]> {
   try {
-    return await pbProducts.getFeatured();
+    return await sbProducts.getFeatured();
   } catch (err) {
-    console.error('[db] pbProducts.getFeatured failed:', (err as Error).message);
+    console.error('[db] getFeaturedProducts failed:', (err as Error).message);
     return [];
   }
-}
+});
 
 /**
  * Get all categories.
  */
-export async function getCategories(): Promise<Category[]> {
+export const getCategories = cache(async function getCategories(): Promise<Category[]> {
   try {
-    return await pbCategories.getAll();
+    return await sbCategories.getAll();
   } catch (err) {
-    console.error('[db] pbCategories.getAll failed:', (err as Error).message);
+    console.error('[db] getCategories failed:', (err as Error).message);
     return [];
   }
-}
+});
 
 /**
  * Get a single category by slug.
  */
-export async function getCategoryBySlug(slug: string): Promise<Category | null> {
+export const getCategoryBySlug = cache(async function getCategoryBySlug(slug: string): Promise<Category | null> {
   try {
-    const categories = await getCategories();
-    return categories.find((c) => c.slug.toLowerCase() === slug.toLowerCase() || c.name.toLowerCase() === slug.toLowerCase()) || null;
+    return await sbCategories.getBySlug(slug);
   } catch (err) {
     console.error(`[db] getCategoryBySlug failed for ${slug}:`, (err as Error).message);
     return null;
   }
-}
+});
 
 /**
  * Get all brands.
  */
-export async function getBrands(): Promise<Brand[]> {
+export const getBrands = cache(async function getBrands(): Promise<Brand[]> {
   try {
-    const rawBrands = await pbBrands.getAll();
-    const pbUrl = getPbUrl();
+    const rawBrands = await sbBrands.getAll();
     return (rawBrands || []).map((b) => ({
       id: b.id,
       name: b.name,
       slug: b.slug || b.name.toLowerCase().replace(/\s+/g, '-'),
-      logo: b.logo ? `${pbUrl}/api/files/brands/${b.id}/${b.logo}` : undefined,
+      logo: b.logo || undefined,
       description: b.description,
     }));
   } catch (err) {
-    console.error('[db] pbBrands.getAll failed:', (err as Error).message);
+    console.error('[db] getBrands failed:', (err as Error).message);
     return [];
   }
-}
+});
 
 /**
  * Get a brand by slug.
  */
-export async function getBrandBySlug(slug: string): Promise<Brand | null> {
+export const getBrandBySlug = cache(async function getBrandBySlug(slug: string): Promise<Brand | null> {
   try {
-    const brands = await getBrands();
-    return brands.find((b) => b.slug.toLowerCase() === slug.toLowerCase() || b.name.toLowerCase() === slug.toLowerCase()) || null;
+    const pbBrand = await sbBrands.getBySlug(slug);
+    if (!pbBrand) return null;
+    return {
+      id: pbBrand.id,
+      name: pbBrand.name,
+      slug: pbBrand.slug || pbBrand.name.toLowerCase().replace(/\s+/g, '-'),
+      logo: pbBrand.logo || undefined,
+      description: pbBrand.description,
+    };
   } catch (err) {
     console.error(`[db] getBrandBySlug failed for ${slug}:`, (err as Error).message);
     return null;
   }
-}
+});
 
 /**
  * Search products by query string.
  */
-export async function searchProducts(query: string): Promise<Product[]> {
+export const searchProducts = cache(async function searchProducts(query: string): Promise<Product[]> {
   if (!query || query.trim() === '') return [];
   return getProducts({ search: query.trim() });
-}
+});
 
 /**
  * Get products for a named collection (on-sale, new-arrivals, air-purifiers).
  */
-export async function getCollectionProducts(
-  collection: 'on-sale' | 'new-arrivals' | 'air-purifiers'
+export const getCollectionProducts = cache(async function getCollectionProducts(
+  collection: 'on-sale' | 'new-arrivals' | 'air-purifiers',
+  limit?: number
 ): Promise<Product[]> {
-  const pbCollection = collection === 'air-purifiers' ? 'featured' : collection;
+  const sbCollection = collection === 'air-purifiers' ? 'featured' : collection;
   try {
-    return await pbProducts.getByCollection(
-      pbCollection as 'on-sale' | 'new-arrivals' | 'featured'
+    return await sbProducts.getByCollection(
+      sbCollection as 'on-sale' | 'new-arrivals' | 'featured',
+      limit
     );
   } catch (err) {
-    console.error(`[db] pbProducts.getByCollection failed for ${collection}:`, (err as Error).message);
+    console.error(`[db] getCollectionProducts failed for ${collection}:`, (err as Error).message);
     return [];
   }
-}
+});
 
+/**
+ * Get reviews for a product or general storefront reviews.
+ */
+export const getReviews = cache(async function getReviews(productId?: string) {
+  try {
+    return await pbReviews.getByProductId(productId || "");
+  } catch (err) {
+    console.error('[db] getReviews failed:', (err as Error).message);
+    return [];
+  }
+});
+
+/**
+ * Get active announcements for modal popups.
+ */
+export const getActiveAnnouncements = cache(async function getActiveAnnouncements() {
+  try {
+    return await pbAnnouncements.getActive();
+  } catch (err) {
+    console.error('[db] getActiveAnnouncements failed:', (err as Error).message);
+    return [];
+  }
+});

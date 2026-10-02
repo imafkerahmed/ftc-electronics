@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { pbSiteSettings } from '@/lib/pb-collections';
+import { sbSiteSettings } from '@/lib/supabase-collections';
 
 export interface SiteBrandingContextType {
   siteName: string;
@@ -24,9 +24,21 @@ export interface SiteBrandingContextType {
   };
   announcement: {
     show: boolean;
-    text: string;
-    link: string;
     bgColor: string;
+    texts: {
+      id: string;
+      text: string;
+      link?: string;
+      enabled: boolean;
+    }[];
+  };
+  digitalCardEnabled: boolean;
+  bankDetails: {
+    bankName: string;
+    accountName: string;
+    accountNo: string;
+    branch: string;
+    branchCode: string;
   };
   isLoading: boolean;
 }
@@ -55,15 +67,22 @@ const defaultBranding: SiteBrandingContextType = {
   },
   announcement: {
     show: true,
-    text: '🚀 Free islandwide delivery on orders over LKR 50,000 | Authorized Reseller',
-    link: '/products',
     bgColor: '#1e293b',
+    texts: []
+  },
+  digitalCardEnabled: true,
+  bankDetails: {
+    bankName: '',
+    accountName: '',
+    accountNo: '',
+    branch: '',
+    branchCode: '',
   },
   isLoading: true,
 };
 
-const CACHE_KEY = 'ftc_site_branding';
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const CACHE_KEY = 'ftc_site_branding_v3';
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
 function readBrandingCache(): SiteBrandingContextType | null {
   try {
@@ -84,7 +103,7 @@ function writeBrandingCache(data: SiteBrandingContextType) {
   try {
     sessionStorage.setItem(CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
   } catch {
-    // sessionStorage quota exceeded or unavailable — silently skip
+    // skip
   }
 }
 
@@ -95,7 +114,6 @@ export function SiteBrandingProvider({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     async function loadBranding() {
-      // 1. Try cache first — instant load on subsequent page views
       const cached = readBrandingCache();
       if (cached) {
         setBranding({ ...cached, isLoading: false });
@@ -103,12 +121,13 @@ export function SiteBrandingProvider({ children }: { children: React.ReactNode }
         return;
       }
 
-      // 2. Cache miss — fetch from PocketBase
       try {
-        const [genSettings, persSettings] = await Promise.all([
-          pbSiteSettings.get<any>('general').catch(() => null),
-          pbSiteSettings.get<any>('personalization').catch(() => null),
-        ]);
+        const response = await fetch('/api/settings/branding');
+        if (!response.ok) throw new Error('Failed to fetch branding');
+        
+        const data = await response.json();
+        const genSettings = data.general;
+        const persSettings = data.personalization;
 
         const siteName = genSettings?.siteName || defaultBranding.siteName;
         const tagline = genSettings?.tagline || defaultBranding.tagline;
@@ -131,23 +150,21 @@ export function SiteBrandingProvider({ children }: { children: React.ReactNode }
           city: genSettings?.location?.city || defaultBranding.location.city,
           googleMapsUrl: genSettings?.location?.googleMapsUrl || defaultBranding.location.googleMapsUrl,
         };
-        const basePbUrl = (process.env.NEXT_PUBLIC_POCKETBASE_URL || 'https://ftc-db.codix.site').replace(/\/+$/, '');
 
-        const logoUrl = persSettings?.logoUrl
-          ? (persSettings.logoUrl.startsWith('http') || persSettings.logoUrl.startsWith('/')
-              ? persSettings.logoUrl
-              : `${basePbUrl}/api/files/${persSettings.collectionId || persSettings.collectionName || 'personalization'}/${persSettings.id}/${persSettings.logoUrl}`)
-          : '/loader-logo.webp';
-
-        const darkLogoUrl = persSettings?.darkLogoUrl
-          ? (persSettings.darkLogoUrl.startsWith('http') || persSettings.darkLogoUrl.startsWith('/')
-              ? persSettings.darkLogoUrl
-              : `${basePbUrl}/api/files/${persSettings.collectionId || persSettings.collectionName || 'personalization'}/${persSettings.id}/${persSettings.darkLogoUrl}`)
-          : '';
-
+        const logoUrl = persSettings?.logoUrl || '/loader-logo.webp';
+        const darkLogoUrl = persSettings?.darkLogoUrl || '';
         const faviconUrl = persSettings?.faviconUrl || '';
         const primaryColor = persSettings?.primaryColor || defaultBranding.primaryColor;
         const announcement = persSettings?.announcement || defaultBranding.announcement;
+        const digitalCardEnabled = genSettings?.digitalCardEnabled !== false;
+        
+        const bankDetails = {
+          bankName: genSettings?.bankDetails?.bankName || '',
+          accountName: genSettings?.bankDetails?.accountName || '',
+          accountNo: genSettings?.bankDetails?.accountNo || '',
+          branch: genSettings?.bankDetails?.branch || '',
+          branchCode: genSettings?.bankDetails?.branchCode || '',
+        };
 
         const fresh: SiteBrandingContextType = {
           siteName,
@@ -161,6 +178,8 @@ export function SiteBrandingProvider({ children }: { children: React.ReactNode }
           contactInfo,
           location,
           announcement,
+          digitalCardEnabled,
+          bankDetails,
           isLoading: false,
         };
 
