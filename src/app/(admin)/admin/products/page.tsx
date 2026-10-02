@@ -185,6 +185,10 @@ export default function AdminProductsPage() {
   const [brand, setBrand] = useState('');       // Stores brand ID
   const [countInStock, setCountInStock] = useState('10');
   const [inventoryTrackingType, setInventoryTrackingType] = useState<'counter' | 'unit'>('counter');
+  const isEditingExistingUnitProduct = Boolean(
+    editingProduct &&
+    (editingProduct.inventoryTrackingType === 'unit' || editingProduct.inventory_tracking_type === 'unit')
+  );
   const [description, setDescription] = useState('');
   const [descBlocks, setDescBlocks] = useState<DescriptionBlock[]>([]);
   const [descMode, setDescMode] = useState<'visual' | 'plain'>('visual');
@@ -386,7 +390,7 @@ export default function AdminProductsPage() {
     setBrand(brandRecord ? brandRecord.id : (product.brand || ''));
 
     setCountInStock(product.countInStock.toString());
-    setInventoryTrackingType(product.inventoryTrackingType || (product as any).inventory_tracking_type || 'counter');
+    setInventoryTrackingType(product.inventoryTrackingType || product.inventory_tracking_type || 'counter');
 
     // Temporarily clear heavy fields until they load
     setDescription('');
@@ -488,7 +492,18 @@ export default function AdminProductsPage() {
       }
       formData.append('category', targetCategory); // category ID
       formData.append('brand', targetBrand);       // brand ID
-      formData.append('countInStock', countInStock || '0');
+      // Finding 10 & CodeRabbit Fix:
+      // - New UNIT product: must initialize with 0 aggregate stock.
+      // - Existing UNIT product staying UNIT: client value is not authoritative (server omits count_in_stock).
+      // - Existing UNIT transitioning to COUNTER: submit entered countInStock for conversion.
+      // - Existing COUNTER transitioning to UNIT or staying COUNTER: submit entered/existing count.
+      const submittedCountInStock = (!editingProduct && inventoryTrackingType === 'unit')
+        ? '0'
+        : (isEditingExistingUnitProduct && inventoryTrackingType === 'unit')
+          ? '0'
+          : (countInStock || '0');
+
+      formData.append('countInStock', submittedCountInStock);
       formData.append('inventoryTrackingType', inventoryTrackingType);
       formData.append('description', finalDescription);
       formData.append('status', status);
@@ -1169,7 +1184,7 @@ export default function AdminProductsPage() {
                         </div>
                       )}
 
-                      {inventoryTrackingType === 'unit' && editingProduct && (
+                      {inventoryTrackingType === 'unit' && isEditingExistingUnitProduct && editingProduct && (
                         <div className="pt-2 p-3 bg-muted/30 rounded-lg border border-border text-[11px] text-muted-foreground space-y-1">
                           <div className="flex items-center justify-between">
                             <span className="font-medium text-foreground">Tracked Unit Stock:</span>

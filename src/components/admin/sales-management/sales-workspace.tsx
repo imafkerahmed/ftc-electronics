@@ -409,8 +409,8 @@ export default function SalesWorkspace({
       if (fulRes.success && fulRes.data) {
         setSaleFulfillments(fulRes.data);
       }
-      queryClient.invalidateQueries({ queryKey: ["unified-sales-tracker"] });
-      queryClient.invalidateQueries({ queryKey: ["unified-sales-metrics"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-sales"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-sales-metrics"] });
     } finally {
       setLoadingFulfillments(false);
     }
@@ -424,8 +424,8 @@ export default function SalesWorkspace({
         setSalePayments(payRes.data.payments);
         setSalePaymentReversals(payRes.data.reversals || []);
         setSalePaymentSummary(payRes.data.summary);
-        queryClient.invalidateQueries({ queryKey: ["unified-sales-tracker"] });
-        queryClient.invalidateQueries({ queryKey: ["unified-sales-metrics"] });
+        queryClient.invalidateQueries({ queryKey: ["admin-sales"] });
+        queryClient.invalidateQueries({ queryKey: ["admin-sales-metrics"] });
       }
     } finally {
       setLoadingPayments(false);
@@ -489,8 +489,8 @@ export default function SalesWorkspace({
         setReturnActionMessage({ type: 'error', text: res.error || 'Failed to record payment return' });
       } else {
         setReturnActionMessage({ type: 'success', text: 'Payment return successfully recorded in audit ledger!' });
-        queryClient.invalidateQueries({ queryKey: ["unified-sales-tracker"] });
-        queryClient.invalidateQueries({ queryKey: ["unified-sales-metrics"] });
+        queryClient.invalidateQueries({ queryKey: ["admin-sales"] });
+        queryClient.invalidateQueries({ queryKey: ["admin-sales-metrics"] });
         queryClient.invalidateQueries({ queryKey: ["admin-outstanding-receivables"] });
         queryClient.invalidateQueries({ queryKey: ["admin-outstanding-receivables-metrics"] });
 

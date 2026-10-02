@@ -98,6 +98,9 @@ export function CommercialHandoverModal({
   // Success state
   const [completedFulfillment, setCompletedFulfillment] = useState<CommercialSaleFulfillmentRecord | null>(null);
 
+  // Session tracking ref to ensure modal initializes once per open session per sale.id
+  const initializedSaleIdRef = useRef<string | null>(null);
+
   const fetchAvailableUnits = async (productId: string) => {
     setLoadingUnitsForProduct((prev) => ({ ...prev, [productId]: true }));
     try {
@@ -114,44 +117,62 @@ export function CommercialHandoverModal({
 
   // Initialize or reset state when modal opens
   useEffect(() => {
-    if (isOpen && sale) {
-      setIdempotencyKey(generateClientUUID());
-      setRecipientName(sale.customer_name || "");
-      setRecipientPhone(sale.customer_phone || "");
-      setNotes("");
-      setSubmitError(null);
+    if (!isOpen || !sale) {
+      initializedSaleIdRef.current = null;
       setCompletedFulfillment(null);
-      setScannerInputs({});
-      setScannerErrors({});
-
-      // Initialize line states
-      const initialLines: Record<string, LineHandoverState> = {};
-      const unitProductIdsToFetch = new Set<string>();
-
-      items.forEach((item) => {
-        const remaining = Math.max(0, item.quantity - (item.quantity_fulfilled || 0));
-        if (remaining > 0) {
-          const isUnit = item.inventory_tracking_type === "unit";
-          initialLines[item.id] = {
-            saleItemId: item.id,
-            quantity: isUnit ? 0 : remaining, // Counter defaults to remaining; Unit defaults to 0 selected
-            selectedUnitIds: [],
-            nonInventoryConfirmed: false,
-          };
-
-          if (isUnit && item.product_id) {
-            unitProductIdsToFetch.add(item.product_id);
-          }
-        }
-      });
-
-      setLineStates(initialLines);
-
-      // Fetch available units for all unit-tracked products in this invoice
-      unitProductIdsToFetch.forEach((pId) => {
-        fetchAvailableUnits(pId);
-      });
+      return;
     }
+
+    // Modal is already initialized for this exact sale session:
+    // Do NOT reset state on same-sale object/items reference refresh
+    // (preserves completedFulfillment, user inputs, and line states).
+    if (initializedSaleIdRef.current === sale.id) {
+      return;
+    }
+
+    // Defer initialization if the sale indicates items exist but the items array has not loaded yet
+    if (items.length === 0 && (sale.items_count ?? 0) > 0) {
+      return;
+    }
+
+    // Modal is opened for a new session (closed -> open, or different sale.id)
+    initializedSaleIdRef.current = sale.id;
+    setIdempotencyKey(generateClientUUID());
+    setRecipientName(sale.customer_name || "");
+    setRecipientPhone(sale.customer_phone || "");
+    setNotes("");
+    setSubmitError(null);
+    setCompletedFulfillment(null);
+    setScannerInputs({});
+    setScannerErrors({});
+
+    // Initialize line states using current items
+    const initialLines: Record<string, LineHandoverState> = {};
+    const unitProductIdsToFetch = new Set<string>();
+
+    items.forEach((item) => {
+      const remaining = Math.max(0, item.quantity - (item.quantity_fulfilled || 0));
+      if (remaining > 0) {
+        const isUnit = item.inventory_tracking_type === "unit";
+        initialLines[item.id] = {
+          saleItemId: item.id,
+          quantity: isUnit ? 0 : remaining, // Counter defaults to remaining; Unit defaults to 0 selected
+          selectedUnitIds: [],
+          nonInventoryConfirmed: false,
+        };
+
+        if (isUnit && item.product_id) {
+          unitProductIdsToFetch.add(item.product_id);
+        }
+      }
+    });
+
+    setLineStates(initialLines);
+
+    // Fetch available units for all unit-tracked products in this invoice
+    unitProductIdsToFetch.forEach((pId) => {
+      fetchAvailableUnits(pId);
+    });
   }, [isOpen, sale, items]);
 
   if (!isOpen || !sale) return null;

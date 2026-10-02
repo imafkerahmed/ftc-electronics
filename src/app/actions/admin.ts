@@ -361,26 +361,75 @@ export async function updateProductAction(id: string, formData: FormData) {
 
     const payload = await buildProductPayloadFromFormData(formData, oldRecord);
 
+    type ProductUpdatePayload = Omit<Awaited<ReturnType<typeof buildProductPayloadFromFormData>>, 'count_in_stock'> & {
+      count_in_stock?: number;
+    };
+
+    let updatePayload: ProductUpdatePayload = payload;
+
+    // Finding 9 & CodeRabbit Fix: For UNIT-tracked products that are NOT transitioning to counter,
+    // count_in_stock is authoritative from stock_management and must not be
+    // overwritten by a client-submitted form value.
+    const staysUnit =
+      oldRecord.inventory_tracking_type === 'unit' &&
+      payload.inventory_tracking_type === 'unit';
+    if (staysUnit) {
+      const { count_in_stock: _ignoredCount, ...rest } = payload;
+      updatePayload = rest;
+    }
+
     // Safeguards for inventory tracking transitions
     if (oldRecord.inventory_tracking_type === 'counter' && payload.inventory_tracking_type === 'unit') {
-      const { count: availUnits } = await supabase
+      const { count: availUnits, error: availUnitsError } = await supabase
         .from('stock_management')
         .select('id', { count: 'exact', head: true })
         .eq('product_id', id)
         .eq('status', 'available');
 
-      const targetStock = payload.count_in_stock ?? oldRecord.count_in_stock ?? 0;
-      if (targetStock > 0 && (availUnits ?? 0) !== targetStock) {
+      if (availUnitsError) {
+        console.error(
+          'Failed to verify physical inventory before tracking conversion:',
+          availUnitsError
+        );
         return {
           success: false,
-          error: `Cannot convert product to Individually Tracked Units: current stock count (${targetStock}) does not match available physical unit records (${availUnits ?? 0}). Please generate or reconcile physical stock units before activating unit tracking.`,
+          error:
+            'Unable to verify physical inventory. Product tracking type was not changed. Please try again.',
         };
       }
+
+      const existingCounterStock = oldRecord.count_in_stock ?? 0;
+      const physicalAvailableCount = availUnits ?? 0;
+
+      if (existingCounterStock > 0 && physicalAvailableCount !== existingCounterStock) {
+        return {
+          success: false,
+          error: `Cannot convert product to Individually Tracked Units: current stock count (${existingCounterStock}) does not match available physical unit records (${physicalAvailableCount}). Please generate or reconcile physical stock units before activating unit tracking.`,
+        };
+      }
+
+      // Ensure resulting count_in_stock in products remains reconciled with available physical units
+      updatePayload = {
+        ...updatePayload,
+        count_in_stock: physicalAvailableCount,
+      };
     } else if (oldRecord.inventory_tracking_type === 'unit' && payload.inventory_tracking_type === 'counter') {
-      const { count: totalUnits } = await supabase
+      const { count: totalUnits, error: totalUnitsError } = await supabase
         .from('stock_management')
         .select('id', { count: 'exact', head: true })
         .eq('product_id', id);
+
+      if (totalUnitsError) {
+        console.error(
+          'Failed to verify physical inventory history before tracking conversion:',
+          totalUnitsError
+        );
+        return {
+          success: false,
+          error:
+            'Unable to verify physical inventory. Product tracking type was not changed. Please try again.',
+        };
+      }
 
       if ((totalUnits ?? 0) > 0) {
         return {
@@ -392,7 +441,7 @@ export async function updateProductAction(id: string, formData: FormData) {
 
     const { data: record, error } = await supabase
       .from('products')
-      .update(payload)
+      .update(updatePayload)
       .eq('id', id)
       .select()
       .single();
